@@ -66,7 +66,7 @@ class RecordResults():
         self.log_loss_total.update(loss, bs)
         self.log_loss_intent.update(loss_intent, bs)
         # (3.2) training data info
-        if intent_prob != []:
+        if len(intent_prob) > 0:
             # (3.3) intent
             self.intention_gt.extend(intent_gt)  # bs
             self.intention_prob_gt.extend(intent_prob_gt)
@@ -140,7 +140,7 @@ class RecordResults():
         # print("save record: video list - ", data['video_id'])
 
         # (3.3) intent
-        if intent_prob != []:
+        if len(intent_prob) > 0:
             self.intention_gt.extend(intent_gt)  # bs
             self.intention_prob_gt.extend(intent_prob_gt)
             self.intention_pred.extend(intent_prob)  # bs

@@ -8,9 +8,9 @@ def get_opts():
                         help='task name: [PSI1.0 | PSI2.0]')
     parser.add_argument('--task_name', type=str, default='ped_intent',
                         help='task name: [ped_intent | ped_traj | driving_decision]')
-    parser.add_argument('--video_splits', type=str, default='./splits/PSI200_split.json',
+    parser.add_argument('--video_splits', type=str, default='./PSI2.0_TrainVal/splits/PSI2_split.json',
                         help='video splits, [PSI100_split | PSI200_split | PSI200_split_paper]')
-    parser.add_argument('--dataset_root_path', type=str, default='path to dataset rootpath',
+    parser.add_argument('--dataset_root_path', type=str, default='./',
                         help='Path of the dataset, e.g. frames/video_0001/000.jpg')
     parser.add_argument('--database_path', type=str, default='./database',
                         help='Path of the database created based on the cv_annotations and nlp_annotations')

@@ -47,15 +47,6 @@ def main(args):
 if __name__ == '__main__':
     # /home/scott/Work/Toyota/PSI_Competition/Dataset
     args = get_opts()
-    args.dataset_root_path = '/home/scott/Work/Toyota/PSI_Competition/Dataset'
-    # Dataset
-    args.dataset = 'PSI2.0'
-    if args.dataset == 'PSI2.0':
-        args.video_splits = os.path.join(args.dataset_root_path, 'PSI2.0_TrainVal/splits/PSI2_split.json')
-    elif args.dataset == 'PSI1.0':
-        args.video_splits = os.path.join(args.dataset_root_path, 'PSI1.0/splits/PSI1_split.json')
-    else:
-        raise Exception("Unknown dataset name!")
 
 
     # Task

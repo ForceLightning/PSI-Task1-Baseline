@@ -104,5 +104,8 @@ def get_tracks(data, seq_len, observed_seq_len, overlap, args):
                     sub_tracks.append(track[i:i + seq_len])
             tracks.extend(sub_tracks)
 
-        d[k] = np.array(tracks)
+        try:
+            d[k] = np.array(tracks)
+        except:
+            d[k] = np.array(tracks, dtype=object)
     return d
