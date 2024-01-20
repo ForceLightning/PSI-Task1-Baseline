@@ -40,7 +40,8 @@ def create_database(args):
         # 3. cut sequences, remove early frames before the first key frame, and after last key frame
         # cut_sequence(db, db_log, args)
 
-        database_name = 'intent_database_' + split_name + '.pkl'
+        task = args.task_name.split('_')[1]
+        database_name = f'{task}_database_' + split_name + '.pkl'
         with open(os.path.join(args.database_path, database_name), 'wb') as fid:
             pickle.dump(db, fid)
 

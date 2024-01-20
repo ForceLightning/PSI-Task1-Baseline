@@ -57,7 +57,7 @@ class VideoDataset(torch.utils.data.Dataset):
             if self.args.task_name == 'ped_intent' or self.args.task_name == 'ped_traj':
                 bboxes[f] = [xtl, ytl, xrb, yrb]
 
-
+        original_bboxes = bboxes
         if self.args.normalize_bbox == 'L2':
             raise Exception("Bboxes nromalize is not defined!")
         elif self.args.normalize_bbox == 'subtract_first_frame':
@@ -72,6 +72,7 @@ class VideoDataset(torch.utils.data.Dataset):
             # 'images': images,
             'local_featmaps': local_featmaps,
             'global_featmaps': global_featmaps,
+            'original_bboxes': original_bboxes,  # bboxes before normalization
             'bboxes': bboxes,
             # 'intention_onehot': intention_onehot,
             'intention_binary': intention_binary,

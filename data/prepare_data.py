@@ -8,13 +8,15 @@ from data.process_sequence import generate_data_sequence
 from data.custom_dataset import VideoDataset
 
 def get_dataloader(args, shuffle_train=True, drop_last_train=True):
-    with open(os.path.join(args.database_path, 'intent_database_train.pkl'), 'rb') as fid:
+    task = args.task_name.split('_')[1]
+
+    with open(os.path.join(args.database_path, f'{task}_database_train.pkl'), 'rb') as fid:
         imdb_train = pickle.load(fid)
     train_seq = generate_data_sequence('train', imdb_train, args)
-    with open(os.path.join(args.database_path, 'intent_database_val.pkl'), 'rb') as fid:
+    with open(os.path.join(args.database_path, f'{task}_database_val.pkl'), 'rb') as fid:
         imdb_val = pickle.load(fid)
     val_seq = generate_data_sequence('val', imdb_val, args)
-    with open(os.path.join(args.database_path, 'intent_database_test.pkl'), 'rb') as fid:
+    with open(os.path.join(args.database_path, f'{task}_database_test.pkl'), 'rb') as fid:
         imdb_test = pickle.load(fid)
     test_seq = generate_data_sequence('test', imdb_test, args)
 
