@@ -36,7 +36,8 @@ def create_database(args):
         # 1. Init db
         db = init_db(sorted(datasplits[split_name]), db_log, args)
         # 2. get intent, remove missing frames
-        update_db_annotations(db, db_log, args)
+        if args.task_name != 'driving_decision':
+            update_db_annotations(db, db_log, args)
         # 3. cut sequences, remove early frames before the first key frame, and after last key frame
         # cut_sequence(db, db_log, args)
 
@@ -51,6 +52,8 @@ def create_database(args):
 def add_ped_case(db, video_name, ped_name, nlp_vid_uid_pairs):
     if video_name not in db:
         db[video_name] = {}
+
+    
 
     db[video_name][ped_name] = {  # ped_name is 'track_id' in cv-annotation
         'frames': None,  # [] list of frame_idx of the target pedestrian appear
@@ -71,7 +74,72 @@ def add_ped_case(db, video_name, ped_name, nlp_vid_uid_pairs):
             # 1: key frame (labeled by NLP annotations)
         }
 
+def add_case(db, video_name, cog_annotation, cv_annotation, db_log):
+    if video_name not in db:
+        db[video_name] = {}
 
+        # cog_annotation = annotation['pedestrians']['cognitive_annotations']
+        # nlp_vid_uid_pairs = cog_annotation.keys()
+    frame_list = list(cog_annotation['frames'].keys())
+    frames = [int(f.split('_')[1]) for f in frame_list]
+
+    db[video_name] = {  # ped_name is 'track_id' in cv-annotation
+        'frames': frames,  # [] list of frame_idx of the target pedestrian appear
+        'nlp_annotations': {
+            # [vid_uid_pair: {'speed': [], 'direction': [], 'description': [], 'key_frame': []}]
+        },
+        'speed': [],
+        'gps': []
+    }
+
+    nlp_vid_uid_pairs = list(cog_annotation['frames']['frame_0']['cognitive_annotation'].keys())
+    for vid_uid in nlp_vid_uid_pairs:
+        db[video_name]['nlp_annotations'][vid_uid] = {
+            'driving_speed': [],
+            'driving_direction': [],
+            'description': [],
+            'key_frame': []
+            # 0: not key frame (expanded from key frames with NLP annotations)
+            # 1: key frame (labeled by NLP annotations)
+        }
+
+    first_ann_idx = len(frame_list) - 1
+    last_ann_idx = -1
+    for i in range(len(frame_list)):
+        fname = frame_list[i]
+        for vid_uid in nlp_vid_uid_pairs:
+            db[video_name]['nlp_annotations'][vid_uid]['driving_speed'].append(
+                cog_annotation['frames'][fname]['cognitive_annotation'][vid_uid]['driving_decision_speed'])
+            db[video_name]['nlp_annotations'][vid_uid]['driving_direction'].append(
+                cog_annotation['frames'][fname]['cognitive_annotation'][vid_uid]['driving_decision_direction'])
+            db[video_name]['nlp_annotations'][vid_uid]['description'].append(
+                cog_annotation['frames'][fname]['cognitive_annotation'][vid_uid]['explanation'])
+            db[video_name]['nlp_annotations'][vid_uid]['key_frame'].append(
+                cog_annotation['frames'][fname]['cognitive_annotation'][vid_uid]['key_frame'])
+            # record first/last ann frame idx
+            if cog_annotation['frames'][fname]['cognitive_annotation'][vid_uid]['key_frame'] == 1:
+                first_ann_idx = min(first_ann_idx, i)
+                last_ann_idx = max(last_ann_idx, i)
+        try:
+            db[video_name]['speed'].append(float(cv_annotation['frames'][fname]['speed(km/hr)']))
+            db[video_name]['gps'].append(cv_annotation['frames'][fname]['gps'])
+        except:
+            with open(db_log, 'a') as f:
+                f.write(f"NO speed and gps information:  {video_name} frame {fname} \n")
+
+    # Cut sequences, only keep frames containing both driving decision & explanations
+    db[video_name]['frames'] = db[video_name]['frames'][first_ann_idx: last_ann_idx + 1]
+    db[video_name]['speed'] = db[video_name]['speed'][first_ann_idx: last_ann_idx + 1]
+    db[video_name]['gps'] = db[video_name]['gps'][first_ann_idx: last_ann_idx + 1]
+    for vid_uid in nlp_vid_uid_pairs:
+        db[video_name]['nlp_annotations'][vid_uid]['driving_speed'] \
+            = db[video_name]['nlp_annotations'][vid_uid]['driving_speed'][first_ann_idx: last_ann_idx + 1]
+        db[video_name]['nlp_annotations'][vid_uid]['driving_direction'] \
+            = db[video_name]['nlp_annotations'][vid_uid]['driving_direction'][first_ann_idx: last_ann_idx + 1]
+        db[video_name]['nlp_annotations'][vid_uid]['description'] \
+            = db[video_name]['nlp_annotations'][vid_uid]['description'][first_ann_idx: last_ann_idx + 1]
+        db[video_name]['nlp_annotations'][vid_uid]['key_frame'] \
+            = db[video_name]['nlp_annotations'][vid_uid]['key_frame'][first_ann_idx: last_ann_idx + 1]
 
 def init_db(video_list, db_log, args):
     db = {}
@@ -84,18 +152,45 @@ def init_db(video_list, db_log, args):
         extended_folder = 'PSI1.0/annotations/cognitive_annotation_extended'
 
     for video_name in sorted(video_list):
-        try:
-            with open(os.path.join(dataroot, extended_folder, video_name, 'pedestrian_intent.json'), 'r') as f:
-                annotation = json.load(f)
-        except:
-            with open(db_log, 'a') as f:
-                f.write(f"Error loading {video_name} pedestrian intent annotation json \n")
-            continue
-        db[video_name] = {}
-        for ped in annotation['pedestrians'].keys():
-            cog_annotation = annotation['pedestrians'][ped]['cognitive_annotations']
-            nlp_vid_uid_pairs = cog_annotation.keys()
-            add_ped_case(db, video_name, ped, nlp_vid_uid_pairs)
+        if args.task_name == 'driving_decision':
+            try:
+                with open(os.path.join(dataroot, extended_folder, video_name, 'driving_decision.json'), 'r') as f:
+                    cog_annotation = json.load(f)
+            except:
+                with open(db_log, 'a') as f:
+                    f.write(f"Error loading {video_name} driving decision annotation json \n")
+                continue
+
+            if args.dataset == 'PSI2.0':
+                cv_folder = 'PSI2.0_TrainVal/annotations/cv_annotation'
+            elif args.dataset == 'PSI1.0':
+                cv_folder = 'PSI1.0/annotations/cv_annotation'
+
+            try:
+                with open(os.path.join(dataroot, cv_folder, video_name, 'cv_annotation.json'), 'r') as f:
+                    cv_annotation = json.load(f)
+            except:
+                with open(db_log, 'a') as f:
+                    f.write(f"Error loading {video_name} cv annotation json \n")
+                continue
+
+            db[video_name] = {}
+
+            add_case(db, video_name, cog_annotation, cv_annotation, db_log)
+
+        else:
+            try:
+                with open(os.path.join(dataroot, extended_folder, video_name, 'pedestrian_intent.json'), 'r') as f:
+                    annotation = json.load(f)
+            except:
+                with open(db_log, 'a') as f:
+                    f.write(f"Error loading {video_name} pedestrian intent annotation json \n")
+                continue
+            db[video_name] = {}
+            for ped in annotation['pedestrians'].keys():
+                cog_annotation = annotation['pedestrians'][ped]['cognitive_annotations']
+                nlp_vid_uid_pairs = cog_annotation.keys()
+                add_ped_case(db, video_name, ped, nlp_vid_uid_pairs)
     return db
 
 

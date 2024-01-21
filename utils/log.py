@@ -1,17 +1,18 @@
 import os
 import numpy as np
 from utils.utils import AverageMeter
-from utils.metrics import evaluate_intent, evaluate_traj
+from utils.metrics import evaluate_intent, evaluate_traj, evaluate_driving
 import json
 
 
 class RecordResults():
-    def __init__(self, args=None, intent=True, traj=True, reason=False, evidential=False,
+    def __init__(self, args=None, intent=True, traj=True, driving=True, reason=False, evidential=False,
                  extract_prediction=False):
         self.args = args
         self.save_output = extract_prediction
         self.intent = intent
         self.traj = traj
+        self.driving = driving
         self.reason = reason
         self.evidential = evidential
 
@@ -46,6 +47,8 @@ class RecordResults():
         self.log_loss_total = AverageMeter()
         self.log_loss_intent = AverageMeter()
         self.log_loss_traj = AverageMeter()
+        self.log_loss_driving_speed = AverageMeter()
+        self.log_loss_driving_dir = AverageMeter()
         # (1.2) intent
         self.intention_gt = []
         self.intention_prob_gt = []
@@ -54,7 +57,12 @@ class RecordResults():
         self.traj_gt = []  # normalized, N x 4, (0, 1) range
         self.traj_ori_gt = []
         self.traj_pred = []  # N x 4 dimension, (0, 1) range
-        # (1.4) store all results
+        # (1.4) driving
+        self.driving_speed_gt = []
+        self.driving_speed_pred = []
+        self.driving_dir_gt = []
+        self.driving_dir_pred = []
+        # (1.5) store all results
         self.train_epoch_results = {}
         self.epoch = epoch
         self.nitern = nitern
@@ -109,6 +117,9 @@ class RecordResults():
 
     def eval_epoch_reset(self, epoch, nitern, intent=True, traj=True, args=None):
         # 1. initialize log info
+        self.log_loss_total = AverageMeter()
+        self.log_loss_driving_speed = AverageMeter()
+        self.log_loss_driving_dir = AverageMeter()
         # (1.2) training data info
         self.frames_list = []
         self.video_list = []
@@ -125,6 +136,13 @@ class RecordResults():
         self.traj_ori_gt = []  # original bboxes before normalization. equal to bboxes if no normalization
         self.traj_pred = []  # N x 4 dimension, (0, 1) range
 
+        # (1.5) driving
+        self.driving_speed_gt = []
+        self.driving_speed_pred = []
+        self.driving_dir_gt = []
+        self.driving_dir_pred = []
+
+        # (1.6) store all results
         self.eval_epoch_results = {}
         self.epoch = epoch
         self.nitern = nitern
@@ -272,6 +290,99 @@ class RecordResults():
                     writer.add_scalar(f'Eval/Results/{key}_{time}', val, self.epoch)
                     print(f'Epoch {self.epoch}: {key}_{time}', val)
         print('----------------------------------------------------------- ')
+
+    
+    def train_driving_batch_update(self, itern, data, speed_gt, direction_gt, speed_pred_logit, dir_pred_logit,
+                                   loss, loss_driving_speed, loss_driving_dir):
+        # 3. Update training info
+        # (3.1) loss log list
+        bs = speed_gt.shape[0]
+        self.log_loss_total.update(loss, bs)
+        self.log_loss_driving_speed.update(loss_driving_speed, bs)
+        self.log_loss_driving_dir.update(loss_driving_dir, bs)
+        # (3.2) training data info
+
+        self.driving_speed_gt.extend(speed_gt)  # bs
+        self.driving_dir_gt.extend(direction_gt)
+        self.driving_speed_pred.extend(np.argmax(speed_pred_logit, axis=-1))  # bs
+        self.driving_dir_pred.extend(np.argmax(dir_pred_logit, axis=-1))  # bs
+
+
+        if (itern + 1) % self.args.print_freq == 0:
+            with open(self.args.checkpoint_path + "/training_info.txt", 'a') as f:
+                f.write('Epoch {}/{} Batch: {}/{} | Total Loss: {:.4f} |  driving speed Loss: {:.4f} |  driving dir Loss: {:.4f} \n'.format(
+                    self.epoch, self.args.epochs, itern, self.nitern, self.log_loss_total.avg,
+                    self.log_loss_driving_speed.avg, self.log_loss_driving_dir.avg))
+
+
+    def train_driving_epoch_calculate(self, writer=None):
+        print('----------- Training results: ------------------------------------ ')
+        if self.driving:
+            driving_results = evaluate_driving(np.array(self.driving_speed_gt), np.array(self.driving_dir_gt),
+                                             np.array(self.driving_speed_pred), np.array(self.driving_dir_pred),
+                                               self.args)
+            self.train_epoch_results['driving_results'] = driving_results
+            # {'speed_Acc': 0, 'speed_mAcc': 0, 'direction_Acc': 0, 'direction_mAcc': 0}
+
+
+        # Update epoch to all results
+        self.all_train_results[str(self.epoch)] = self.train_epoch_results
+        self.log_info(epoch=self.epoch, info=self.train_epoch_results, filename='train')
+
+        # write scalar to tensorboard
+        if writer:
+            for key in ['speed_Acc', 'speed_mAcc', 'direction_Acc', 'direction_mAcc']: # driving_results.keys(): #
+                if key not in driving_results.keys():
+                    continue
+                val = driving_results[key]
+                print("results: ", key, val)
+                writer.add_scalar(f'Train/Results/{key}', val, self.epoch)
+        print('----------------------------------------------------------- ')
+
+    
+    def eval_driving_batch_update(self, itern, data, speed_gt, direction_gt, speed_pred_logit, dir_pred_logit,
+                                 reason_gt=None, reason_pred=None):
+        # 3. Update training info
+        # (3.1) loss log list
+        bs = speed_gt.shape[0]
+        # self.frames_list.extend(data['frames'].detach().cpu().numpy())  # bs x sq_length(60)
+        # assert len(self.frames_list[0]) == self.args.observe_length
+        # self.video_list.extend(data['video_id'])  # bs
+        # (3.2) training data info
+
+        self.driving_speed_gt.extend(speed_gt)  # bs
+        self.driving_dir_gt.extend(direction_gt)
+        self.driving_speed_pred.extend(np.argmax(speed_pred_logit, axis=-1))  # bs
+        self.driving_dir_pred.extend(np.argmax(dir_pred_logit, axis=-1))  # bs
+        if reason_pred is not None:
+            pass # store reason prediction
+
+
+    def eval_driving_epoch_calculate(self, writer):
+        print('----------- Evaluate results: ------------------------------------ ')
+        if self.driving:
+            driving_results = evaluate_driving(np.array(self.driving_speed_gt), np.array(self.driving_dir_gt),
+                                               np.array(self.driving_speed_pred), np.array(self.driving_dir_pred),
+                                               self.args)
+            self.eval_epoch_results['driving_results'] = driving_results
+            # {'speed_Acc': 0, 'speed_mAcc': 0, 'direction_Acc': 0, 'direction_mAcc': 0}
+            for key in self.eval_epoch_results['driving_results'].keys():
+                print(key, self.eval_epoch_results['driving_results'][key])
+        # Update epoch to all results
+        self.all_eval_results[str(self.epoch)] = self.eval_epoch_results
+        self.log_info(epoch=self.epoch, info=self.eval_epoch_results, filename='eval')
+
+
+        # write scalar to tensorboard
+        if writer:
+            for key in ['speed_Acc', 'speed_mAcc', 'direction_Acc', 'direction_mAcc']:
+                if key not in driving_results.keys():
+                    continue
+                val = driving_results[key]
+                print("results: ", key, val)
+                writer.add_scalar(f'Eval/Results/{key}', val, self.epoch)
+        print('log info finished')
+        print('----------------------finished results calculation------------------------------------- ')
 
 
     def log_msg(self, msg: str, filename: str = None):

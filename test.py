@@ -160,3 +160,60 @@ def get_test_traj_gt(model, dataloader, args, dset='test'):
             # print(len(traj_pred[i].detach().cpu().numpy().tolist()))
     with open(os.path.join(f'./test_gt/{dset}_traj_gt.json'), 'w') as f:
         json.dump(gt, f)
+
+@torch.no_grad()
+def validate_driving(epoch, model, dataloader, args, recorder, writer):
+    print(f"Validate ...")
+    model.eval()
+    niters = len(dataloader)
+    for itern, data in enumerate(dataloader):
+        pred_speed_logit, pred_dir_logit = model(data)
+        lbl_speed = data['label_speed']  # bs x 1
+        lbl_dir = data['label_direction']  # bs x 1
+        recorder.eval_driving_batch_update(itern, data, lbl_speed.detach().cpu().numpy(), lbl_dir.detach().cpu().numpy(),
+                                         pred_speed_logit.detach().cpu().numpy(), pred_dir_logit.detach().cpu().numpy())
+
+        if itern % args.print_freq == 0:
+            print(f"Epoch {epoch}/{args.epochs} | Batch {itern}/{niters}")
+
+        del data
+        del pred_speed_logit
+        del pred_dir_logit
+
+    recorder.eval_driving_epoch_calculate(writer)
+
+    return recorder
+
+
+@torch.no_grad()
+def predict_driving(model, dataloader, args, dset='test'):
+    print(f"Predict and save prediction of {dset} set...")
+    model.eval()
+    dt = {}
+    niters = len(dataloader)
+    for itern, data in enumerate(dataloader):
+        pred_speed_logit, pred_dir_logit = model(data)
+        # lbl_speed = data['label_speed']  # bs x 1
+        # lbl_dir = data['label_direction']  # bs x 1
+        # print("batch size: ", len(data['frames']), len(data['video_id']))
+        for i in range(len(data['frames'])): # for each sample in a batch
+            # print(data['video_id'])
+            vid = data['video_id'][0][i] # str list, bs x 60
+            fid = (data['frames'][i][-1] + 1).item()  # int list, bs x 15, observe 0~14, predict 15th intent
+
+            if vid not in dt:
+                dt[vid] = {}
+            if fid not in dt[vid]:
+                dt[vid][fid] = {}
+            dt[vid][fid]['speed'] = torch.argmax(pred_speed_logit[i]).item()
+            dt[vid][fid]['direction'] = torch.argmax(pred_dir_logit[i]).item()
+
+        if itern % args.print_freq == 10:
+            print(f"Predicting driving decision of Batch {itern}/{niters}")
+        del data
+        del pred_speed_logit
+        del pred_dir_logit
+
+    print("Saving prediction to file...")
+    with open(os.path.join(args.checkpoint_path, 'results', f'{dset}_driving_pred.json'), 'w') as f:
+        json.dump(dt, f)

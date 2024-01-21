@@ -7,7 +7,7 @@ import PIL
 from PIL import Image
 import copy
 from torch.utils.data.sampler import WeightedRandomSampler
-
+from opts import get_opts
 
 
 class VideoDataset(torch.utils.data.Dataset):
@@ -22,6 +22,21 @@ class VideoDataset(torch.utils.data.Dataset):
         print(self.data.keys())
 
     def __getitem__(self, index):
+        # Driving data (Comment out line 40 to 102 for driving_intention)
+        # video_ids = self.data['video_id'][index]
+        # frame_list = self.data['frame'][index][:self.args.observe_length] # return first 15 frames as observed
+        # data = {}
+        # data['video_id'] = [video_ids[0]]
+        # data['frames'] = frame_list # 15 observed frames
+        # data['image'] = self.load_images(video_ids[0], frame_list)  # load iamges
+        # data['label_speed'] = self.data['driving_speed'][index][self.args.observe_length] # only return 16-th label, 3-class one-hot
+        # data['label_direction'] = self.data['driving_direction'][index][self.args.observe_length] # only return 16-th label, 3-class one-hot
+        # data['label_speed_prob'] = self.data['driving_speed_prob'][index][self.args.observe_length]  # only return 16-th label, 3-class one-hot
+        # data['label_direction_prob'] = self.data['driving_direction_prob'][index][self.args.observe_length]  # only return 16-th label, 3-class one-hot
+        # data['description'] = self.dataset['description'][index][self.args.observe_length]  # only return 16-th label, 3-class one-hot
+
+        
+        # Intent and Traj data (Comment out line 26 to 36 for driving_intention)
         video_ids = self.data['video_id'][index]
         ped_ids = self.data['ped_id'][index]
         assert video_ids[0] == video_ids[-1] # all video_id should be the same
@@ -87,6 +102,7 @@ class VideoDataset(torch.utils.data.Dataset):
         }
 
         return data
+    
 
     def __len__(self):
         return len(self.data['frame'])
@@ -136,54 +152,75 @@ class VideoDataset(torch.utils.data.Dataset):
         return global_featmaps, local_featmaps
 
 
-    def load_images(self, video_ids, frame_list, bboxes):
+    # def load_images(self, video_ids, frame_list, bboxes):
+    #     images = []
+    #     cropped_images = []
+    #     video_name = video_ids[0]
+
+    #     for i in range(len(frame_list)):
+    #         frame_id = frame_list[i]
+    #         bbox = bboxes[i]
+    #         # load original image
+    #         # print(video_id, frame_list, video_name, frame_id, bbox)
+    #         img_path = os.path.join(self.images_path, video_name, str(frame_id).zfill(5)+'.png')
+    #         # print(img_path)
+    #         img = self.rgb_loader(img_path)
+    #         print(img.shape)# 2048 x 2048 x 3 --> 1280 x 720
+    #         # print("Original image size: ", img.shape, bbox)
+    #         # Image.fromarray(img).show()
+    #         # img.shape: H x W x C, RGB channel
+    #         # crop pedestrian surrounding image
+    #         ori_bbox = copy.deepcopy(bbox)
+
+    #         bbox = self.jitter_bbox(img, [bbox], self.args.crop_mode, 2.0)[0]
+
+    #         # x1, y1, x2, y2 = bbox
+
+    #         bbox = self.squarify(bbox, 1, img.shape[1])
+    #         bbox = list(map(int, bbox[0:4]))
+
+    #         cropped_img = Image.fromarray(img).crop(bbox)
+    #         cropped_img = np.array(cropped_img)
+    #         if not cropped_img.shape:
+    #             print("Error in crop: ", video_id[0][0], frame_id, ori_bbox, bbox)
+    #         cropped_img = self.img_pad(cropped_img, mode='pad_resize', size=224) # return PIL.image type
+
+    #         cropped_img = np.array(cropped_img)
+    #         # cv2.imshow(str(i), np.array(cropped_img))
+    #         # cv2.waitKey(1000)
+    #         # cv2.destroyAllWindows()
+
+    #         if self.transform:
+    #             # print("before transform - img: ", img.shape, " cropped: ", cropped_img.shape)
+    #             img = self.transform(img)
+    #             cropped_img = self.transform(cropped_img)
+    #             # print("after transform - img: ", img.shape, " cropped: ", cropped_img.shape)
+    #             # After transform, changed to tensor, img.shape: C x H x W
+    #         images.append(img)
+    #         cropped_images.append(cropped_img)
+
+    #     return torch.stack(images), torch.stack(cropped_images) # Time x Channel x H x W
+    def load_images(self, video_name, frame_list):
         images = []
-        cropped_images = []
-        video_name = video_ids[0]
 
         for i in range(len(frame_list)):
             frame_id = frame_list[i]
-            bbox = bboxes[i]
             # load original image
-            # print(video_id, frame_list, video_name, frame_id, bbox)
-            img_path = os.path.join(self.images_path, video_name, str(frame_id).zfill(5)+'.png')
+            img_path = os.path.join(self.images_path, video_name, str(frame_id).zfill(3)+'.jpg')
             # print(img_path)
             img = self.rgb_loader(img_path)
-            print(img.shape)# 2048 x 2048 x 3 --> 1280 x 720
-            # print("Original image size: ", img.shape, bbox)
+            # print(img.shape) #1280 x 720
             # Image.fromarray(img).show()
             # img.shape: H x W x C, RGB channel
             # crop pedestrian surrounding image
-            ori_bbox = copy.deepcopy(bbox)
-
-            bbox = self.jitter_bbox(img, [bbox], self.args.crop_mode, 2.0)[0]
-
-            # x1, y1, x2, y2 = bbox
-
-            bbox = self.squarify(bbox, 1, img.shape[1])
-            bbox = list(map(int, bbox[0:4]))
-
-            cropped_img = Image.fromarray(img).crop(bbox)
-            cropped_img = np.array(cropped_img)
-            if not cropped_img.shape:
-                print("Error in crop: ", video_id[0][0], frame_id, ori_bbox, bbox)
-            cropped_img = self.img_pad(cropped_img, mode='pad_resize', size=224) # return PIL.image type
-
-            cropped_img = np.array(cropped_img)
-            # cv2.imshow(str(i), np.array(cropped_img))
-            # cv2.waitKey(1000)
-            # cv2.destroyAllWindows()
 
             if self.transform:
-                # print("before transform - img: ", img.shape, " cropped: ", cropped_img.shape)
+                # print("before transform - img: ", img.shape)
                 img = self.transform(img)
-                cropped_img = self.transform(cropped_img)
-                # print("after transform - img: ", img.shape, " cropped: ", cropped_img.shape)
                 # After transform, changed to tensor, img.shape: C x H x W
             images.append(img)
-            cropped_images.append(cropped_img)
 
-        return torch.stack(images), torch.stack(cropped_images) # Time x Channel x H x W
+        return torch.stack(images, dim=0)
 
 
     def rgb_loader(self, img_path):

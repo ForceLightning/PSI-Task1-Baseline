@@ -55,6 +55,32 @@ def get_intent_gt(dataloader, output_path, args):
     with open(output_path, 'w') as f:
         json.dump(dt, f)
 
+def get_test_driving_gt(model, dataloader, args, dset='test'):
+    dt = {}
+    niters = len(dataloader)
+    for itern, data in enumerate(dataloader):
+        lbl_speed = data['label_speed']  # bs x 1
+        lbl_dir = data['label_direction']  # bs x 1
+        for i in range(len(data['frames'])):  # for each sample in a batch
+            # print(data['video_id'])
+            vid = data['video_id'][0][i]  # str list, bs x 60
+            fid = (data['frames'][i][-1] + 1).item()  # int list, bs x 15, observe 0~14, predict 15th intent
+
+            if vid not in dt:
+                dt[vid] = {}
+            if fid not in dt[vid]:
+                dt[vid][fid] = {}
+            dt[vid][fid]['speed'] = lbl_speed[i].item()
+            dt[vid][fid]['direction'] = lbl_dir[i].item()
+
+        if itern % args.print_freq == 0:
+            print(f"Get gt driving decision of Batch {itern}/{niters}")
+
+        # if itern >= 10:
+        #     break
+    with open(os.path.join(f'./test_gt/{dset}_driving_gt.json'), 'w') as f:
+        json.dump(dt, f)
+        
 def get_intent_reasoning_gt():
     pass
 
