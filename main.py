@@ -67,9 +67,6 @@ if __name__ == '__main__':
     # /home/scott/Work/Toyota/PSI_Competition/Dataset
     args = get_opts()
 
-    # Task
-    args.task_name = 'ped_traj'
-
     if args.task_name == 'ped_intent':
         args.database_file = 'intent_database_train.pkl'
         args.intent_model = True
