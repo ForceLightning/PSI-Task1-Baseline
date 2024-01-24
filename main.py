@@ -96,7 +96,7 @@ if __name__ == '__main__':
 
 
     # Train
-    args.epochs = 10
+    args.epochs = 50
     args.batch_size = 128
     args.lr = 1e-3
     args.loss_weights = {
@@ -118,8 +118,8 @@ if __name__ == '__main__':
         json.dump(args.__dict__, f, indent=4)
 
     result_path = os.path.join(args.checkpoint_path, 'results')
-    print(args.checkpoint_path)
     if not os.path.isdir(result_path):
         os.makedirs(result_path)
 
     main(args)
+    print(args.checkpoint_path)
