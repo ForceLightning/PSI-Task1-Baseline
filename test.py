@@ -1,6 +1,7 @@
 import os
 import torch
 import json
+import cv2
 
 cuda = True if torch.cuda.is_available() else False
 device = torch.device("cuda:0" if cuda else "cpu")
@@ -55,36 +56,63 @@ def test_intent(epoch, model, dataloader, args, recorder, writer):
     recorder.eval_intent_epoch_calculate(writer)
 
     return recorder
-
-
-def predict_intent(model, dataloader, args, dset='test'):
+# Non-dataloader
+def predict_intent(model, data, args, dset='test'):
     model.eval()
     dt = {}
-    for itern, data in enumerate(dataloader):
-        intent_logit = model.forward(data)
-        intent_prob = torch.sigmoid(intent_logit)
+    intent_logit = model.forward(data)
+    intent_prob = torch.sigmoid(intent_logit)
 
-        for i in range(len(data['frames'])):
-            vid = data['video_id'][i]  # str list, bs x 60
-            pid = data['ped_id'][i]  # str list, bs x 60
-            fid = (data['frames'][i][-1] + 1).item()  # int list, bs x 15, observe 0~14, predict 15th intent
-            # gt_int = data['intention_binary'][i][args.observe_length].item()  # int list, bs x 60
-            # gt_int_prob = data['intention_prob'][i][args.observe_length].item()  # float list, bs x 60
-            # gt_disgr = data['disagree_score'][i][args.observe_length].item()  # float list, bs x 60
-            int_prob = intent_prob[i].item()
-            int_pred = round(int_prob) # <0.5 --> 0, >=0.5 --> 1.
+    vid = data['video_id']  # str list, bs x 60
+    pid = data['ped_id']  # str list, bs x 60
+    fid = (data['frames'][0][-1] + 1).item()  # int list, bs x 15, observe 0~14, predict 15th intent
+    # gt_int = data['intention_binary'][i][args.observe_length].item()  # int list, bs x 60
+    # gt_int_prob = data['intention_prob'][i][args.observe_length].item()  # float list, bs x 60
+    # gt_disgr = data['disagree_score'][i][args.observe_length].item()  # float list, bs x 60
+    int_prob = intent_prob.item()
+    int_pred = round(int_prob) # <0.5 --> 0, >=0.5 --> 1.
 
-            if vid not in dt:
-                dt[vid] = {}
-            if pid not in dt[vid]:
-                dt[vid][pid] = {}
-            if fid not in dt[vid][pid]:
-                dt[vid][pid][fid] = {}
-            dt[vid][pid][fid]['intent'] = int_pred
-            dt[vid][pid][fid]['intent_prob'] = int_prob
-
+    if vid not in dt:
+        dt[vid] = {}
+    if pid not in dt[vid]:
+        dt[vid][pid] = {}
+    if fid not in dt[vid][pid]:
+        dt[vid][pid][fid] = {}
+    dt[vid][pid][fid]['intent'] = int_pred
+    dt[vid][pid][fid]['intent_prob'] = int_prob
     with open(os.path.join(args.checkpoint_path, 'results', f'{dset}_intent_pred'), 'w') as f:
         json.dump(dt, f)
+
+
+# def predict_intent(model, dataloader, args, dset='test'):
+#     model.eval()
+#     dt = {}
+#     for itern, data in enumerate(dataloader):
+#         intent_logit = model.forward(data)
+#         intent_prob = torch.sigmoid(intent_logit)
+#         print("IB:", intent_prob.shape)
+
+#         for i in range(len(data['frames'])):
+#             vid = data['video_id'][i]  # str list, bs x 60
+#             pid = data['ped_id'][i]  # str list, bs x 60
+#             fid = (data['frames'][i][-1] + 1).item()  # int list, bs x 15, observe 0~14, predict 15th intent
+#             # gt_int = data['intention_binary'][i][args.observe_length].item()  # int list, bs x 60
+#             # gt_int_prob = data['intention_prob'][i][args.observe_length].item()  # float list, bs x 60
+#             # gt_disgr = data['disagree_score'][i][args.observe_length].item()  # float list, bs x 60
+#             int_prob = intent_prob[i].item()
+#             int_pred = round(int_prob) # <0.5 --> 0, >=0.5 --> 1.
+
+#             if vid not in dt:
+#                 dt[vid] = {}
+#             if pid not in dt[vid]:
+#                 dt[vid][pid] = {}
+#             if fid not in dt[vid][pid]:
+#                 dt[vid][pid][fid] = {}
+#             dt[vid][pid][fid]['intent'] = int_pred
+#             dt[vid][pid][fid]['intent_prob'] = int_prob
+
+#     with open(os.path.join(args.checkpoint_path, 'results', f'{dset}_intent_pred'), 'w') as f:
+#         json.dump(dt, f)
 
 
 def validate_traj(epoch, model, dataloader, args, recorder, writer):

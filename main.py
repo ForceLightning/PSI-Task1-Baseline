@@ -4,7 +4,7 @@ import os
 import json
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
-from data.prepare_data import get_dataloader
+from data.prepare_data import get_dataloader, get_dataset
 from database.create_database import create_database
 from models.build_model import build_model
 from train import train_intent, train_traj, train_driving
@@ -12,7 +12,9 @@ from test import validate_intent, test_intent, predict_intent, predict_traj, get
 from utils.log import RecordResults
 from utils.evaluate_results import evaluate_intent, evaluate_traj, evaluate_driving
 from utils.get_test_intent_gt import get_intent_gt, get_test_driving_gt
-
+from ultralytics import YOLO
+import matplotlib.pyplot as plt
+import torch
 
 def main(args):
     writer = SummaryWriter(args.checkpoint_path)
@@ -23,12 +25,57 @@ def main(args):
     else:
         print("Database exists!")
     train_loader, val_loader, test_loader = get_dataloader(args)
+    val_dataset = get_dataset(args, 'val')    
+    model = YOLO('yolov8n.pt')
+    image, labels = val_dataset[50]
+    
+    bboxes = []
+    # Scale the image to the range [0,1]
+    image = (image - image.min()) / (image.max() - image.min()) 
+    results = model.predict(image)
+    for result in results:
+    
+        # Print number of bounding boxes
+        print("Length:", len(result.boxes))
 
+        # print(result.names)
+
+        for box in result.boxes:
+            label = int(box.cls[0].item())
+            cords =  box.xyxyn[0].tolist()
+            # Only care about the bounding boxes of pedestrian
+            if label == 0:
+                bboxes.append(cords)
+            prob = box.conf[0].item()
+            print("Object type :", label)
+            print("Coordinates :", cords)
+            print("Probability : ", prob)
+            print("---")
+
+        # Visualise the predictions
+        # img = Image.fromarray(result.plot()[:,:,::-1])
+        
+        # print(result.plot().shape)  
+        # plt.imshow(img)
+        # plt.show()
+            
+    yolo_bbox = torch.tensor(bboxes)
+    yolo_bbox = torch.unsqueeze(yolo_bbox, dim=0)
+    print(yolo_bbox.shape)
+    yolo_frames = torch.tensor(labels['frames'])
+    yolo_frames = torch.unsqueeze(yolo_frames, dim=0)
+    yolo_data = {
+        'bboxes': yolo_bbox,
+        'frames': yolo_frames,
+        'video_id': labels['video_id'], 
+        'ped_id': labels['ped_id'],
+    }  
+        
     ''' 2. Create models '''
     model, optimizer, scheduler = build_model(args)
     model = nn.DataParallel(model)
 
-    # ''' 3. Train '''
+    ''' 3. Train '''
     if args.task_name == 'ped_intent':
         train_intent(model, optimizer, scheduler, train_loader, val_loader, args, recorder, writer)
     elif args.task_name == 'ped_traj':
@@ -37,24 +84,25 @@ def main(args):
         train_driving(model, optimizer, scheduler, train_loader, val_loader, args, recorder, writer)
 
     if args.task_name == 'ped_intent':
-        val_gt_file = './test_gt/val_intent_gt.json'
-        if not os.path.exists(val_gt_file):
-            get_intent_gt(val_loader, val_gt_file, args)
-        predict_intent(model, val_loader, args, dset='val')
-        evaluate_intent(val_gt_file, args.checkpoint_path + '/results/val_intent_pred', args)
-    elif args.task_name == 'ped_traj':
-        val_gt_file = './test_gt/val_traj_gt.json'
-        if not os.path.exists(val_gt_file):
-            get_test_traj_gt(model, val_loader, args, dset='val')
-        predict_traj(model, val_loader, args, dset='val')
-        score = evaluate_traj(val_gt_file, args.checkpoint_path + '/results/val_traj_pred.json', args)
-    elif args.task_name == 'driving_decision':
-        val_gt_file = './test_gt/val_driving_gt.json'
-        if not os.path.exists(val_gt_file):
-            get_test_driving_gt(model, val_loader, args, dset='val')
-        predict_driving(model, val_loader, args, dset='val')
-        score = evaluate_driving(val_gt_file, args.checkpoint_path + '/results/val_driving_pred.json', args)
-        print("Ranking score of val set: ", score)
+        # val_gt_file = './test_gt/val_intent_gt.json'
+        # if not os.path.exists(val_gt_file):
+        #     get_intent_gt(val_loader, val_gt_file, args)
+        # predict_intent(model, val_loader, args, dset='val')
+        predict_intent(model, yolo_data, args, dset='val')
+        # evaluate_intent(val_gt_file, args.checkpoint_path + '/results/val_intent_pred', args)
+    # elif args.task_name == 'ped_traj':
+    #     val_gt_file = './test_gt/val_traj_gt.json'
+    #     if not os.path.exists(val_gt_file):
+    #         get_test_traj_gt(model, val_loader, args, dset='val')
+    #     predict_traj(model, val_loader, args, dset='val')
+    #     score = evaluate_traj(val_gt_file, args.checkpoint_path + '/results/val_traj_pred.json', args)
+    # elif args.task_name == 'driving_decision':
+    #     val_gt_file = './test_gt/val_driving_gt.json'
+    #     if not os.path.exists(val_gt_file):
+    #         get_test_driving_gt(model, val_loader, args, dset='val')
+    #     predict_driving(model, val_loader, args, dset='val')
+    #     score = evaluate_driving(val_gt_file, args.checkpoint_path + '/results/val_driving_pred.json', args)
+    #     print("Ranking score of val set: ", score)
 
     # ''' 4. Test '''
     # test_gt_file = './test_gt/test_intent_gt.json'

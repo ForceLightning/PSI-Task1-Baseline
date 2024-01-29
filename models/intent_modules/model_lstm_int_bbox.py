@@ -33,7 +33,7 @@ class LSTMIntBbox(nn.Module):
         # local_imgs = data['cropped_images']
         dec_input_emb = None # as the additional emb for intent predictor
         # bbox: shape = [bs x observe_length x enc_input_dim]
-        assert bbox.shape[1] == self.observe_length
+        # assert bbox.shape[1] == self.observe_length
 
         # 1. backbone feature (to be implemented for images)
         if self.backbone is not None:

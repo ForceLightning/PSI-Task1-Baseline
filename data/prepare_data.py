@@ -5,7 +5,7 @@ import torch
 import json
 # from create_database import create_intent_database
 from data.process_sequence import generate_data_sequence
-from data.custom_dataset import VideoDataset
+from data.custom_dataset import VideoDataset, YoloDataset
 
 def get_dataloader(args, shuffle_train=True, drop_last_train=True):
     task = args.task_name.split('_')[1]
@@ -39,6 +39,32 @@ def get_dataloader(args, shuffle_train=True, drop_last_train=True):
 
     return train_loader, val_loader, test_loader
 
+def get_dataset(args, datatype):
+    task = args.task_name.split('_')[1]
+
+    with open(os.path.join(args.database_path, f'{task}_database_train.pkl'), 'rb') as fid:
+        imdb_train = pickle.load(fid)
+    train_seq = generate_data_sequence('train', imdb_train, args)
+    with open(os.path.join(args.database_path, f'{task}_database_val.pkl'), 'rb') as fid:
+        imdb_val = pickle.load(fid)
+    val_seq = generate_data_sequence('val', imdb_val, args)
+    with open(os.path.join(args.database_path, f'{task}_database_test.pkl'), 'rb') as fid:
+        imdb_test = pickle.load(fid)
+    test_seq = generate_data_sequence('test', imdb_test, args)
+
+    train_d = get_train_val_data(train_seq, args, overlap=args.seq_overlap_rate) # returned tracks
+    val_d = get_train_val_data(val_seq, args, overlap=args.test_seq_overlap_rate)
+    test_d = get_test_data(test_seq, args, overlap=args.test_seq_overlap_rate)
+
+    # Create video dataset and dataloader
+    if datatype == 'train':
+        dataset = YoloDataset(train_d, args)
+    elif datatype == 'val':
+        dataset = YoloDataset(val_d, args)
+    elif datatype == 'test':
+        dataset = YoloDataset(test_d, args)
+
+    return dataset
 
 def get_train_val_data(data, args, overlap=0.5):  # overlap==0.5, seq_len=15
     seq_len = args.max_track_size
