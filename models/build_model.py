@@ -27,7 +27,7 @@ def get_tcn_intent_bbox(args):
         'output_dim': 1,  # intent prediction, output logits, add activation later
         'n_layers': 4,
         'dropout': 0.125,
-        'kernel_size':2,
+        'kernel_size':4,
         'observe_length': args.observe_length,  # 15
         'predict_length': 1,  # only predict one intent
         'return_sequence': False,  # False for reason/intent/trust. True for trajectory

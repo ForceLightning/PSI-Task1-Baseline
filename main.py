@@ -98,7 +98,7 @@ if __name__ == '__main__':
     hyperparamter_list = {
         'lr': [1e-3],
         'batch_size': [128],
-        'epochs': [10]
+        'epochs': [50]
     }
     parameter_grid = list(ParameterGrid(hyperparamter_list))
     best_hyperparameter = None
