@@ -12,7 +12,7 @@ from test import validate_intent, test_intent, predict_intent
 from utils.log import RecordResults
 from utils.evaluate_results import evaluate_intent
 from utils.get_test_intent_gt import get_intent_gt
-from sklearn.model_selection import ParameterGrid
+from sklearn.model_selection import ParameterSampler
 import numpy as np
 import glob
 
@@ -37,14 +37,16 @@ def main(args):
     if not os.path.exists(val_gt_file):
         get_intent_gt(val_loader, val_gt_file, args)
     predict_intent(model, val_loader, args, dset='val')
-    evaluate_intent(val_gt_file, args.checkpoint_path + '/results/val_intent_pred', args)
+    val_accuracy = evaluate_intent(val_gt_file, args.checkpoint_path + '/results/val_intent_pred', args)
 
     # ''' 4. Test '''
     test_gt_file = './test_gt/test_intent_gt.json'
     if not os.path.exists(test_gt_file):
         get_intent_gt(test_loader, test_gt_file, args)
     predict_intent(model, test_loader, args, dset='test')
-    test_acc = evaluate_intent(test_gt_file, args.checkpoint_path + '/results/test_intent_pred', args)
+    test_accuracy = evaluate_intent(test_gt_file, args.checkpoint_path + '/results/test_intent_pred', args)
+
+    return val_accuracy, test_accuracy
 
 if __name__ == '__main__':
     # /home/scott/Work/Toyota/PSI_Competition/Dataset
@@ -95,18 +97,16 @@ if __name__ == '__main__':
         args.freeze_backbone = False
 
     # Train
-    hyperparamter_list = {
-        'lr': [1e-3],
-        'batch_size': [128],
-        'epochs': [50]
+    hyperparameter_list = {
+        'lr': [1e-3,1e-2],
+        'batch_size': [64,128,256],
+        'epochs': [5,10,15]
     }
-    parameter_grid = list(ParameterGrid(hyperparamter_list))
-    best_hyperparameter = None
-    best_accuracy = 0.0
 
-    # args.epochs = 1
-    # args.batch_size = 128
-    # args.lr = 1e-3
+    n_random_samples = 5
+
+    parameter_samples = list(ParameterSampler(hyperparameter_list, n_iter=n_random_samples))
+
     args.loss_weights = {
         'loss_intent': 1.0,
         'loss_traj': 0.0,
@@ -116,7 +116,10 @@ if __name__ == '__main__':
     args.test_freq = 1
     args.print_freq = 10
 
-    for params in parameter_grid:
+    best_val_accuracy = 0.0
+    best_hyperparameters = None
+
+    for params in parameter_samples:
         args.lr = params['lr']
         args.batch_size = params['batch_size']
         args.epochs = params['epochs']
@@ -136,20 +139,13 @@ if __name__ == '__main__':
             os.makedirs(result_path)
 
         print("Running with Parameters:", params)  # Print the current parameters
-        main(args)
+        val_accuracy, test_accuracy = main(args)
+        print("Validation Accuracy:", val_accuracy)
+        print("Test Accuracy:", test_accuracy)
 
-        performance_file = glob.glob(os.path.join(args.checkpoint_path, '**/eval_intent_results.txt'), recursive=True)
-        for file_path in performance_file:
-            with open(file_path, 'r') as f:
-                for line in f:
-                    if line.startswith('Acc:'):
-                        val_accuracy = float(line.split(':')[1].strip())
-                        if val_accuracy > best_accuracy:
-                            best_accuracy = val_accuracy
-                            best_hyperparameters = params
-                        break
+        if val_accuracy > best_val_accuracy:
+            best_val_accuracy = val_accuracy
+            best_hyperparameters = params
 
-    # Print best hyperparameters and accuracy
+    print("Best Validation Accuracy:", best_val_accuracy)
     print("Best Hyperparameters:", best_hyperparameters)
-    print("Best Validation Accuracy:", best_accuracy)
-
