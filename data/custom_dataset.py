@@ -228,27 +228,27 @@ class YoloDataset(torch.utils.data.Dataset):
 
     def set_transform(self):
         if self.stage == 'train':
-            resize_size = 256
+            resize_size = 640
             crop_size = 224
             self.transform = transforms.Compose([
                 transforms.ToPILImage(),
                 transforms.Resize((resize_size, resize_size)),
-                transforms.RandomCrop(crop_size),
-                transforms.RandomHorizontalFlip(),
+                # transforms.RandomCrop(crop_size),
+                # transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
+                # transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                #                      std=[0.229, 0.224, 0.225])
             ])
         else:
-            resize_size = 256
+            resize_size = 704
             crop_size = 224
             self.transform = transforms.Compose([
                 transforms.ToPILImage(),
                 transforms.Resize((resize_size, resize_size)),
-                transforms.CenterCrop(crop_size),
+                # transforms.CenterCrop(crop_size),
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
+                # transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                #                      std=[0.229, 0.224, 0.225])
             ])
 
     def squarify(self, bbox, squarify_ratio, img_width):

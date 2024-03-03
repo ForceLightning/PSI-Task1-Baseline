@@ -1,20 +1,27 @@
-from opts import get_opts
-from datetime import datetime
-import os
 import json
+import os
+import sys
+from datetime import datetime
+from test import (get_test_traj_gt, predict_driving, predict_intent,
+                  predict_traj, test_intent, validate_intent)
+
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
 import torch.nn as nn
-from torch.utils.tensorboard import SummaryWriter
 from data.prepare_data import get_dataloader, get_dataset
 from database.create_database import create_database
 from models.build_model import build_model
-from train import train_intent, train_traj, train_driving
-from test import validate_intent, test_intent, predict_intent, predict_traj, get_test_traj_gt, predict_driving
-from utils.log import RecordResults
-from utils.evaluate_results import evaluate_intent, evaluate_traj, evaluate_driving
-from utils.get_test_intent_gt import get_intent_gt, get_test_driving_gt
+from opts import get_opts
+from torch.utils.tensorboard import SummaryWriter
+from train import train_driving, train_intent, train_traj
 from ultralytics import YOLO
-import matplotlib.pyplot as plt
-import torch
+from utils.evaluate_results import (evaluate_driving, evaluate_intent,
+                                    evaluate_traj)
+from utils.get_test_intent_gt import get_intent_gt, get_test_driving_gt
+from utils.log import RecordResults
+
 
 def main(args):
     writer = SummaryWriter(args.checkpoint_path)
@@ -27,14 +34,25 @@ def main(args):
     train_loader, val_loader, test_loader = get_dataloader(args)
     val_dataset = get_dataset(args, 'val')    
     model = YOLO('yolov8n.pt')
-    image, labels = val_dataset[50]
-    
+    frames, labels = val_dataset[50]
+
     bboxes = []
-    # Scale the image to the range [0,1]
-    image = (image - image.min()) / (image.max() - image.min()) 
-    results = model.predict(image)
+    print(frames.shape)
+    results = []
+    for frame in frames:
+        # to plot the image
+        # plt.imshow(frame.numpy().transpose(1,2,0))
+        # plt.show()
+        np_frame = cv2.cvtColor(frame.numpy().transpose(1,2,0), cv2.COLOR_RGB2BGR)
+        np_frame = (np_frame * 255).astype(np.uint8)
+        result = model.track(np_frame, persist=True)
+        # to plot the resultant annotated image
+        # res = result[0].plot()
+        # cv2.imshow('frame', res)
+        # cv2.waitKey(0)
+        results.append(result[0])
     for result in results:
-    
+
         # Print number of bounding boxes
         print("Length:", len(result.boxes))
 
@@ -54,11 +72,11 @@ def main(args):
 
         # Visualise the predictions
         # img = Image.fromarray(result.plot()[:,:,::-1])
-        
+
         # print(result.plot().shape)  
         # plt.imshow(img)
         # plt.show()
-            
+
     yolo_bbox = torch.tensor(bboxes)
     yolo_bbox = torch.unsqueeze(yolo_bbox, dim=0)
     print(yolo_bbox.shape)
@@ -69,8 +87,9 @@ def main(args):
         'frames': yolo_frames,
         'video_id': labels['video_id'], 
         'ped_id': labels['ped_id'],
-    }  
-        
+    }
+    sys.exit()
+
     ''' 2. Create models '''
     model, optimizer, scheduler = build_model(args)
     model = nn.DataParallel(model)
