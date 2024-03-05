@@ -45,7 +45,7 @@ def main(args):
         # plt.show()
         np_frame = cv2.cvtColor(frame.numpy().transpose(1,2,0), cv2.COLOR_RGB2BGR)
         np_frame = (np_frame * 255).astype(np.uint8)
-        result = model.track(np_frame, persist=True, half=True, device='cuda:0')
+        result = model.track(np_frame, persist=True, half=True, device='cuda:0', classes=[0])
         # to plot the resultant annotated image
         res = result[0].plot()
         cv2.imshow('frame', res)
