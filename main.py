@@ -33,7 +33,7 @@ def main(args):
         print("Database exists!")
     train_loader, val_loader, test_loader = get_dataloader(args)
     val_dataset = get_dataset(args, 'val')    
-    model = YOLO('yolov8n.pt')
+    model = YOLO('yolov8s.pt')
     frames, labels = val_dataset[50]
 
     bboxes = []
@@ -45,11 +45,11 @@ def main(args):
         # plt.show()
         np_frame = cv2.cvtColor(frame.numpy().transpose(1,2,0), cv2.COLOR_RGB2BGR)
         np_frame = (np_frame * 255).astype(np.uint8)
-        result = model.track(np_frame, persist=True)
+        result = model.track(np_frame, persist=True, half=True, device='cuda:0')
         # to plot the resultant annotated image
-        # res = result[0].plot()
-        # cv2.imshow('frame', res)
-        # cv2.waitKey(0)
+        res = result[0].plot()
+        cv2.imshow('frame', res)
+        cv2.waitKey(0)
         results.append(result[0])
     for result in results:
 
@@ -88,7 +88,7 @@ def main(args):
         'video_id': labels['video_id'], 
         'ped_id': labels['ped_id'],
     }
-    sys.exit()
+    sys.exit() # TODO(jiayu): remove this when you are done with YOLO inferencing
 
     ''' 2. Create models '''
     model, optimizer, scheduler = build_model(args)

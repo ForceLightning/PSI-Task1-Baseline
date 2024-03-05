@@ -232,7 +232,7 @@ class YoloDataset(torch.utils.data.Dataset):
             crop_size = 224
             self.transform = transforms.Compose([
                 transforms.ToPILImage(),
-                transforms.Resize((resize_size, resize_size)),
+                # transforms.Resize((resize_size, resize_size)),
                 # transforms.RandomCrop(crop_size),
                 # transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
@@ -244,7 +244,7 @@ class YoloDataset(torch.utils.data.Dataset):
             crop_size = 224
             self.transform = transforms.Compose([
                 transforms.ToPILImage(),
-                transforms.Resize((resize_size, resize_size)),
+                # transforms.Resize((resize_size, resize_size)),
                 # transforms.CenterCrop(crop_size),
                 transforms.ToTensor(),
                 # transforms.Normalize(mean=[0.485, 0.456, 0.406],
