@@ -19,7 +19,6 @@ def train_intent(model, optimizer, scheduler, train_loader, val_loader, args, re
         'CELoss': torch.nn.CrossEntropyLoss(),
     }
     epoch_loss = {'loss_intent': [], 'loss_traj': []}
-
     for epoch in range(1, args.epochs + 1):
         niters = len(train_loader)
         recorder.train_epoch_reset(epoch, niters)

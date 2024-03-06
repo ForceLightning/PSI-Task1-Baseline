@@ -22,7 +22,7 @@ def evaluate_intent(groundtruth='', prediction='', args=None):
     print('F1: ', res['F1'])
     print('mAcc: ', res['mAcc'])
     print('ConfusionMatrix: ', res['ConfusionMatrix'])
-    return res['Acc']
+    return res['Acc'], res['F1'], res['mAcc']
 
 def measure_intent_prediction(target, prediction, args):
     print("Evaluating Intent ...")
@@ -57,5 +57,5 @@ if __name__ == '__main__':
     # evaluate_intent('gt.json', 'pred.json', args)
     test_gt_file = '../val_intent_gt.json'
     test_pred_file = '../val_intent_pred'
-    score = evaluate_intent(test_gt_file, test_pred_file, args)
+    score, _, _ = evaluate_intent(test_gt_file, test_pred_file, args)
     print("Ranking score is : ", score)

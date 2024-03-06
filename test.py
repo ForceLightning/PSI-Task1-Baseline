@@ -30,7 +30,6 @@ def validate_intent(epoch, model, dataloader, args, recorder, writer):
             print(f"Epoch {epoch}/{args.epochs} | Batch {itern}/{niters}")
 
     recorder.eval_intent_epoch_calculate(writer)
-
     return recorder
 
 
