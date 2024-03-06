@@ -90,5 +90,11 @@ def get_opts():
                         help='frequency of test')
     parser.add_argument('--print_freq', type=int, default=10,
                         help='frequency of print')
+    parser.add_argument('--persist_dataloader', type=bool, default=True,
+                        help="persistent_workers in multi epochs dataloader")
+    parser.add_argument('--n_layers', type=int, default=4,
+                        help='number of layers in the model')
+    parser.add_argument('--tcn_kernel_size', type=int, default=4,
+                        help='kernel size of TCN')
 
     return parser.parse_args()

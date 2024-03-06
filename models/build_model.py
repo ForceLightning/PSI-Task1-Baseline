@@ -25,9 +25,9 @@ def get_tcn_intent_bbox(args):
         'dec_in_emb_dim': None,  # encoder output + bbox
         'dec_out_dim': 64,
         'output_dim': 1,  # intent prediction, output logits, add activation later
-        'n_layers': 4,
+        'n_layers': args.n_layers,
         'dropout': 0.125,
-        'kernel_size':4,
+        'kernel_size': args.kernel_size,
         'observe_length': args.observe_length,  # 15
         'predict_length': 1,  # only predict one intent
         'return_sequence': False,  # False for reason/intent/trust. True for trajectory

@@ -40,11 +40,13 @@ def main(args):
     val_accuracy = evaluate_intent(val_gt_file, args.checkpoint_path + '/results/val_intent_pred', args)
 
     # ''' 4. Test '''
-    test_gt_file = './test_gt/test_intent_gt.json'
-    if not os.path.exists(test_gt_file):
-        get_intent_gt(test_loader, test_gt_file, args)
-    predict_intent(model, test_loader, args, dset='test')
-    test_accuracy = evaluate_intent(test_gt_file, args.checkpoint_path + '/results/test_intent_pred', args)
+    test_accuracy = 0.0
+    if test_loader is not None:
+        test_gt_file = './test_gt/test_intent_gt.json'
+        if not os.path.exists(test_gt_file):
+            get_intent_gt(test_loader, test_gt_file, args)
+        predict_intent(model, test_loader, args, dset='test')
+        test_accuracy = evaluate_intent(test_gt_file, args.checkpoint_path + '/results/test_intent_pred', args)
 
     return val_accuracy, test_accuracy
 
@@ -53,6 +55,7 @@ if __name__ == '__main__':
     args = get_opts()
     # Task
     args.task_name = 'ped_intent'
+    args.persist_dataloader = True
 
     if args.task_name == 'ped_intent':
         args.database_file = 'intent_database_train.pkl'
@@ -98,9 +101,11 @@ if __name__ == '__main__':
 
     # Train
     hyperparameter_list = {
-        'lr': [1e-3,1e-2],
-        'batch_size': [64,128,256],
-        'epochs': [5,10,15]
+        'lr': [1e-4,3e-4,1e-3,3e-3],
+        'batch_size': [64,128,256,512,1024],
+        'epochs': [50],
+        'n_layers': [2,4,8],
+        'kernel_size': [2,4,8],
     }
 
     n_random_samples = 5
@@ -119,15 +124,19 @@ if __name__ == '__main__':
     best_val_accuracy = 0.0
     best_hyperparameters = None
 
+    checkpoint_path = args.checkpoint_path
+
     for params in parameter_samples:
         args.lr = params['lr']
         args.batch_size = params['batch_size']
         args.epochs = params['epochs']
+        args.kernel_size = params['kernel_size']
+        args.n_layers = params['n_layers']
 
         # Record
         now = datetime.now()
         time_folder = now.strftime('%Y%m%d%H%M%S')
-        args.checkpoint_path = os.path.join(args.checkpoint_path, args.task_name, args.dataset, args.model_name,
+        args.checkpoint_path = os.path.join(checkpoint_path, args.task_name, args.dataset, args.model_name,
                                             time_folder)
         if not os.path.exists(args.checkpoint_path):
             os.makedirs(args.checkpoint_path)
