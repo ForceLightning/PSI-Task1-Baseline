@@ -2,22 +2,27 @@
 """
 
 from __future__ import annotations
-from datetime import datetime
+
+import glob
 import json
 import os
+from datetime import datetime
 from typing import Any
 
 import numpy as np
-from sklearn.model_selection import ParameterSampler
 import torch
 import torch.nn as nn
+from sklearn.model_selection import ParameterSampler
 from torch.utils.tensorboard.writer import SummaryWriter
+from yolo_tracking.boxmot.utils import ROOT
+from yolo_tracking.tracking.track import run
 
+from data.custom_dataset import YoloDataset
 from data.prepare_data import get_dataloader
 from database.create_database import create_database
+from eval import get_test_traj_gt, predict_driving, predict_intent, predict_traj
 from models.build_model import build_model
 from opts import get_opts
-from eval import get_test_traj_gt, predict_driving, predict_intent, predict_traj
 from train import train_driving, train_intent, train_traj
 from utils.args import DefaultArguments
 from utils.evaluate_results import evaluate_driving, evaluate_intent, evaluate_traj
@@ -31,6 +36,15 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
     :param DefaultArguments args: The training arguments.
     :return: The validation score and test accuracy.
     """
+    # Set args.classes to 0 for pedestrian tracking
+    args.classes = 0
+
+    # Change args.source to the video source
+    args.source = os.path.join(os.getcwd(), "PSI2.0_Test", "videos", "video_0149.mp4")
+    run(args)
+
+    bbox_holder, frames_holder, video_id = consolidate_yolo_data()
+    save_data_to_txt(bbox_holder, frames_holder, video_id)
     writer = SummaryWriter(args.checkpoint_path, comment=args.comment)
     recorder = RecordResults(args)
     if "transformer" in args.model_name:  # handles "lag" in the sequence
@@ -43,6 +57,18 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
         print("Database exists!")
     train_loader, val_loader, test_loader = get_dataloader(args)
     args.steps_per_epoch = int(np.ceil(len(train_loader.dataset) / args.batch_size))
+
+    example_data = YoloDataset(os.path.join(ROOT, "yolo_results_data"))
+
+    # num_workers > 0 gives me error
+    example_loader = torch.utils.data.DataLoader(
+        example_data,
+        batch_size=args.batch_size,
+        shuffle=False,
+        pin_memory=True,
+        sampler=None,
+        num_workers=0,
+    )
 
     """ 2. Create models """
     model, optimizer, scheduler = build_model(args)
