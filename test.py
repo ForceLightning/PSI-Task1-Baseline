@@ -82,9 +82,12 @@ def predict_intent(model, dataloader, args, dset='test'):
                 dt[vid][pid][fid] = {}
             dt[vid][pid][fid]['intent'] = int_pred
             dt[vid][pid][fid]['intent_prob'] = int_prob
-
-    with open(os.path.join(args.checkpoint_path, 'results', f'{dset}_intent_pred'), 'w') as f:
-        json.dump(dt, f)
+    if dset == 'test':
+        with open(os.path.join(os.getcwd(), 'test_gt', f'{dset}_intent_pred'), 'w') as f:
+            json.dump(dt, f)
+    else:
+        with open(os.path.join(args.checkpoint_path, 'results', f'{dset}_intent_pred'), 'w') as f:
+            json.dump(dt, f)
 
 
 def validate_traj(epoch, model, dataloader, args, recorder, writer):

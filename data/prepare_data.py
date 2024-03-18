@@ -11,6 +11,7 @@ from data.custom_dataset import (
     MultiEpochsDataLoader,
 )
 from data.process_sequence import generate_data_sequence
+from yolo_tracking.boxmot.utils import ROOT
 
 
 def get_dataloader(args, shuffle_train=True, drop_last_train=True):
@@ -216,3 +217,69 @@ def get_tracks(data, seq_len, observed_seq_len, overlap, args):
         except:
             d[k] = np.array(tracks, dtype=object)
     return d
+
+def consolidate_yolo_data():
+        bbox_holder = {}
+        frames_holder = {}
+        yolo_data_folder = os.path.join(ROOT, "runs", "track", "exp" ,"labels")
+        file_list = os.listdir(yolo_data_folder)
+        # Sort in numerical order of the frames
+        sorted_list = sorted(file_list, key=lambda x: int(x.split('_')[-1].split('.')[0]))
+    
+        for file in sorted_list:
+            string = file.split("_")
+            video_id = string[0] + "_" + string[1]
+            frame_id = string[-1].split(".")[0]
+            result_file = os.path.join(yolo_data_folder, file)
+            with open(result_file, "r") as f:
+                lines = f.readlines()
+                for line in lines:
+                    elements = line.split(" ")
+                    x_center = float(elements[1])
+                    y_center = float(elements[2])
+                    width = float(elements[3])
+                    height = float(elements[4])
+
+                    xtl = x_center - width
+                    xbr = x_center + width
+                    ytl = y_center - height
+                    ybr = y_center + height
+
+                    # To prevent error when YOLO gives iffy predictions
+                    try:
+                        track_id = elements[5].strip()
+                        track_id = "track_" + track_id
+                        if track_id not in bbox_holder:
+                            bbox_holder[track_id] = [[xtl, ytl, xbr, ybr]]
+                        else:
+                            bbox_holder[track_id].append([xtl, ytl, xbr, ybr])
+                        if track_id not in frames_holder:
+                            frames_holder[track_id] = [frame_id]
+                        else:
+                            frames_holder[track_id].append(frame_id)
+                    except:
+                        pass
+        
+        return bbox_holder, frames_holder, video_id
+
+# Make folder with the data then create dataset from there
+def save_data_to_txt(bbox_dict, frames_dict, video_id):
+    data_folder = os.path.join(ROOT, "yolo_results_data") 
+    if not os.path.exists(data_folder):
+        os.makedirs(data_folder, exist_ok=True)
+    file_count = 0
+    for k, v in bbox_dict.items():
+        if len(v) >= 15:
+            for i in range(len(v) - 16 + 1):
+                file_name = os.path.join(data_folder, str(file_count + 1) + ".txt")
+                with open(file_name, "w") as f:
+                    f.write(video_id + '\t' + k + '\t' + str(v[i: i+16]))
+                file_count += 1
+    file_count = 0
+    for k, v in frames_dict.items():
+        if len(v) >= 15:
+            for i in range(len(v) - 16 + 1):
+                file_name = os.path.join(data_folder, str(file_count + 1) + ".txt")
+                with open(file_name, "a") as f:
+                    f.write('\t' + str(v[i: i+16]))
+                file_count += 1
