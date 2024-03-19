@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 from numpy import typing as npt
 from torch.utils.data import DataLoader
+import cv2
 
 from data.custom_dataset import (
     DrivingDecisionDataset,
@@ -315,7 +316,21 @@ def get_tracks(
     return d
 
 
-def consolidate_yolo_data():
+def get_video_dimensions(video_path):
+    # Open the video file
+    cap = cv2.VideoCapture(video_path)
+
+    # Get the video frame dimensions
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    # Release the video capture object
+    cap.release()
+
+    return width, height
+
+
+def consolidate_yolo_data(image_width, image_height):
     bbox_holder = {}
     frames_holder = {}
     yolo_data_folder = os.path.join(ROOT, "runs", "track", "exp", "labels")
@@ -337,10 +352,10 @@ def consolidate_yolo_data():
                 width = float(elements[3])
                 height = float(elements[4])
 
-                xtl = x_center - width
-                xbr = x_center + width
-                ytl = y_center - height
-                ybr = y_center + height
+                xtl = (x_center - width * 0.5) * image_width
+                xbr = (x_center + width * 0.5) * image_width
+                ytl = (y_center - height * 0.5) * image_height
+                ybr = (y_center + height * 0.5) * image_height
 
                 # To prevent error when YOLO gives iffy predictions
                 try:
@@ -381,4 +396,3 @@ def save_data_to_txt(bbox_dict, frames_dict, video_id):
                 with open(file_name, "a") as f:
                     f.write("\t" + str(v[i : i + 16]))
                 file_count += 1
-

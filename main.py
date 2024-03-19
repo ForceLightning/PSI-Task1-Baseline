@@ -17,8 +17,7 @@ from torch.utils.tensorboard.writer import SummaryWriter
 from yolo_tracking.boxmot.utils import ROOT
 from yolo_tracking.tracking.track import run
 
-from data.custom_dataset import YoloDataset
-from data.prepare_data import get_dataloader
+from data.prepare_data import get_dataloader, get_video_dimensions, save_data_to_txt
 from database.create_database import create_database
 from eval import get_test_traj_gt, predict_driving, predict_intent, predict_traj
 from models.build_model import build_model
@@ -40,10 +39,11 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
     args.classes = 0
 
     # Change args.source to the video source
-    args.source = os.path.join(os.getcwd(), "PSI2.0_Test", "videos", "video_0149.mp4")
+    args.source = os.path.join(os.getcwd(), "PSI2.0_Test", "videos", "video_0147.mp4")
+    width, height = get_video_dimensions(args.source)
     run(args)
 
-    bbox_holder, frames_holder, video_id = consolidate_yolo_data()
+    bbox_holder, frames_holder, video_id = consolidate_yolo_data(width, height)
     save_data_to_txt(bbox_holder, frames_holder, video_id)
     writer = SummaryWriter(args.checkpoint_path, comment=args.comment)
     recorder = RecordResults(args)
