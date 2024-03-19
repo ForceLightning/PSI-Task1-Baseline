@@ -4,7 +4,8 @@ import os
 import json
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
-from data.prepare_data import get_dataloader, consolidate_yolo_data, save_data_to_txt
+from data.prepare_data import get_dataloader, get_video_dimensions, \
+consolidate_yolo_data, save_data_to_txt
 from database.create_database import create_database
 from models.build_model import build_model
 from train import train_intent
@@ -34,10 +35,11 @@ def main(args):
     args.classes = 0
 
     # Change args.source to the video source
-    args.source = os.path.join(os.getcwd(), "PSI2.0_Test", "videos", "video_0149.mp4")
+    args.source = os.path.join(os.getcwd(), "PSI2.0_Test", "videos", "video_0147.mp4")
+    width, height = get_video_dimensions(args.source)
     run(args)
 
-    bbox_holder, frames_holder, video_id = consolidate_yolo_data()
+    bbox_holder, frames_holder, video_id = consolidate_yolo_data(width, height)
     save_data_to_txt(bbox_holder, frames_holder, video_id)    
 
     example_data = YoloDataset(os.path.join(ROOT, "yolo_results_data"))
@@ -67,7 +69,7 @@ def main(args):
     #     get_intent_gt(val_loader, val_gt_file, args)
     
     # Set dset to test to write results to test_gt folder for now
-    predict_intent(model,example_loader, args, dset='test')
+    predict_intent(model, example_loader, args, dset='test')
 
     # val_accuracy = evaluate_intent(val_gt_file, args.checkpoint_path + '/results/val_intent_pred', args)
 
