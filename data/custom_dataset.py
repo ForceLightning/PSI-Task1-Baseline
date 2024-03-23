@@ -1,16 +1,18 @@
 from __future__ import annotations
-import abc
-from copy import deepcopy
-import os
-from typing import Any, Literal, TypedDict
 
-import PIL
-from PIL import Image
+import abc
+import ast
+import os
+from copy import deepcopy
+from typing import Any, Generator, Literal, TypedDict
+
 import cv2
-from cv2 import typing as cvt
 import numpy as np
-from numpy import typing as npt
+import PIL
 import torch
+from cv2 import typing as cvt
+from numpy import typing as npt
+from PIL import Image
 from torch.utils.data import DataLoader, Dataset, Sampler
 from torchvision.transforms import v2
 from typing_extensions import override
@@ -863,6 +865,10 @@ class YoloDataset(Dataset):
                 frames = ast.literal_eval(elements[3])
                 frames = torch.tensor([int(frame) for frame in frames])
 
-        data = {"video_id": vid_id, "ped_id": ped_id, "bboxes": bbox, "frames": frames}
-        return data
-
+            data = {
+                "video_id": vid_id,
+                "ped_id": ped_id,
+                "bboxes": bbox,
+                "frames": frames,
+            }
+            return data

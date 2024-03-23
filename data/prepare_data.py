@@ -7,6 +7,7 @@ import numpy as np
 from numpy import typing as npt
 from torch.utils.data import DataLoader
 import cv2
+import ast
 
 from data.custom_dataset import (
     DrivingDecisionDataset,
@@ -317,6 +318,13 @@ def get_tracks(
 
 
 def get_video_dimensions(video_path):
+    """
+    Get height and width of the video
+
+    Args:
+    video_path : str
+        Path to the video
+    """
     # Open the video file
     cap = cv2.VideoCapture(video_path)
 
@@ -330,7 +338,16 @@ def get_video_dimensions(video_path):
     return width, height
 
 
-def consolidate_yolo_data(image_width, image_height):
+def consolidate_yolo_data(video_width, video_height):
+    """
+    Consolidate the output data from YOLO
+
+    Args:
+    video_width : int
+        Width of the video
+    video_height: int
+        Height of the height
+    """
     bbox_holder = {}
     frames_holder = {}
     yolo_data_folder = os.path.join(ROOT, "runs", "track", "exp", "labels")
@@ -352,10 +369,10 @@ def consolidate_yolo_data(image_width, image_height):
                 width = float(elements[3])
                 height = float(elements[4])
 
-                xtl = (x_center - width * 0.5) * image_width
-                xbr = (x_center + width * 0.5) * image_width
-                ytl = (y_center - height * 0.5) * image_height
-                ybr = (y_center + height * 0.5) * image_height
+                xtl = (x_center - width * 0.5) * video_width
+                xbr = (x_center + width * 0.5) * video_width
+                ytl = (y_center - height * 0.5) * video_height
+                ybr = (y_center + height * 0.5) * video_height
 
                 # To prevent error when YOLO gives iffy predictions
                 try:
@@ -377,6 +394,17 @@ def consolidate_yolo_data(image_width, image_height):
 
 # Make folder with the data then create dataset from there
 def save_data_to_txt(bbox_dict, frames_dict, video_id):
+    """
+    Make folder with the data then create dataset from there
+
+    Args:
+    bbox_dict : dict
+        Dictionary containing the ped_id and the bbox
+    frames_dict: dict
+        Dictionary containing the ped_id and the frames
+    video_id : str
+        The video id
+    """
     data_folder = os.path.join(ROOT, "yolo_results_data")
     if not os.path.exists(data_folder):
         os.makedirs(data_folder, exist_ok=True)
@@ -396,3 +424,51 @@ def save_data_to_txt(bbox_dict, frames_dict, video_id):
                 with open(file_name, "a") as f:
                     f.write("\t" + str(v[i : i + 16]))
                 file_count += 1
+
+
+def visualise_annotations(annotation_path, selected_frame):
+    """
+    Visualise the bounding boxes that are fed into TCN model for sanity check
+
+    Args:
+    annotation_path : str
+        path to text with labeling for Intent Prediction
+    selected_frame : int
+        The frame to visualise (0-14)
+    """
+    # Read annotations
+    with open(annotation_path, "r") as f:
+        annotations = f.readlines()
+
+    for ann in annotations:
+        elements = ann.split("\t")
+        vid_id = elements[0]
+        ped_id = elements[1]
+        bboxes = ast.literal_eval(elements[2])
+        bbox = bboxes[selected_frame]
+        xtl = int(bbox[0])
+        ytl = int(bbox[1])
+        xbr = int(bbox[2])
+        ybr = int(bbox[3])
+        frames = ast.literal_eval(elements[3])
+        frame = str(frames[selected_frame]).zfill(3)
+
+        # Load the image
+        image_path = os.path.join(os.getcwd(), "frames", vid_id, frame + ".jpg")
+        image = cv2.imread(image_path)
+
+        # Draw bounding box
+        cv2.rectangle(image, (xtl, ytl), (xbr, ybr), (255, 0, 0), 2)
+        cv2.putText(
+            img=image,
+            text=ped_id,
+            org=(xbr, ybr),
+            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+            fontScale=0.5,
+            color=(0, 0, 255),
+        )
+
+    # Display the image
+    cv2.imshow("Annotated Image", image)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
