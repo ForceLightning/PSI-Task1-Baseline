@@ -5,7 +5,7 @@ import json
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 from data.prepare_data import get_dataloader, get_video_dimensions, \
-consolidate_yolo_data, save_data_to_txt
+consolidate_yolo_data, save_data_to_txt, visualise_annotations
 from database.create_database import create_database
 from models.build_model import build_model
 from train import train_intent
@@ -34,8 +34,10 @@ def main(args):
     # Set args.classes to 0 for pedestrian tracking
     args.classes = 0
 
-    # Change args.source to the video source
+    # If video source source is from test
     args.source = os.path.join(os.getcwd(), "PSI2.0_Test", "videos", "video_0147.mp4")
+    # If video source is from val
+    # args.source = os.path.join(os.getcwd(), "PSI_Videos", "videos", "video_0120.mp4")
     width, height = get_video_dimensions(args.source)
     run(args)
 
@@ -70,6 +72,8 @@ def main(args):
     
     # Set dset to test to write results to test_gt folder for now
     predict_intent(model, example_loader, args, dset='test')
+    # Visualise specific bbox from specific frame fed into TCN for sanity check
+    visualise_annotations(os.path.join(ROOT, "yolo_results_data", "1.txt"), 0)
 
     # val_accuracy = evaluate_intent(val_gt_file, args.checkpoint_path + '/results/val_intent_pred', args)
 
