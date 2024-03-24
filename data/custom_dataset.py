@@ -554,7 +554,8 @@ class _RepeatSampler:
 class YoloDataset(Dataset):
         def __init__(self, dataset_path):
             self.dataset_path = dataset_path
-            self.yolo_results = os.listdir(self.dataset_path)
+            file_list = os.listdir(dataset_path)
+            self.yolo_results = sorted(file_list, key=lambda x: int(x.split('_')[-1].split('.')[0]))
 
         def __len__(self):
             return len(os.listdir(self.dataset_path))  
