@@ -22,6 +22,7 @@ from data.prepare_data import (
     get_video_dimensions,
     save_data_to_txt,
     visualise_annotations,
+    visualise_intent,
 )
 from database.create_database import create_database
 from eval import get_test_traj_gt, predict_driving, predict_intent, predict_traj
@@ -165,6 +166,12 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
                 # Visualise specific bbox from specific frame fed into TCN for sanity check
                 visualise_annotations(
                     os.path.join(ROOT, "yolo_results_data", "1.txt"), 0
+                )
+                visualise_intent(
+                    os.path.join(ROOT, "runs", "track", "exp", "labels"),
+                    os.path.join(os.getcwd(), "test_gt", "test_intent_pred"),
+                    width,
+                    height,
                 )
         case "ped_traj":
             train_traj(

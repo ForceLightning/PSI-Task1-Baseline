@@ -847,7 +847,10 @@ class _RepeatSampler:
 class YoloDataset(Dataset):
     def __init__(self, dataset_path):
         self.dataset_path = dataset_path
-        self.yolo_results = os.listdir(self.dataset_path)
+        file_list = os.listdir(dataset_path)
+        self.yolo_results = sorted(
+            file_list, key=lambda x: int(x.split("_")[-1].split(".")[0])
+        )
 
     def __len__(self):
         return len(os.listdir(self.dataset_path))
@@ -856,19 +859,19 @@ class YoloDataset(Dataset):
         result_file = os.path.join(self.dataset_path, self.yolo_results[idx])
         with open(result_file, "r") as f:
             lines = f.readlines()
-            for line in lines:
-                elements = line.split("\t")
-                vid_id = elements[0]
-                ped_id = elements[1]
-                bbox = ast.literal_eval(elements[2])
-                bbox = torch.tensor(bbox)
-                frames = ast.literal_eval(elements[3])
-                frames = torch.tensor([int(frame) for frame in frames])
+        for line in lines:
+            elements = line.split("\t")
+            vid_id = elements[0]
+            ped_id = elements[1]
+            bbox = ast.literal_eval(elements[2])
+            bbox = torch.tensor(bbox)
+            frames = ast.literal_eval(elements[3])
+            frames = torch.tensor([int(frame) for frame in frames])
 
-            data = {
-                "video_id": vid_id,
-                "ped_id": ped_id,
-                "bboxes": bbox,
-                "frames": frames,
-            }
-            return data
+    data = {
+        "video_id": vid_id,
+        "ped_id": ped_id,
+        "bboxes": bbox,
+        "frames": frames,
+    }
+    return data

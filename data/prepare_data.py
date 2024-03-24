@@ -328,6 +328,11 @@ def get_video_dimensions(video_path):
     # Open the video file
     cap = cv2.VideoCapture(video_path)
 
+    # Check if the video file was successfully opened
+    if not cap.isOpened():
+        print("Error: Unable to open video file")
+        return None, None
+
     # Get the video frame dimensions
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -411,18 +416,18 @@ def save_data_to_txt(bbox_dict, frames_dict, video_id):
     file_count = 0
     for k, v in bbox_dict.items():
         if len(v) >= 15:
-            for i in range(len(v) - 16 + 1):
+            for i in range(len(v) - 15 + 1):
                 file_name = os.path.join(data_folder, str(file_count + 1) + ".txt")
                 with open(file_name, "w") as f:
-                    f.write(video_id + "\t" + k + "\t" + str(v[i : i + 16]))
+                    f.write(video_id + "\t" + k + "\t" + str(v[i : i + 15]))
                 file_count += 1
     file_count = 0
     for k, v in frames_dict.items():
         if len(v) >= 15:
-            for i in range(len(v) - 16 + 1):
+            for i in range(len(v) - 15 + 1):
                 file_name = os.path.join(data_folder, str(file_count + 1) + ".txt")
                 with open(file_name, "a") as f:
-                    f.write("\t" + str(v[i : i + 16]))
+                    f.write("\t" + str(v[i : i + 15]))
                 file_count += 1
 
 
@@ -472,3 +477,84 @@ def visualise_annotations(annotation_path, selected_frame):
     cv2.imshow("Annotated Image", image)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
+
+
+def visualise_intent(annotation_path, intent_path, video_width, video_height):
+    """
+    Visualise the pedestrian intent (Bbox is 1 frame behind)
+
+    Args:
+    intent_path : str
+        path to text with labeling for Intent Prediction
+    """
+
+    with open(intent_path, "r") as f:
+        intent_results = f.read()
+
+    # Parse JSON data
+    parsed_data = json.loads(intent_results)
+
+    # Loop through the JSON data and extract number and intent for each track
+    for vid_id, tracks in parsed_data.items():
+        print("Video:", vid_id)
+        for track, frames in tracks.items():
+            print("Track:", track)
+            for frame, details in frames.items():
+                yolo_frame = int(frame) - 1
+                with open(
+                    annotation_path + "\\" + vid_id + "_" + str(yolo_frame) + ".txt",
+                    "r",
+                ) as f:
+                    annotations = f.readlines()
+                for ann in annotations:
+                    element = ann.split(" ")
+                    if ("track_" + element[5].strip()) == track:
+                        x_center = float(element[1])
+                        y_center = float(element[2])
+                        width = float(element[3])
+                        height = float(element[4])
+                        xtl = (x_center - width * 0.5) * video_width
+                        xbr = (x_center + width * 0.5) * video_width
+                        ytl = (y_center - height * 0.5) * video_height
+                        ybr = (y_center + height * 0.5) * video_height
+
+                        frame = frame.zfill(3)
+                        intent = details["intent"]
+                        image_path = os.path.join(
+                            os.getcwd(), "frames", vid_id, frame + ".jpg"
+                        )
+                        image = cv2.imread(image_path)
+                        print(
+                            "GT Frame:",
+                            frame,
+                            "| Intent:",
+                            intent,
+                            "| Bbox Frame:",
+                            yolo_frame,
+                        )
+                        cv2.rectangle(
+                            image,
+                            (int(xtl), int(ytl)),
+                            (int(xbr), int(ybr)),
+                            (255, 0, 0),
+                            2,
+                        )
+                        cv2.putText(
+                            img=image,
+                            text=str(intent),
+                            org=(int(xbr), int(ybr)),
+                            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                            fontScale=1,
+                            color=(0, 0, 255),
+                        )
+                        cv2.putText(
+                            img=image,
+                            text=track,
+                            org=(int(xbr), int(ytl)),
+                            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                            fontScale=1,
+                            color=(0, 0, 255),
+                        )
+                        cv2.imshow("Annotated Image", image)
+                        cv2.waitKey(0)
+                        cv2.destroyAllWindows()
