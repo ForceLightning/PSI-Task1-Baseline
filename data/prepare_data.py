@@ -484,8 +484,14 @@ def visualise_intent(annotation_path, intent_path, video_width, video_height):
     Visualise the pedestrian intent (Bbox is 1 frame behind)
 
     Args:
+    annotation_path: str
+        path to text with yolo_annotation
     intent_path : str
         path to text with labeling for Intent Prediction
+    video_width : int
+        Width of the video
+    video_height: int
+        Height of the height    
     """
 
     with open(intent_path, "r") as f:
@@ -494,7 +500,7 @@ def visualise_intent(annotation_path, intent_path, video_width, video_height):
     # Parse JSON data
     parsed_data = json.loads(intent_results)
 
-    # Loop through the JSON data and extract number and intent for each track
+    # Loop through the JSON data and extract frame and intent for each track
     for vid_id, tracks in parsed_data.items():
         print("Video:", vid_id)
         for track, frames in tracks.items():
