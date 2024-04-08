@@ -13,8 +13,6 @@ from data.custom_dataset import (
     MultiEpochsDataLoader,
 )
 from data.process_sequence import generate_data_sequence
-from yolo_tracking.boxmot.utils import ROOT
-
 
 def get_dataloader(args, shuffle_train=True, drop_last_train=True):
     task = args.task_name.split("_")[1]
@@ -245,7 +243,7 @@ def get_video_dimensions(video_path):
 
     return width, height
 
-def consolidate_yolo_data(video_width, video_height):
+def consolidate_yolo_data(video_id):
     """
     Consolidate the output data from YOLO
 
@@ -257,44 +255,41 @@ def consolidate_yolo_data(video_width, video_height):
     """
     bbox_holder = {}
     frames_holder = {}
-    yolo_data_folder = os.path.join(ROOT, "runs", "track", "exp" ,"labels")
-    file_list = os.listdir(yolo_data_folder)
-    # Sort in numerical order of the frames
-    sorted_list = sorted(file_list, key=lambda x: int(x.split('_')[-1].split('.')[0]))
+    yolo_data = os.path.join(os.getcwd(), video_id + ".txt")
 
-    for file in sorted_list:
-        string = file.split("_")
-        video_id = string[0] + "_" + string[1]
-        frame_id = string[-1].split(".")[0]
-        result_file = os.path.join(yolo_data_folder, file)
-        with open(result_file, "r") as f:
-            lines = f.readlines()
-            for line in lines:
-                elements = line.split(" ")
-                x_center = float(elements[1])
-                y_center = float(elements[2])
-                width = float(elements[3])
-                height = float(elements[4])
+    with open(yolo_data, "r") as f:
+        lines = f.readlines()
+        for line in lines:
+            elements = line.split(" ")
+            track_id = elements[0]
+            x1 = float(elements[1])
+            y1 = float(elements[2])
+            x2 = float(elements[3])
+            y2 = float(elements[4])
+            frame_id = elements[-1].strip()
 
-                xtl = (x_center - width * 0.5) * video_width
-                xbr = (x_center + width * 0.5) * video_width
-                ytl = (y_center - height * 0.5) * video_height
-                ybr = (y_center + height * 0.5) * video_height
-
-                # To prevent error when YOLO gives iffy predictions
-                try:
-                    track_id = elements[5].strip()
-                    track_id = "track_" + track_id
-                    if track_id not in bbox_holder:
-                        bbox_holder[track_id] = [[xtl, ytl, xbr, ybr]]
-                    else:
-                        bbox_holder[track_id].append([xtl, ytl, xbr, ybr])
-                    if track_id not in frames_holder:
-                        frames_holder[track_id] = [frame_id]
-                    else:
-                        frames_holder[track_id].append(frame_id)
-                except:
-                    pass
+            if track_id not in bbox_holder:
+                bbox_holder[track_id] = [[x1, y1, x2, y2]]
+            else:
+                bbox_holder[track_id].append([x1, y1, x2, y2])
+            if track_id not in frames_holder:
+                    frames_holder[track_id] = [frame_id]
+            else:
+                frames_holder[track_id].append(frame_id)
+            # To prevent error when YOLO gives iffy predictions
+            # try:
+            #     track_id = elements[5].strip()
+            #     track_id = "track_" + track_id
+            #     if track_id not in bbox_holder:
+            #         bbox_holder[track_id] = [[xtl, ytl, xbr, ybr]]
+            #     else:
+            #         bbox_holder[track_id].append([xtl, ytl, xbr, ybr])
+            #     if track_id not in frames_holder:
+            #         frames_holder[track_id] = [frame_id]
+            #     else:
+            #         frames_holder[track_id].append(frame_id)
+            # except:
+            #     pass
     
     return bbox_holder, frames_holder, video_id
  
@@ -310,7 +305,7 @@ def save_data_to_txt(bbox_dict, frames_dict, video_id):
     video_id : str
         The video id
     """
-    data_folder = os.path.join(ROOT, "yolo_results_data") 
+    data_folder = os.path.join(os.getcwd(), "yolo_results_data") 
     if not os.path.exists(data_folder):
         os.makedirs(data_folder, exist_ok=True)
     file_count = 0
@@ -376,7 +371,7 @@ def visualise_annotations(annotation_path, selected_frame):
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-def visualise_intent(annotation_path, intent_path, video_width, video_height):
+def visualise_intent(annotation_path, intent_path):
     """
     Visualise the pedestrian intent (Bbox is 1 frame behind)
 
@@ -403,20 +398,17 @@ def visualise_intent(annotation_path, intent_path, video_width, video_height):
         for track, frames in tracks.items():
             print("Track:", track)
             for frame, details in frames.items():
-                yolo_frame = int(frame) - 1
-                with open(annotation_path + "\\" + vid_id + "_" + str(yolo_frame) + ".txt", 'r') as f:
+                yolo_frame = int(frame) 
+                with open(annotation_path, 'r') as f:
                     annotations = f.readlines()
                 for ann in annotations:
                     element = ann.split(" ")
-                    if ("track_" + element[5].strip()) == track: 
-                        x_center = float(element[1])
-                        y_center = float(element[2])
-                        width = float(element[3])
-                        height = float(element[4])
-                        xtl = (x_center - width * 0.5) * video_width
-                        xbr = (x_center + width * 0.5) * video_width
-                        ytl = (y_center - height * 0.5) * video_height
-                        ybr = (y_center + height * 0.5) * video_height
+
+                    if ("track_" + element[0]) == track and element[-1].strip() == frame: 
+                        xtl = float(element[1])
+                        ytl = float(element[2])
+                        xbr = float(element[3])
+                        ybr = float(element[4])
 
                         frame = frame.zfill(3)
                         intent = details["intent"]

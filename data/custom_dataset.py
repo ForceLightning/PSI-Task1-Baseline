@@ -567,7 +567,7 @@ class YoloDataset(Dataset):
             for line in lines:
                 elements = line.split("\t")
                 vid_id = elements[0]
-                ped_id = elements[1]
+                ped_id = "track_" + elements[1]
                 bbox = ast.literal_eval(elements[2])
                 bbox = torch.tensor(bbox)
                 frames = ast.literal_eval(elements[3])

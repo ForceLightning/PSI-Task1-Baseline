@@ -17,8 +17,11 @@ from sklearn.model_selection import ParameterSampler
 import numpy as np
 import glob
 import torch
-from yolo_tracking.tracking.track import run
-from yolo_tracking.boxmot.utils import ROOT
+import cv2
+from pathlib import Path
+from ultralytics import YOLO
+
+from boxmot import DeepOCSORT
 from data.custom_dataset import YoloDataset
 
 def main(args):
@@ -36,19 +39,78 @@ def main(args):
 
     # If video source source is from test
     args.source = os.path.join(os.getcwd(), "PSI2.0_Test", "videos", "video_0147.mp4")
+    
     # If video source is from val
-    # args.source = os.path.join(os.getcwd(), "PSI_Videos", "videos", "video_0120.mp4")
-    width, height = get_video_dimensions(args.source)
-    run(args)
+    # args.source = os.path.join(os.getcwd(), "PSI_Videos", "videos", "video_0111.mp4")
+    file_name = args.source.split("\\")[-1].split(".")[0]
+    
+    model = YOLO("yolov8s.pt")
+    tracker = DeepOCSORT(
+    model_weights=Path('osnet_x0_25_msmt17.pt'), # which ReID model to use
+    device='cuda:0',
+    fp16=False,
+    )
+    
+    # This tracking process can be functionised when got time
+    vid = cv2.VideoCapture(args.source)
 
-    bbox_holder, frames_holder, video_id = consolidate_yolo_data(width, height)
+    frame_number = 0
+    while True:
+        ret, im = vid.read()
+
+        if not ret :
+            break
+        
+        # Increment frame number
+        frame_number += 1
+
+        result = model.predict(im, classes=[0], verbose=False)
+
+        dets = []
+        result = result[0]
+        
+        for box in result.boxes:
+            cls = int(box.cls[0].item())
+            cords = box.xyxy[0].tolist()
+            conf = box.conf[0].item()
+            id = box.id
+            dets.append([cords[0], cords[1], cords[2], cords[3], conf, cls])
+                
+        dets = np.array(dets)
+
+        if len(dets) == 0:
+            dets = np.empty((0, 6))
+            
+        tracking_results = tracker.update(dets, im) 
+        if len(tracking_results) > 0:
+            x1 = tracking_results[0][0]
+            y1 = tracking_results[0][1]
+            x2 = tracking_results[0][2]
+            y2 = tracking_results[0][3]
+            id = tracking_results[0][4]
+            conf = tracking_results[0][5]
+            cls = tracking_results[0][6]
+            with open(file_name + ".txt", 'a') as f:
+                f.write(f"{int(id)} {x1} {y1} {x2} {y2} {conf} {int(cls)} {frame_number}\n")
+                
+        tracker.plot_results(im, show_trajectories=False)
+        
+        # break on pressing q or space
+    #     cv2.imshow('BoxMOT detection', im)     
+    #     key = cv2.waitKey(1) & 0xFF
+    #     if key == ord(' ') or key == ord('q'):
+    #         break
+
+    # vid.release()
+    # cv2.destroyAllWindows()
+
+    bbox_holder, frames_holder, video_id = consolidate_yolo_data(file_name)
     save_data_to_txt(bbox_holder, frames_holder, video_id)    
 
-    example_data = YoloDataset(os.path.join(ROOT, "yolo_results_data"))
+    example_data = YoloDataset(os.path.join(os.getcwd(), "yolo_results_data"))
 
-    # num_workers > 0 gives me error 
     example_loader = torch.utils.data.DataLoader(example_data, batch_size=args.batch_size, shuffle=False,
-                                           pin_memory=True, sampler=None, num_workers=0)
+                                           pin_memory=True, sampler=None, num_workers=4)
 
     ''' 2. Create models '''
     # model, optimizer, scheduler = build_model(args)
@@ -73,10 +135,9 @@ def main(args):
     # Set dset to test to write results to test_gt folder for now
     predict_intent(model, example_loader, args, dset='test')
     # Visualise specific bbox from specific frame fed into TCN for sanity check
-    visualise_annotations(os.path.join(ROOT, "yolo_results_data", "1.txt"), 0)
-    visualise_intent(os.path.join(ROOT, "runs", "track", "exp" ,"labels"),
-                    os.path.join(os.getcwd(), "test_gt", "test_intent_pred"),
-                    width, height)
+    # visualise_annotations(os.path.join(os.getcwd(), "yolo_results_data", "1.txt"), 0)
+    visualise_intent(os.path.join(os.getcwd(), file_name + ".txt"),
+                    os.path.join(os.getcwd(), "test_gt", "test_intent_pred"))
 
     # val_accuracy = evaluate_intent(val_gt_file, args.checkpoint_path + '/results/val_intent_pred', args)
 
