@@ -1,6 +1,5 @@
 import argparse
 from pathlib import Path
-from yolo_tracking.boxmot.utils import ROOT, WEIGHTS
 
 
 def get_opts() -> argparse.Namespace:

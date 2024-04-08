@@ -7,6 +7,7 @@ import glob
 import json
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -14,6 +15,7 @@ import torch
 import torch.nn as nn
 from sklearn.model_selection import ParameterSampler
 from torch.utils.tensorboard.writer import SummaryWriter
+from ultralytics import YOLO
 from yolo_tracking.boxmot.utils import ROOT
 from yolo_tracking.tracking.track import run
 
@@ -46,6 +48,15 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
 
     # If video source source is from test
     args.source = os.path.join(os.getcwd(), "PSI2.0_Test", "videos", "video_0147.mp4")
+
+    file_name = args.source.split("\\")[-1].split(".")[0]
+
+    model = YOLO("yolov8s.pt")
+    tracker = DeepOCSORT(
+        model_weights=Path("osnet_x0_25_msmt17.pt"),  # which ReID model to use
+        device="cuda:0",
+        fp16=False,
+    )
     # If video source is from val
     # args.source = os.path.join(os.getcwd(), "PSI_Videos", "videos", "video_0120.mp4")
     width, height = get_video_dimensions(args.source)
