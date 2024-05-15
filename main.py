@@ -2,21 +2,26 @@ import glob
 import json
 import os
 from datetime import datetime
-from test import predict_intent, test_intent, validate_intent
+from test import (
+    predict_intent,
+    test_intent,
+    validate_intent,
+    predict_traj,
+    get_test_traj_gt,
+)
 
 import numpy as np
 import torch.nn as nn
+from data.prepare_data import get_dataloader
+from database.create_database import create_database
 from models.build_model import build_model
 from opts import get_opts
 from sklearn.model_selection import ParameterSampler
 from torch.utils.tensorboard import SummaryWriter
-from train import train_intent
-from utils.evaluate_results import evaluate_intent
+from train import train_intent, train_traj, train_driving
+from utils.evaluate_results import evaluate_intent, evaluate_traj
 from utils.get_test_intent_gt import get_intent_gt
 from utils.log import RecordResults
-
-from data.prepare_data import get_dataloader
-from database.create_database import create_database
 
 
 def main(args):
@@ -34,18 +39,52 @@ def main(args):
     model = nn.DataParallel(model)
 
     # ''' 3. Train '''
-    train_intent(
-        model, optimizer, scheduler, train_loader, val_loader, args, recorder, writer
-    )
+    if args.task_name == "ped_intent":
+        train_intent(
+            model,
+            optimizer,
+            scheduler,
+            train_loader,
+            val_loader,
+            args,
+            recorder,
+            writer,
+        )
+        val_gt_file = "./test_gt/val_intent_gt.json"
+        if not os.path.exists(val_gt_file):
+            get_intent_gt(val_loader, val_gt_file, args)
+        predict_intent(model, val_loader, args, dset="val")
+        val_accuracy, val_f1, val_mAcc = evaluate_intent(
+            val_gt_file, args.checkpoint_path + "/results/val_intent_pred", args
+        )
+        metrics = {
+            "hparam/val_accuracy": val_accuracy,
+            "hparam/val_f1": val_f1,
+            "hparam/val_mAcc": val_mAcc,
+        }
 
-    val_gt_file = "./test_gt/val_intent_gt.json"
-    if not os.path.exists(val_gt_file):
-        get_intent_gt(val_loader, val_gt_file, args)
-    predict_intent(model, val_loader, args, dset="val")
-    val_accuracy, val_f1, val_mAcc = evaluate_intent(
-        val_gt_file, args.checkpoint_path + "/results/val_intent_pred", args
-    )
-    
+    elif args.task_name == "ped_traj":
+        train_traj(
+            model,
+            optimizer,
+            scheduler,
+            train_loader,
+            val_loader,
+            args,
+            recorder,
+            writer,
+        )
+        val_gt_file = "./test_gt/val_traj_gt.json"
+        if not os.path.exists(val_gt_file):
+            get_test_traj_gt(model, val_loader, args, dset="val")
+        predict_traj(model, val_loader, args, dset="val")
+        score = evaluate_traj(
+            val_gt_file, args.checkpoint_path + "/results/val_traj_pred.json", args
+        )
+        metrics = {
+            "hparam/val_score": score
+        }
+
     hparams = {
         "lr": args.lr,
         "batch_size": args.batch_size,
@@ -53,15 +92,8 @@ def main(args):
         "kernel_size": args.kernel_size,
         "n_layers": args.n_layers,
     }
-    metrics = {
-        "hparam/val_accuracy": val_accuracy,
-        "hparam/val_f1": val_f1,
-        "hparam/val_mAcc": val_mAcc,
-    }
 
     writer.add_hparams(hparam_dict=hparams, metric_dict=metrics)
-
-
 
     # ''' 4. Test '''
     test_accuracy = 0.0
@@ -81,7 +113,7 @@ if __name__ == "__main__":
     # /home/scott/Work/Toyota/PSI_Competition/Dataset
     args = get_opts()
     # Task
-    args.task_name = "ped_intent"
+    args.task_name = "ped_traj"
     args.persist_dataloader = True
 
     if args.task_name == "ped_intent":
@@ -124,7 +156,8 @@ if __name__ == "__main__":
 
     # Model
     args.model_name = (
-        "tcn_int_bbox"  # LSTM module, with bboxes sequence as input, to predict intent
+        # "tcn_int_bbox"  # LSTM module, with bboxes sequence as input, to predict intent
+        "tcn_traj_bbox"
     )
     args.load_image = False  # only bbox sequence as input
     if args.load_image:
@@ -135,11 +168,17 @@ if __name__ == "__main__":
         args.freeze_backbone = False
 
     # Train
+    # hyperparameter_list = {
+    #     "lr": [1e-4, 3e-4, 1e-3, 3e-3],
+    #     "batch_size": [64, 128, 256, 512, 1024],
+    #     "epochs": [50],
+    #     "n_layers-kernel_size": [(2, 8), (3, 3), (4, 2)],
+    # }
     hyperparameter_list = {
-        "lr": [1e-4, 3e-4, 1e-3, 3e-3],
-        "batch_size": [64, 128, 256, 512, 1024],
+        "lr": [3e-3],
+        "batch_size": [256],
         "epochs": [50],
-        "n_layers-kernel_size": [(2, 8), (4, 4), (8, 2)],
+        "n_layers-kernel_size": [(4, 2)],
     }
 
     n_random_samples = 60
@@ -148,7 +187,7 @@ if __name__ == "__main__":
         ParameterSampler(hyperparameter_list, n_iter=n_random_samples)
     )
 
-    args.loss_weights = {"loss_intent": 1.0, "loss_traj": 0.0, "loss_driving": 0.0}
+    args.loss_weights = {"loss_intent": 0.0, "loss_traj": 1.0, "loss_driving": 0.0}
     args.val_freq = 1
     args.test_freq = 1
     args.print_freq = 10
@@ -172,7 +211,9 @@ if __name__ == "__main__":
         )
         if not os.path.exists(args.checkpoint_path):
             os.makedirs(args.checkpoint_path)
-        with open(os.path.join(args.checkpoint_path, "args.txt"), "w") as f:
+        with open(
+            os.path.join(args.checkpoint_path, "args.txt"), "w", encoding="utf-8"
+        ) as f:
             json.dump(args.__dict__, f, indent=4)
 
         result_path = os.path.join(args.checkpoint_path, "results")

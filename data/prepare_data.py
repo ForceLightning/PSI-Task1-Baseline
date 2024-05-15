@@ -48,6 +48,10 @@ def get_dataloader(args, shuffle_train=True, drop_last_train=True):
             train_dataset = PedestrianIntentDataset(train_d, args)
             val_dataset = PedestrianIntentDataset(val_d, args)
             test_dataset = PedestrianIntentDataset(test_d, args)
+        case "ped_traj":
+            train_dataset = PedestrianIntentDataset(train_d, args)
+            val_dataset = PedestrianIntentDataset(val_d, args)
+            test_dataset = PedestrianIntentDataset(test_d, args)
         case _:
             raise NotImplementedError
     print(len(train_dataset), len(val_dataset), len(test_dataset))

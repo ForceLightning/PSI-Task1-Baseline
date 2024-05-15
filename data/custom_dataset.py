@@ -424,6 +424,8 @@ class PedestrianIntentDataset(VideoDataset):
             if self.args.task_name == "ped_intent" or self.args.task_name == "ped_traj":
                 bboxes[frame] = [xtl, ytl, xrb, yrb]
 
+        original_bboxes = bboxes
+
         match (self.args.normalize_bbox):
             case "L2":
                 raise NotImplementedError("L2 normalization not implemented yet")
@@ -437,6 +439,7 @@ class PedestrianIntentDataset(VideoDataset):
             "local_featmaps": local_featmaps,
             "reason_features": reason_features,
             "bboxes": bboxes,
+            "original_bboxes": original_bboxes,
             "intention_binary": intention_binary,
             "intention_prob": intention_prob,
             "frames": np.array([int(frame) for frame in frame_list]),
