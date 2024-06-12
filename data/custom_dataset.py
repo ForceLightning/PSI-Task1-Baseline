@@ -25,6 +25,9 @@ class VideoDataset(Dataset):
     def __getitem__(self, index: int) -> dict:
         raise NotImplementedError("Method not implemented")
 
+    def __len__(self):
+        return len(self.data["frame"])
+
     def load_images(
         self, video_ids: list, frame_list: list, bboxes: list
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -406,16 +409,17 @@ class PedestrianIntentDataset(VideoDataset):
         bboxes = self.data["bbox"][index]
         intention_binary = self.data["intention_binary"][index]
         intention_prob = self.data["intention_prob"][index]
+        images = self.load_images(video_ids[0], frame_list)  # load iamges
 
         disagree_score = self.data["disagree_score"][index]
 
         assert len(bboxes) == self.args.max_track_size
         assert len(frame_list) == self.args.observe_length
 
-        global_featmaps, local_featmaps = self.load_features(
-            video_ids, ped_ids, frame_list
-        )
-        reason_features = self.load_reason_features(video_ids, ped_ids, frame_list)
+        # global_featmaps, local_featmaps = self.load_features(
+        # video_ids, ped_ids, frame_list
+        # )
+        # reason_features = self.load_reason_features(video_ids, ped_ids, frame_list)
 
         for frame in range(len(frame_list)):
             bbox = bboxes[frame]
@@ -435,9 +439,10 @@ class PedestrianIntentDataset(VideoDataset):
                 pass
 
         data = {
-            "global_featmaps": global_featmaps,
-            "local_featmaps": local_featmaps,
-            "reason_features": reason_features,
+            # "global_featmaps": global_featmaps,
+            # "local_featmaps": local_featmaps,
+            # "reason_features": reason_features,
+            "image": images,
             "bboxes": bboxes,
             "original_bboxes": original_bboxes,
             "intention_binary": intention_binary,
@@ -450,8 +455,28 @@ class PedestrianIntentDataset(VideoDataset):
 
         return data
 
-    def __len__(self):
-        return len(self.data["frame"])
+    def load_images(self, video_name: str, frame_list: list) -> torch.Tensor:
+        images = []
+
+        for frame_id in frame_list:
+            # load original image
+            img_path = os.path.join(
+                self.images_path, video_name, str(frame_id).zfill(3) + ".jpg"
+            )
+            # print(img_path)
+            img = self.rgb_loader(img_path)
+            # print(img.shape) #1280 x 720
+            # Image.fromarray(img).show()
+            # img.shape: H x W x C, RGB channel
+            # crop pedestrian surrounding image
+
+            if self.transform:
+                # print("before transform - img: ", img.shape)
+                img = self.transform(img)
+                # After transform, changed to tensor, img.shape: C x H x W
+            images.append(img)
+
+        return torch.stack(images, dim=0)
 
 
 class DrivingDecisionDataset(VideoDataset):
@@ -466,6 +491,7 @@ class DrivingDecisionDataset(VideoDataset):
             : self.args.observe_length
         ]  # return first 15 frames as observed
         data = {}
+        bboxes = self.data["bbox"][index]
         data["video_id"] = [video_ids[0]]
         data["frames"] = frame_list  # 15 observed frames
         data["image"] = self.load_images(video_ids[0], frame_list)  # load iamges
@@ -481,9 +507,26 @@ class DrivingDecisionDataset(VideoDataset):
         data["label_direction_prob"] = self.data["driving_direction_prob"][index][
             self.args.observe_length
         ]  # only return 16-th label, 3-class one-hot
-        data["description"] = self.data["description"][index][
-            self.args.observe_length
-        ]  # only return 16-th label, 3-class one-hot
+        # data["description"] = self.data["description"][index][
+        #     self.args.observe_length
+        # ]  # only return 16-th label, 3-class one-hot
+        for frame in range(len(frame_list)):
+            bbox = bboxes[frame]
+            xtl, ytl, xrb, yrb = bbox  # xtl: x top left, xrb: x right bottom
+            bboxes[frame] = [xtl, ytl, xrb, yrb]
+
+        original_bboxes = bboxes
+
+        match (self.args.normalize_bbox):
+            case "L2":
+                raise NotImplementedError("L2 normalization not implemented yet")
+            case "subtract_first_frame":
+                bboxes = bboxes - bboxes[:1, :]
+            case _:
+                pass
+
+        data["bboxes"] = bboxes
+        data["original_bboxes"] = original_bboxes
 
         return data
 

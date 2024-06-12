@@ -35,7 +35,7 @@ def get_dataloader(args, shuffle_train=True, drop_last_train=True):
     train_d = get_train_val_data(
         train_seq, args, overlap=args.seq_overlap_rate
     )  # returned tracks
-    val_d = get_train_val_data(val_seq, args, overlap=args.test_seq_overlap_rate)
+    val_d = get_train_val_data(val_seq, args, overlap=args.seq_overlap_rate)
     test_d = get_test_data(test_seq, args, overlap=args.test_seq_overlap_rate)
 
     # Create video dataset and dataloader
@@ -61,7 +61,7 @@ def get_dataloader(args, shuffle_train=True, drop_last_train=True):
             train_dataset,
             batch_size=args.batch_size,
             shuffle=shuffle_train,
-            pin_memory=True,
+            # pin_memory=True,
             sampler=None,
             drop_last=drop_last_train,
             num_workers=4,
@@ -70,16 +70,16 @@ def get_dataloader(args, shuffle_train=True, drop_last_train=True):
             val_dataset,
             batch_size=args.batch_size,
             shuffle=False,
-            pin_memory=True,
+            # pin_memory=True,
             sampler=None,
             drop_last=False,
-            num_workers=8,
+            num_workers=4,
         )
         test_loader = torch.utils.data.DataLoader(
             test_dataset,
             batch_size=args.batch_size,
             shuffle=False,
-            pin_memory=True,
+            # pin_memory=True,
             sampler=None,
             drop_last=False,
             num_workers=4,
@@ -89,7 +89,7 @@ def get_dataloader(args, shuffle_train=True, drop_last_train=True):
             train_dataset,
             batch_size=args.batch_size,
             shuffle=shuffle_train,
-            pin_memory=True,
+            # pin_memory=True,
             sampler=None,
             drop_last=drop_last_train,
             num_workers=4,
@@ -99,7 +99,7 @@ def get_dataloader(args, shuffle_train=True, drop_last_train=True):
             val_dataset,
             batch_size=args.batch_size,
             shuffle=False,
-            pin_memory=True,
+            # pin_memory=True,
             sampler=None,
             drop_last=False,
             num_workers=4,

@@ -105,3 +105,27 @@ class TCNTrajBbox(nn.Module):
     def _reset_parameters(self):
         nn.init.xavier_uniform_(self.fc.weight)
         self.fc.bias.data.fill_(0)
+
+
+class TCNTrajBboxInt(TCNTrajBbox):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(self, data):
+        bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
+        intent = data["intention_prob"][:, : self.args.observe_length].type(FloatTensor)
+        intent = intent.unsqueeze(2)
+        assert bbox.shape[1] == self.args.observe_length
+        assert intent.shape[1] == self.args.observe_length
+        # enc_input = bbox
+        enc_input = torch.cat([bbox, intent], dim=2)
+
+        tcn_output = self.tcn(enc_input.transpose(1, 2)).transpose(1, 2)
+        tcn_last_output = tcn_output[:, -1:, :]
+
+        output = self.fc(tcn_last_output)  # bs x output_dim * predict_length
+        output = self.activation(output).reshape(
+            -1, self.predict_length, self.output_dim
+        )
+        return output
+        

@@ -2,12 +2,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
+
 # import torchvision.transforms as transforms
 
 cuda = True if torch.cuda.is_available() else False
 device = torch.device("cuda:0" if cuda else "cpu")
 FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
+
 
 class ResLSTMDrivingGlobal(nn.Module):
     def __init__(self, args, model_opts):
@@ -37,14 +39,29 @@ class ResLSTMDrivingGlobal(nn.Module):
         RNN_FC_dim = 256
 
         # Create model
-        self.cnn_encoder = ResCNNEncoder(fc_hidden1=CNN_fc_hidden1, fc_hidden2=CNN_fc_hidden2, drop_p=dropout_p,
-                                    CNN_embed_dim=CNN_embed_dim).to(device)
+        self.cnn_encoder = ResCNNEncoder(
+            fc_hidden1=CNN_fc_hidden1,
+            fc_hidden2=CNN_fc_hidden2,
+            drop_p=dropout_p,
+            CNN_embed_dim=CNN_embed_dim,
+        ).to(device)
         num_pred_class = 3
-        self.rnn_decoder_speed = DecoderRNN(CNN_embed_dim=CNN_embed_dim, h_RNN_layers=RNN_hidden_layers, h_RNN=RNN_hidden_nodes,
-                                h_FC_dim=RNN_FC_dim, drop_p=dropout_p, num_classes=num_pred_class).to(device)
-        self.rnn_decoder_dir = DecoderRNN(CNN_embed_dim=CNN_embed_dim, h_RNN_layers=RNN_hidden_layers,
-                                h_RNN=RNN_hidden_nodes, h_FC_dim=RNN_FC_dim, drop_p=dropout_p, num_classes=num_pred_class).to(device)
-
+        self.rnn_decoder_speed = DecoderRNN(
+            CNN_embed_dim=CNN_embed_dim,
+            h_RNN_layers=RNN_hidden_layers,
+            h_RNN=RNN_hidden_nodes,
+            h_FC_dim=RNN_FC_dim,
+            drop_p=dropout_p,
+            num_classes=num_pred_class,
+        ).to(device)
+        self.rnn_decoder_dir = DecoderRNN(
+            CNN_embed_dim=CNN_embed_dim,
+            h_RNN_layers=RNN_hidden_layers,
+            h_RNN=RNN_hidden_nodes,
+            h_FC_dim=RNN_FC_dim,
+            drop_p=dropout_p,
+            num_classes=num_pred_class,
+        ).to(device)
 
         # if model_opts['output_activation'] == 'tanh':
         #     self.activation = nn.Tanh()
@@ -53,14 +70,17 @@ class ResLSTMDrivingGlobal(nn.Module):
         # else:
         #     self.activation = nn.Identity()
 
-        self.module_list = [self.cnn_encoder, self.rnn_decoder_speed, self.rnn_decoder_dir]
+        self.module_list = [
+            self.cnn_encoder,
+            self.rnn_decoder_speed,
+            self.rnn_decoder_dir,
+        ]
         # self.intent_embedding = 'int' in self.args.model_name
         # self.reason_embedding = 'rsn' in self.args.model_name
         # self.speed_embedding = 'speed' in self.args.model_name
 
     def forward(self, data):
-        images = data['image'] # bs x ts x c x h x w
-
+        images = data["image"]  # bs x ts x c x h x w
 
         visual_feats = self.cnn_encoder(images)
         pred_speed = self.rnn_decoder_speed(visual_feats)
@@ -119,14 +139,13 @@ class ResLSTMDrivingGlobal(nn.Module):
         #         else:
         #             param.requres_grad = False
 
-
         for module in self.module_list:
-            param_group += [{'params': module.parameters(), 'lr': learning_rate}]
+            param_group += [{"params": module.parameters(), "lr": learning_rate}]
 
         optimizer = torch.optim.Adam(param_group, lr=args.lr, eps=1e-7)
 
         for param_group in optimizer.param_groups:
-            param_group['lr0'] = param_group['lr']
+            param_group["lr0"] = param_group["lr"]
 
         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
         # self.optimizer = optimizer
@@ -136,12 +155,11 @@ class ResLSTMDrivingGlobal(nn.Module):
     def lr_scheduler(self, optimizer, cur_epoch, args, gamma=10, power=0.75):
         decay = (1 + gamma * cur_epoch / args.epochs) ** (-power)
         for param_group in optimizer.param_groups:
-            param_group['lr'] = param_group['lr0'] * decay
-            param_group['weight_decay'] = 1e-3
-            param_group['momentum'] = 0.9
-            param_group['nesterov'] = True
+            param_group["lr"] = param_group["lr0"] * decay
+            param_group["weight_decay"] = 1e-3
+            param_group["momentum"] = 0.9
+            param_group["nesterov"] = True
         return
-
 
     def _reset_parameters(self):
         # Original Transformer initialization, see PyTorch documentation
@@ -167,7 +185,7 @@ class ResCNNEncoder(nn.Module):
         self.bn2 = nn.BatchNorm1d(fc_hidden2, momentum=0.01)
         self.fc3 = nn.Linear(fc_hidden2, CNN_embed_dim)
 
-    def forward(self, x_3d): # Input: bs x ts x C x H x W
+    def forward(self, x_3d):  # Input: bs x ts x C x H x W
         cnn_embed_seq = []
         for t in range(x_3d.size(1)):
             # ResNet CNN
@@ -193,7 +211,15 @@ class ResCNNEncoder(nn.Module):
 
 
 class DecoderRNN(nn.Module):
-    def __init__(self, CNN_embed_dim=300, h_RNN_layers=3, h_RNN=256, h_FC_dim=128, drop_p=0.3, num_classes=3):
+    def __init__(
+        self,
+        CNN_embed_dim=300,
+        h_RNN_layers=3,
+        h_RNN=256,
+        h_FC_dim=128,
+        drop_p=0.3,
+        num_classes=3,
+    ):
         super(DecoderRNN, self).__init__()
 
         self.RNN_input_size = CNN_embed_dim
@@ -226,3 +252,4 @@ class DecoderRNN(nn.Module):
         x = self.fc2(x)
 
         return x
+

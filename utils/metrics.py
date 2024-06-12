@@ -1,59 +1,69 @@
-from sklearn.metrics import mean_squared_error, confusion_matrix, classification_report, accuracy_score, f1_score
+from sklearn.metrics import (
+    mean_squared_error,
+    confusion_matrix,
+    classification_report,
+    accuracy_score,
+    f1_score,
+)
 import numpy as np
 from scipy.special import softmax
 from scipy.special import expit as sigmoid
 import torch.nn.functional as F
 
+
 def evaluate_intent(target, target_prob, prediction, args):
-    '''
+    """
     Here we only predict one 'intention' for one track (15 frame observation). (not a sequence as before)
     :param target: (bs x 1), hard label; target_prob: soft probability, 0-1, agreement mean([0, 0.5, 1]).
     :param prediction: (bs), sigmoid probability, 1-dim, should use 0.5 as threshold
     :return:
-    '''
+    """
     print("Evaluating Intent ...")
     results = {
-        'MSE': 0,
-        'Acc': 0,
-        'F1': 0,
-        'mAcc': 0,
-        'ConfusionMatrix': [[]],
+        "MSE": 0,
+        "Acc": 0,
+        "F1": 0,
+        "mAcc": 0,
+        "ConfusionMatrix": [[]],
     }
 
     bs = target.shape[0]
     # lbl_target = np.argmax(target, axis=-1) # bs x ts
-    lbl_target = target # bs
+    lbl_target = target  # bs
     lbl_taeget_prob = target_prob
-    lbl_pred = np.round(prediction) # bs, use 0.5 as threshold
+    lbl_pred = np.round(prediction)  # bs, use 0.5 as threshold
 
     MSE = np.mean(np.square(lbl_taeget_prob - prediction))
     # hard label evaluation - acc, f1
-    Acc = accuracy_score(lbl_target, lbl_pred) # calculate acc for all samples
-    F1 = f1_score(lbl_target, lbl_pred, average='macro')
+    Acc = accuracy_score(lbl_target, lbl_pred)  # calculate acc for all samples
+    F1 = f1_score(lbl_target, lbl_pred, average="macro")
 
     intent_matrix = confusion_matrix(lbl_target, lbl_pred)  # [2 x 2]
-    intent_cls_acc = np.array(intent_matrix.diagonal() / intent_matrix.sum(axis=-1)) # 2
+    intent_cls_acc = np.array(
+        intent_matrix.diagonal() / intent_matrix.sum(axis=-1)
+    )  # 2
     intent_cls_mean_acc = intent_cls_acc.mean(axis=0)
 
-    results['MSE'] = MSE
-    results['Acc'] = Acc
-    results['F1'] = F1
-    results['mAcc'] = intent_cls_mean_acc
-    results['ConfusionMatrix'] = intent_matrix
+    results["MSE"] = MSE
+    results["Acc"] = Acc
+    results["F1"] = F1
+    results["mAcc"] = intent_cls_mean_acc
+    results["ConfusionMatrix"] = intent_matrix
 
     return results
 
+
 def evaluate_traj(target, prediction, args):
-    '''
+    """
     :param target: (n_samples x ts x 4), original size coordinates. Notice: the 1st dimension is not batch-size
     :param prediction: (n_samples x ts x 4), directly predict coordinates
     :return:
-    '''
+    """
     print("Evaluating Trajectory ...")
     target = np.array(target)
     prediction = np.array(prediction)
     assert target.shape[1] == args.predict_length
-    assert target.shape[2] == 4 # bbox
+    assert target.shape[2] == 4  # bbox
     assert prediction.shape[1] == args.predict_length
     assert prediction.shape[2] == 4
     results = {
@@ -61,16 +71,16 @@ def evaluate_traj(target, prediction, args):
         # 'Bbox_FMSE': {'0.5': 0, '1.0': 0, '1.5': 0},
         # 'Center_MSE': {'0.5': 0, '1.0': 0, '1.5': 0},
         # 'Center_FMSE': {'0.5': 0, '1.0': 0, '1.5': 0},
-        'ADE': {'0.5': 0, '1.0': 0, '1.5': 0}, # center
-        'FDE': {'0.5': 0, '1.0': 0, '1.5': 0}, # center
-        'ARB': {'0.5': 0, '1.0': 0, '1.5': 0}, # bbox - B: bbox
-        'FRB': {'0.5': 0, '1.0': 0, '1.5': 0}, # bbox - B: bbox
+        "ADE": {"0.5": 0, "1.0": 0, "1.5": 0},  # center
+        "FDE": {"0.5": 0, "1.0": 0, "1.5": 0},  # center
+        "ARB": {"0.5": 0, "1.0": 0, "1.5": 0},  # bbox - B: bbox
+        "FRB": {"0.5": 0, "1.0": 0, "1.5": 0},  # bbox - B: bbox
     }
     bs, ts, _ = target.shape
     # Correct error of calculating RMSE of bbox for ARB and FRB
     # performance_MSE = np.square(target - prediction).sum(axis=2)  # n_samples x ts x 4 --> bs x ts
     performance_MSE = np.square(target - prediction).mean(axis=2)
-    performance_RMSE = np.sqrt(performance_MSE)  #bs x ts
+    performance_RMSE = np.sqrt(performance_MSE)  # bs x ts
     for t in [0.5, 1.0, 1.5]:
         end_frame = int(t * args.fps)
         # 1. bbox MSE
@@ -79,9 +89,9 @@ def evaluate_traj(target, prediction, args):
         # results['Bbox_FMSE'][str(t)] = performance_MSE[:, end_frame-1].mean(axis=None)
 
         # 5. ARB - bbox
-        results['ARB'][str(t)] = performance_RMSE[:, :end_frame].mean(axis=None)
+        results["ARB"][str(t)] = performance_RMSE[:, :end_frame].mean(axis=None)
         # 6. FRB - bbox
-        results['FRB'][str(t)] = performance_RMSE[:, end_frame - 1].mean(axis=None)
+        results["FRB"][str(t)] = performance_RMSE[:, end_frame - 1].mean(axis=None)
 
     # centers
     center_target = np.zeros((bs, ts, 2))
@@ -93,8 +103,10 @@ def evaluate_traj(target, prediction, args):
             center_pred[i, j, 0] = (prediction[i, j, 0] + prediction[i, j, 2]) / 2
             center_pred[i, j, 1] = (prediction[i, j, 1] + prediction[i, j, 3]) / 2
 
-    performance_CMSE = np.square(center_target - center_pred).sum(axis=2) # bs x ts x 4 --> bs x ts
-    performance_CRMSE = np.sqrt(performance_CMSE)  #bs x ts
+    performance_CMSE = np.square(center_target - center_pred).sum(
+        axis=2
+    )  # bs x ts x 4 --> bs x ts
+    performance_CRMSE = np.sqrt(performance_CMSE)  # bs x ts
 
     for t in [0.5, 1.0, 1.5]:
         end_frame = int(t * args.fps)
@@ -103,37 +115,45 @@ def evaluate_traj(target, prediction, args):
         # # 4. C_FMSE
         # results['Center_FMSE'][str(t)] = performance_CMSE[:, end_frame-1].mean(axis=None)
         # 7. ADE - center
-        results['ADE'][str(t)] = performance_CRMSE[:, : end_frame].mean(axis=None)
+        results["ADE"][str(t)] = performance_CRMSE[:, :end_frame].mean(axis=None)
         # 8. FDE - center
-        results['FDE'][str(t)] = performance_CRMSE[:, end_frame - 1].mean(axis=None)
+        results["FDE"][str(t)] = performance_CRMSE[:, end_frame - 1].mean(axis=None)
 
     return results
 
+
 def evaluate_driving(target_speed, target_dir, pred_speed, pred_dir, args):
-    results = {'speed_Acc': 0, 'speed_mAcc': 0, 'direction_Acc': 0, 'direction_mAcc': 0}
+    results = {
+        "speed_Acc": 0.0,
+        "speed_mAcc": 0.0,
+        "speed_confusion_matrix": None,
+        "direction_Acc": 0,
+        "direction_mAcc": 0,
+        "dir_confusion_matrix": None,
+    }
     print("Evaluating Driving Decision Prediction ...")
 
     bs = target_speed.shape[0]
-    results['speed_Acc'] = accuracy_score(target_speed, pred_speed)
-    results['direction_Acc'] = accuracy_score(target_dir, pred_dir)
+    results["speed_Acc"] = accuracy_score(target_speed, pred_speed)
+    results["direction_Acc"] = accuracy_score(target_dir, pred_dir)
 
     speed_matrix = confusion_matrix(target_speed, pred_speed)
-    results['speed_confusion_matrix'] = speed_matrix
+    results["speed_confusion_matrix"] = speed_matrix
     sum_cnt = speed_matrix.sum(axis=1)
     sum_cnt = np.array([max(1, i) for i in sum_cnt])
     speed_cls_wise_acc = speed_matrix.diagonal() / sum_cnt
-    results['speed_mAcc'] = np.mean(speed_cls_wise_acc)
+    results["speed_mAcc"] = np.mean(speed_cls_wise_acc)
 
     dir_matrix = confusion_matrix(target_dir, pred_dir)
-    results['dir_confusion_matrix'] = dir_matrix
+    results["dir_confusion_matrix"] = dir_matrix
     sum_cnt = dir_matrix.sum(axis=1)
     sum_cnt = np.array([max(1, i) for i in sum_cnt])
     dir_cls_wise_acc = dir_matrix.diagonal() / sum_cnt
-    results['dir_mAcc'] = np.mean(dir_cls_wise_acc)
-
+    results["dir_mAcc"] = np.mean(dir_cls_wise_acc)
 
     return results
 
+
 def shannon(data):
-    shannon = -np.sum(data*np.log2(data))
+    shannon = -np.sum(data * np.log2(data))
     return shannon

@@ -1,26 +1,29 @@
+from datetime import datetime
 import glob
 import json
 import os
-from datetime import datetime
-from test import (
-    predict_intent,
-    test_intent,
-    validate_intent,
-    predict_traj,
-    get_test_traj_gt,
-)
+import traceback
 
 import numpy as np
+from sklearn.model_selection import ParameterSampler
+from test import (
+    get_test_traj_gt,
+    predict_intent,
+    predict_traj,
+    test_intent,
+    validate_intent,
+)
+import torch
 import torch.nn as nn
+from torch.utils.tensorboard import SummaryWriter
+
 from data.prepare_data import get_dataloader
 from database.create_database import create_database
 from models.build_model import build_model
 from opts import get_opts
-from sklearn.model_selection import ParameterSampler
-from torch.utils.tensorboard import SummaryWriter
-from train import train_intent, train_traj, train_driving
-from utils.evaluate_results import evaluate_intent, evaluate_traj
-from utils.get_test_intent_gt import get_intent_gt
+from train import train_driving, train_intent, train_traj
+from utils.evaluate_results import evaluate_driving, evaluate_intent, evaluate_traj
+from utils.get_test_intent_gt import get_intent_gt, get_test_driving_gt
 from utils.log import RecordResults
 
 
@@ -37,53 +40,81 @@ def main(args):
     """ 2. Create models """
     model, optimizer, scheduler = build_model(args)
     model = nn.DataParallel(model)
+    metrics = {}
 
     # ''' 3. Train '''
-    if args.task_name == "ped_intent":
-        train_intent(
-            model,
-            optimizer,
-            scheduler,
-            train_loader,
-            val_loader,
-            args,
-            recorder,
-            writer,
-        )
-        val_gt_file = "./test_gt/val_intent_gt.json"
-        if not os.path.exists(val_gt_file):
-            get_intent_gt(val_loader, val_gt_file, args)
-        predict_intent(model, val_loader, args, dset="val")
-        val_accuracy, val_f1, val_mAcc = evaluate_intent(
-            val_gt_file, args.checkpoint_path + "/results/val_intent_pred", args
-        )
-        metrics = {
-            "hparam/val_accuracy": val_accuracy,
-            "hparam/val_f1": val_f1,
-            "hparam/val_mAcc": val_mAcc,
-        }
+    match args.task_name:
+        case "ped_intent":
+            train_intent(
+                model,
+                optimizer,
+                scheduler,
+                train_loader,
+                val_loader,
+                args,
+                recorder,
+                writer,
+            )
+            val_gt_file = "./test_gt/val_intent_gt.json"
+            if not os.path.exists(val_gt_file):
+                get_intent_gt(val_loader, val_gt_file, args)
+            predict_intent(model, val_loader, args, dset="val")
+            val_accuracy, val_f1, val_mAcc = evaluate_intent(
+                val_gt_file, args.checkpoint_path + "/results/val_intent_pred", args
+            )
+            metrics = {
+                "hparam/val_accuracy": val_accuracy,
+                "hparam/val_f1": val_f1,
+                "hparam/val_mAcc": val_mAcc,
+            }
+        case "ped_traj":
+            try:
+                train_traj(
+                    model,
+                    optimizer,
+                    scheduler,
+                    train_loader,
+                    val_loader,
+                    args,
+                    recorder,
+                    writer,
+                )
+                val_gt_file = "./test_gt/val_traj_gt.json"
+                if not os.path.exists(val_gt_file):
+                    get_test_traj_gt(model, val_loader, args, dset="val")
+                predict_traj(model, val_loader, args, dset="val")
+                score = evaluate_traj(
+                    val_gt_file,
+                    args.checkpoint_path + "/results/val_traj_pred.json",
+                    args,
+                )
+                metrics = {"hparam/val_score": score}
+            except RuntimeError as e:
+                # TODO(chris): Figure out what is going on here.
+                print(torch.cuda.memory_summary(device="cuda:0", abbreviated=False))
+                print(f"{type(e)} {str(e)}\n{traceback.format_exc()}")
 
-    elif args.task_name == "ped_traj":
-        train_traj(
-            model,
-            optimizer,
-            scheduler,
-            train_loader,
-            val_loader,
-            args,
-            recorder,
-            writer,
-        )
-        val_gt_file = "./test_gt/val_traj_gt.json"
-        if not os.path.exists(val_gt_file):
-            get_test_traj_gt(model, val_loader, args, dset="val")
-        predict_traj(model, val_loader, args, dset="val")
-        score = evaluate_traj(
-            val_gt_file, args.checkpoint_path + "/results/val_traj_pred.json", args
-        )
-        metrics = {
-            "hparam/val_score": score
-        }
+        case "driving_decision":
+            train_driving(
+                model,
+                optimizer,
+                scheduler,
+                train_loader,
+                val_loader,
+                args,
+                recorder,
+                writer,
+            )
+
+            val_gt_file = "./test_gt/val_driving_gt.json"
+            if not os.path.exists(val_gt_file):
+                get_test_driving_gt(model, val_loader, args, dset="val")
+            score = evaluate_driving(
+                val_gt_file,
+                args.checkpoint_path + "/results/val_driving_pred.json",
+                args,
+            )
+            metrics = {"hparam/val_score": score}
 
     hparams = {
         "lr": args.lr,
@@ -106,60 +137,81 @@ def main(args):
             test_gt_file, args.checkpoint_path + "/results/test_intent_pred", args
         )
 
-    return val_accuracy, test_accuracy
+    return metrics
 
 
 if __name__ == "__main__":
     # /home/scott/Work/Toyota/PSI_Competition/Dataset
     args = get_opts()
     # Task
-    args.task_name = "ped_traj"
+    args.task_name = args.task_name if args.task_name else "ped_traj"
     args.persist_dataloader = True
 
-    if args.task_name == "ped_intent":
-        args.database_file = "intent_database_train.pkl"
-        args.intent_model = True
+    match args.task_name:
+        case "ped_intent":
+            args.database_file = "intent_database_train.pkl"
+            args.intent_model = True
+            args.batch_size = [256]
+            # intent prediction
+            args.intent_num = 2  # 3 for 'major' vote; 2 for mean intent
+            args.intent_type = "mean"  # >= 0.5 --> 1 (cross); < 0.5 --> 0 (not cross)
+            args.intent_loss = ["bce"]
+            args.intent_disagreement = (
+                1  # -1: not use disagreement 1: use disagreement to reweigh samples
+            )
+            args.intent_positive_weight = (
+                0.5  # Reweigh BCE loss of 0/1, 0.5 = count(-1) / count(1)
+            )
+            args.predict_length = 1  # only make one intent prediction
+            args.model_name = "tcn_int_bbox"
+            args.loss_weights = {
+                "loss_intent": 1.0,
+                "loss_traj": 0.0,
+                "loss_driving": 0.0,
+            }
+            args.load_image = True
+            args.seq_overlap_rate = 1  # overlap rate for train/val set
+            args.test_seq_overlap_rate = 1  # overlap for test set. if == 1, means overlap is one frame, following PIE
+        case "ped_traj":
+            args.database_file = "traj_database_train.pkl"
+            args.intent_model = False  # if (or not) use intent prediction module to support trajectory prediction
+            args.traj_model = True
+            args.traj_loss = ["bbox_l1"]
+            # args.batch_size = [256]
+            args.batch_size = [144]
+            args.predict_length = 45
+            # args.model_name = "tcn_traj_bbox"
+            # args.model_name = "tcn_traj_bbox_int"
+            args.model_name = "tcn_traj_global"
+            args.loss_weights = {
+                "loss_intent": 0.0,
+                "loss_traj": 1.0,
+                "loss_driving": 0.0,
+            }
+            args.load_image = True
+            args.seq_overlap_rate = 1  # overlap rate for train/val set
+            args.test_seq_overlap_rate = 1  # overlap for test set. if == 1, means overlap is one frame, following PIE
+        case "driving_decision":
+            args.database_file = "driving_database_train.pkl"
+            args.driving_loss = ["cross_entropy"]
+            args.batch_size = [64]
+            args.model_name = "reslstm_driving_global"
+            args.loss_weights = {
+                "loss_intent": 0.0,
+                "loss_traj": 0.0,
+                "loss_driving": 1.0,
+            }
+            args.load_image = True
+            args.seq_overlap_rate = 0.1  # overlap rate for train/val set
+            args.test_seq_overlap_rate = 1  # overlap for test set. if == 1, means overlap is one frame, following PIE
 
-    # intent prediction
-    args.intent_num = 2  # 3 for 'major' vote; 2 for mean intent
-    args.intent_type = "mean"  # >= 0.5 --> 1 (cross); < 0.5 --> 0 (not cross)
-    args.intent_loss = ["bce"]
-    args.intent_disagreement = (
-        1  # -1: not use disagreement 1: use disagreement to reweigh samples
-    )
-    args.intent_positive_weight = (
-        0.5  # Reweigh BCE loss of 0/1, 0.5 = count(-1) / count(1)
-    )
-
-    # trajectory
-    if args.task_name == "ped_traj":
-        args.database_file = "traj_database_train.pkl"
-        args.intent_model = False  # if (or not) use intent prediction module to support trajectory prediction
-        args.traj_model = True
-        args.traj_loss = ["bbox_l1"]
-
-    args.seq_overlap_rate = 0.9  # overlap rate for trian/val set
-    args.test_seq_overlap_rate = (
-        1  # overlap for test set. if == 1, means overlap is one frame, following PIE
-    )
     args.observe_length = 15
-    if args.task_name == "ped_intent":
-        args.predict_length = 1  # only make one intent prediction
-    elif args.task_name == "ped_traj":
-        args.predict_length = 45
-
     args.max_track_size = args.observe_length + args.predict_length
     args.crop_mode = "enlarge"
     args.normalize_bbox = None
     # 'subtract_first_frame' #here use None, so the traj bboxes output loss is based on origianl coordinates
     # [None (paper results) | center | L2 | subtract_first_frame (good for evidential) | divide_image_size]
 
-    # Model
-    args.model_name = (
-        # "tcn_int_bbox"  # LSTM module, with bboxes sequence as input, to predict intent
-        "tcn_traj_bbox"
-    )
-    args.load_image = False  # only bbox sequence as input
     if args.load_image:
         args.backbone = "resnet"
         args.freeze_backbone = False
@@ -176,7 +228,7 @@ if __name__ == "__main__":
     # }
     hyperparameter_list = {
         "lr": [3e-3],
-        "batch_size": [256],
+        "batch_size": args.batch_size,
         "epochs": [50],
         "n_layers-kernel_size": [(4, 2)],
     }
@@ -187,7 +239,6 @@ if __name__ == "__main__":
         ParameterSampler(hyperparameter_list, n_iter=n_random_samples)
     )
 
-    args.loss_weights = {"loss_intent": 0.0, "loss_traj": 1.0, "loss_driving": 0.0}
     args.val_freq = 1
     args.test_freq = 1
     args.print_freq = 10
