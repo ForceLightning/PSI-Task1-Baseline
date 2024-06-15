@@ -15,7 +15,7 @@ from test import (
 )
 import torch
 import torch.nn as nn
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard.writer import SummaryWriter
 
 from data.prepare_data import get_dataloader
 from database.create_database import create_database
@@ -27,7 +27,7 @@ from utils.get_test_intent_gt import get_intent_gt, get_test_driving_gt
 from utils.log import RecordResults
 
 
-def main(args):
+def main(args) -> tuple[float, float]:
     writer = SummaryWriter(args.checkpoint_path)
     recorder = RecordResults(args)
     """ 1. Load database """
@@ -43,6 +43,7 @@ def main(args):
     metrics = {}
 
     # ''' 3. Train '''
+    val_score, test_acc = 0.0, 0.0
     match args.task_name:
         case "ped_intent":
             train_intent(
@@ -59,14 +60,29 @@ def main(args):
             if not os.path.exists(val_gt_file):
                 get_intent_gt(val_loader, val_gt_file, args)
             predict_intent(model, val_loader, args, dset="val")
-            val_accuracy, val_f1, val_mAcc = evaluate_intent(
+            val_score, val_f1, val_mAcc = evaluate_intent(
                 val_gt_file, args.checkpoint_path + "/results/val_intent_pred", args
             )
             metrics = {
-                "hparam/val_accuracy": val_accuracy,
+                "hparam/val_accuracy": val_score,
                 "hparam/val_f1": val_f1,
                 "hparam/val_mAcc": val_mAcc,
             }
+
+            # ''' 4. Test '''
+            if test_loader is not None:
+                test_gt_file = "./test_gt/test_intent_gt.json"
+                if not os.path.exists(test_gt_file):
+                    get_intent_gt(test_loader, test_gt_file, args)
+                predict_intent(model, test_loader, args, dset="test")
+                test_acc, test_f1, test_mAcc = evaluate_intent(
+                    test_gt_file,
+                    args.checkpoint_path + "/results/test_intent_pred",
+                    args,
+                )
+                metrics["hparam/test_accuracy"] = test_acc
+                metrics["hparam/test_f1"] = test_f1
+                metrics["hparam/test_mAcc"] = test_mAcc
         case "ped_traj":
             try:
                 train_traj(
@@ -83,14 +99,15 @@ def main(args):
                 if not os.path.exists(val_gt_file):
                     get_test_traj_gt(model, val_loader, args, dset="val")
                 predict_traj(model, val_loader, args, dset="val")
-                score = evaluate_traj(
+                val_score = evaluate_traj(
                     val_gt_file,
                     args.checkpoint_path + "/results/val_traj_pred.json",
                     args,
                 )
-                metrics = {"hparam/val_score": score}
+                metrics = {"hparam/val_score": val_score}
             except RuntimeError as e:
                 # TODO(chris): Figure out what is going on here.
+                # ! It appears to have something to do with setting `pin_memory=True` for the dataloaders.
                 print(torch.cuda.memory_summary(device="cuda:0", abbreviated=False))
                 print(f"{type(e)} {str(e)}\n{traceback.format_exc()}")
 
@@ -109,12 +126,12 @@ def main(args):
             val_gt_file = "./test_gt/val_driving_gt.json"
             if not os.path.exists(val_gt_file):
                 get_test_driving_gt(model, val_loader, args, dset="val")
-            score = evaluate_driving(
+            val_score = evaluate_driving(
                 val_gt_file,
                 args.checkpoint_path + "/results/val_driving_pred.json",
                 args,
             )
-            metrics = {"hparam/val_score": score}
+            metrics = {"hparam/val_score": val_score}
 
     hparams = {
         "lr": args.lr,
@@ -126,18 +143,7 @@ def main(args):
 
     writer.add_hparams(hparam_dict=hparams, metric_dict=metrics)
 
-    # ''' 4. Test '''
-    test_accuracy = 0.0
-    if test_loader is not None:
-        test_gt_file = "./test_gt/test_intent_gt.json"
-        if not os.path.exists(test_gt_file):
-            get_intent_gt(test_loader, test_gt_file, args)
-        predict_intent(model, test_loader, args, dset="test")
-        test_accuracy = evaluate_intent(
-            test_gt_file, args.checkpoint_path + "/results/test_intent_pred", args
-        )
-
-    return metrics
+    return val_score, test_acc
 
 
 if __name__ == "__main__":
@@ -189,6 +195,8 @@ if __name__ == "__main__":
                 "loss_driving": 0.0,
             }
             args.load_image = True
+            args.backbone = "resnet50"
+            args.freeze_backbone = True
             args.seq_overlap_rate = 1  # overlap rate for train/val set
             args.test_seq_overlap_rate = 1  # overlap for test set. if == 1, means overlap is one frame, following PIE
         case "driving_decision":
@@ -212,12 +220,12 @@ if __name__ == "__main__":
     # 'subtract_first_frame' #here use None, so the traj bboxes output loss is based on origianl coordinates
     # [None (paper results) | center | L2 | subtract_first_frame (good for evidential) | divide_image_size]
 
-    if args.load_image:
-        args.backbone = "resnet"
-        args.freeze_backbone = False
-    else:
-        args.backbone = None
-        args.freeze_backbone = False
+    # if args.load_image:
+    # args.backbone = "resnet"
+    # args.freeze_backbone = False
+    # else:
+    # args.backbone = None
+    # args.freeze_backbone = False
 
     # Train
     # hyperparameter_list = {
@@ -257,15 +265,34 @@ if __name__ == "__main__":
         # Record
         now = datetime.now()
         time_folder = now.strftime("%Y%m%d%H%M%S")
-        args.checkpoint_path = os.path.join(
-            checkpoint_path, args.task_name, args.dataset, args.model_name, time_folder
-        )
+        if args.checkpoint_path == "./ckpts" and args.resume == "":
+            args.checkpoint_path = os.path.join(
+                checkpoint_path,
+                args.task_name,
+                args.dataset,
+                args.model_name,
+                time_folder,
+            )
+        elif args.checkpoint_path == "./ckpts":
+            args.checkpoint_path = os.path.dirname(args.resume)
+        elif args.checkpoint_path != "./ckpts" and args.resume != "":
+            assert os.path.abspath(args.checkpoint_path) == os.path.abspath(
+                os.path.dirname(args.resume)
+            ), f"checkpoint path and resume path directories do not match, {os.path.abspath(args.checkpoint_path)}, {os.path.abspath(os.path.dirname(args.resume))}"
+
+        print(f"Checkpoint path: {args.checkpoint_path}")
         if not os.path.exists(args.checkpoint_path):
             os.makedirs(args.checkpoint_path)
-        with open(
-            os.path.join(args.checkpoint_path, "args.txt"), "w", encoding="utf-8"
-        ) as f:
-            json.dump(args.__dict__, f, indent=4)
+            with open(
+                os.path.join(args.checkpoint_path, "args.txt"), "w", encoding="utf-8"
+            ) as f:
+                json.dump(args.__dict__, f, indent=4)
+        else:
+            # Load arguments if resume is provided.
+            with open(
+                os.path.join(args.checkpoint_path, "args.txt"), "r", encoding="utf-8"
+            ) as f:
+                args.__dict__ = json.load(f)
 
         result_path = os.path.join(args.checkpoint_path, "results")
         if not os.path.isdir(result_path):

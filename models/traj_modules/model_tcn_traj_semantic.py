@@ -14,6 +14,7 @@ LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
 
 # TODO(chris): Rename file to model_tcn_traj_global.py
 
+
 class TCNTrajGlobal(nn.Module):
     def __init__(self, args, model_opts) -> None:
         super().__init__()
@@ -38,7 +39,7 @@ class TCNTrajGlobal(nn.Module):
         TCN_skip_connections = model_opts.get("use_skip_connections", False)
 
         self.cnn_encoder = ResCNNEncoder(
-            CNN_fc_hidden1, CNN_fc_hidden2, dropout_p, CNN_embed_dim
+            CNN_fc_hidden1, CNN_fc_hidden2, dropout_p, CNN_embed_dim, args
         )
         self.tcn = TemporalConvNet(
             num_inputs=CNN_embed_dim + TCN_enc_in_dim,
@@ -70,15 +71,23 @@ class TCNTrajGlobal(nn.Module):
         self.speed_embedding = "speed" in self.args.model_name
 
     def forward(self, data):
-        images = data["image"][:, : self.args.observe_length, :, :, :].type(FloatTensor)
+        visual_feats = None
+        if self.args.freeze_backbone:
+            visual_embeddings = data["global_featmaps"]
+            visual_feats = self.cnn_encoder(visual_embeddings)
+        else:
+            images = data["image"][:, : self.args.observe_length, :, :, :].type(
+                FloatTensor
+            )
+            assert images.shape[1] == self.args.observe_length
+            visual_feats = self.cnn_encoder(images)  # bs x ts x 256
         bbox = data["bboxes"][:, : self.args.observe_length, :].type(
             FloatTensor
         )  # bs x ts x 4
 
-        assert images.shape[1] == self.args.observe_length
         assert bbox.shape[1] == self.args.observe_length
 
-        visual_feats = self.cnn_encoder(images)  # bs x ts x 256
+        # TODO: Handle loading embeddings from file.
         tcn_input = torch.cat([visual_feats, bbox], dim=2)
 
         tcn_output = self.tcn(tcn_input.transpose(1, 2)).transpose(1, 2)
@@ -97,14 +106,24 @@ class TCNTrajGlobal(nn.Module):
             # TODO: Only use the non-pretrained layers of the CNN.
             match module:
                 case ResCNNEncoder():
-                    for submodule in [
-                        module.resnet,
-                        module.fc1,
-                        module.bn1,
-                        module.fc2,
-                        module.bn2,
-                        module.fc3,
-                    ]:
+                    if self.args.freeze_backbone:
+                        submodules = [
+                            module.fc1,
+                            module.bn1,
+                            module.fc2,
+                            module.bn2,
+                            module.fc3,
+                        ]
+                    else:
+                        submodules = [
+                            module.resnet,
+                            module.fc1,
+                            module.bn1,
+                            module.fc2,
+                            module.bn2,
+                            module.fc3,
+                        ]
+                    for submodule in submodules:
                         param_group += [
                             {"params": submodule.parameters(), "lr": learning_rate}
                         ]

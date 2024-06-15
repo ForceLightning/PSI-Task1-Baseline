@@ -1,4 +1,3 @@
-import json
 import os
 import pickle
 
@@ -7,8 +6,8 @@ import torch
 
 from data.custom_dataset import (
     DrivingDecisionDataset,
-    PedestrianIntentDataset,
     MultiEpochsDataLoader,
+    PedestrianIntentDataset,
 )
 from data.process_sequence import generate_data_sequence
 
@@ -64,7 +63,7 @@ def get_dataloader(args, shuffle_train=True, drop_last_train=True):
             # pin_memory=True,
             sampler=None,
             drop_last=drop_last_train,
-            num_workers=4,
+            num_workers=8,
         )
         val_loader = torch.utils.data.DataLoader(
             val_dataset,
@@ -73,17 +72,19 @@ def get_dataloader(args, shuffle_train=True, drop_last_train=True):
             # pin_memory=True,
             sampler=None,
             drop_last=False,
-            num_workers=4,
+            num_workers=8,
         )
-        test_loader = torch.utils.data.DataLoader(
-            test_dataset,
-            batch_size=args.batch_size,
-            shuffle=False,
-            # pin_memory=True,
-            sampler=None,
-            drop_last=False,
-            num_workers=4,
-        )
+        test_loader = None
+        if len(test_dataset) > 0:
+            test_loader = torch.utils.data.DataLoader(
+                test_dataset,
+                batch_size=args.batch_size,
+                shuffle=False,
+                # pin_memory=True,
+                sampler=None,
+                drop_last=False,
+                num_workers=8,
+            )
     else:
         train_loader = MultiEpochsDataLoader(
             train_dataset,
@@ -92,7 +93,7 @@ def get_dataloader(args, shuffle_train=True, drop_last_train=True):
             # pin_memory=True,
             sampler=None,
             drop_last=drop_last_train,
-            num_workers=4,
+            num_workers=8,
             persistent_workers=True,
         )
         val_loader = MultiEpochsDataLoader(
@@ -102,7 +103,7 @@ def get_dataloader(args, shuffle_train=True, drop_last_train=True):
             # pin_memory=True,
             sampler=None,
             drop_last=False,
-            num_workers=4,
+            num_workers=8,
             persistent_workers=True,
         )
         test_loader = None
@@ -111,11 +112,11 @@ def get_dataloader(args, shuffle_train=True, drop_last_train=True):
                 test_dataset,
                 batch_size=args.batch_size,
                 shuffle=False,
-                pin_memory=True,
+                # pin_memory=True,
                 sampler=None,
                 drop_last=False,
-                num_workers=4,
-                persistent_workers=True,
+                num_workers=8,
+                persistent_workers=False,
             )
 
     return train_loader, val_loader, test_loader

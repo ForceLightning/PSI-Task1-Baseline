@@ -8,12 +8,13 @@ import PIL
 import torch
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
-from torch.utils.data.dataloader import _BaseDataLoaderIter
 from torchvision.transforms import v2
+
+from utils.args import DefaultArguments
 
 
 class VideoDataset(Dataset):
-    def __init__(self, data: dict, args: dict, stage="train") -> None:
+    def __init__(self, data: dict, args: DefaultArguments, stage="train") -> None:
         super().__init__()
         self.data = data
         self.args = args
@@ -129,7 +130,7 @@ class VideoDataset(Dataset):
         global_featmaps = []
         local_featmaps = []
         video_name = video_ids[0]
-        if "global" in self.args.model_name:
+        if "global" in self.args.model_name and self.args.freeze_backbone:
             for i, fid in enumerate(frame_list):
                 pid = ped_ids[i]
 
@@ -409,16 +410,23 @@ class PedestrianIntentDataset(VideoDataset):
         bboxes = self.data["bbox"][index]
         intention_binary = self.data["intention_binary"][index]
         intention_prob = self.data["intention_prob"][index]
-        images = self.load_images(video_ids[0], frame_list)  # load iamges
+        # Do not load images if global_featmaps are used.
+        if self.args.freeze_backbone:
+            images = []
+        else:
+            images = self.load_images(video_ids[0], frame_list)  # load images
 
         disagree_score = self.data["disagree_score"][index]
 
         assert len(bboxes) == self.args.max_track_size
         assert len(frame_list) == self.args.observe_length
 
-        # global_featmaps, local_featmaps = self.load_features(
-        # video_ids, ped_ids, frame_list
-        # )
+        if self.args.freeze_backbone:
+            global_featmaps, local_featmaps = self.load_features(
+                video_ids, ped_ids, frame_list
+            )
+        else:
+            global_featmaps, local_featmaps = [], []
         # reason_features = self.load_reason_features(video_ids, ped_ids, frame_list)
 
         for frame in range(len(frame_list)):
@@ -439,8 +447,8 @@ class PedestrianIntentDataset(VideoDataset):
                 pass
 
         data = {
-            # "global_featmaps": global_featmaps,
-            # "local_featmaps": local_featmaps,
+            "global_featmaps": global_featmaps,
+            "local_featmaps": local_featmaps,
             # "reason_features": reason_features,
             "image": images,
             "bboxes": bboxes,

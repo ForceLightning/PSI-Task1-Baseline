@@ -3,13 +3,15 @@ import gc
 import os
 
 import numpy as np
-from test import validate_driving, validate_intent, validate_traj
 import torch
 from torch import nn
-from torch.cuda.amp import GradScaler
-from torch.utils.tensorboard import SummaryWriter
+from torch.cuda.amp.grad_scaler import GradScaler
+from torch.utils.tensorboard.writer import SummaryWriter
 
+from test import validate_driving, validate_intent, validate_traj
+from utils.args import DefaultArguments
 from utils.log import RecordResults
+from utils.resume_training import ResumeTrainingInfo
 
 cuda = True if torch.cuda.is_available() else False
 device = torch.device("cuda:0" if cuda else "cpu")
@@ -19,7 +21,14 @@ scaler = GradScaler() if cuda else None
 
 
 def train_intent(
-    model, optimizer, scheduler, train_loader, val_loader, args, recorder, writer
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    train_loader: torch.utils.data.DataLoader,
+    val_loader: torch.utils.data.DataLoader,
+    args: DefaultArguments,
+    recorder: RecordResults,
+    writer: SummaryWriter,
 ):
     pos_weight = torch.tensor(args.intent_positive_weight).to(
         device
@@ -84,6 +93,9 @@ def train_intent_epoch(
         # traj_pred: logit, bs x ts x 4
 
         # 1. intent loss
+        loss_intent: torch.Tensor = torch.tensor(0.0).type(FloatTensor).to(device)  # type: ignore
+        gt_intent: torch.Tensor
+        gt_intent_prob: torch.Tensor
         if args.intent_type == "mean" and args.intent_num == 2:  # BCEWithLogitsLoss
             gt_intent = data["intention_binary"][:, args.observe_length].type(
                 FloatTensor
@@ -95,7 +107,6 @@ def train_intent_epoch(
             gt_disagreement = data["disagree_score"][:, args.observe_length]
             gt_consensus = (1 - gt_disagreement).to(device)
 
-            loss_intent = 0
             if "bce" in args.intent_loss:
                 loss_intent_bce = criterions["BCEWithLogitsLoss"](
                     intent_logit, gt_intent
@@ -169,10 +180,19 @@ def train_traj(
     scheduler: torch.optim.lr_scheduler.LRScheduler,
     train_loader: torch.utils.data.DataLoader,
     val_loader: torch.utils.data.DataLoader,
-    args: dict,
+    args: DefaultArguments,
     recorder: RecordResults,
     writer: SummaryWriter,
 ):
+    # Handles some form of resumption of training.
+    resume_info = ResumeTrainingInfo.load_resume_info(args.checkpoint_path)
+    if resume_info is None:
+        resume_info = ResumeTrainingInfo(args.epochs + 1, 1)
+        resume_info.dump_resume_info(args.checkpoint_path)
+    else:
+        model, optimizer, scheduler = resume_info.load_state_dicts(
+            args.checkpoint_path, model, optimizer, scheduler
+        )
     pos_weight = torch.tensor(args.intent_positive_weight).to(
         device
     )  # n_neg_class_samples(5118)/n_pos_class_samples(11285)
@@ -187,7 +207,7 @@ def train_traj(
     }
     epoch_loss = {"loss_intent": [], "loss_traj": []}
 
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(resume_info.current_epoch, args.epochs + 1):
         niters = len(train_loader)
         recorder.train_epoch_reset(epoch, niters)
         epoch_loss = train_traj_epoch(
@@ -203,6 +223,7 @@ def train_traj(
         )
         scheduler.step()
 
+        # Purge cache.
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -219,7 +240,12 @@ def train_traj(
             recorder.eval_epoch_reset(epoch, niters)
             validate_traj(epoch, model, val_loader, args, recorder, writer)
 
-        torch.save(model.state_dict(), args.checkpoint_path + f"/latest.pth")
+        # Save training resumption info.
+        torch.save(model.state_dict(), f"{args.checkpoint_path}/latest.pth")
+        torch.save(optimizer.state_dict(), f"{args.checkpoint_path}/latest_optim.pth")
+        torch.save(scheduler.state_dict(), f"{args.checkpoint_path}/latest_sched.pth")
+        resume_info.current_epoch += 1
+        resume_info.dump_resume_info(args.checkpoint_path)
 
 
 def train_traj_epoch(
@@ -229,7 +255,7 @@ def train_traj_epoch(
     criterions: dict[str, nn.Module],
     epoch_loss: dict,
     dataloader: torch.utils.data.DataLoader,
-    args: dict,
+    args: DefaultArguments,
     recorder: RecordResults,
     writer: SummaryWriter,
 ) -> dict:
@@ -243,7 +269,11 @@ def train_traj_epoch(
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 optimizer.zero_grad()
                 traj_pred = model(data)
-                traj_gt = data["bboxes"][:, args.observe_length :, :].type(torch.bfloat16).to(device)
+                traj_gt = (
+                    data["bboxes"][:, args.observe_length :, :]
+                    .type(torch.bfloat16)
+                    .to(device)
+                )
                 loss_traj = torch.tensor(0.0).type(torch.bfloat16).to(device)
                 if "bbox_l1" in args.traj_loss:
                     loss_bbox_l1 = torch.mean(criterions["L1Loss"](traj_pred, traj_gt))
@@ -256,7 +286,7 @@ def train_traj_epoch(
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
-            
+
         else:
             optimizer.zero_grad()
             traj_pred = model(data)

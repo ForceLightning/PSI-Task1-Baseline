@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
 
+from utils.args import DefaultArguments
+
 # import torchvision.transforms as transforms
 
 cuda = True if torch.cuda.is_available() else False
@@ -169,14 +171,22 @@ class ResLSTMDrivingGlobal(nn.Module):
 
 # 2D CNN encoder using ResNet-50 pretrained
 class ResCNNEncoder(nn.Module):
-    def __init__(self, fc_hidden1=512, fc_hidden2=512, drop_p=0.3, CNN_embed_dim=300):
+    def __init__(
+        self,
+        fc_hidden1=512,
+        fc_hidden2=512,
+        drop_p=0.3,
+        CNN_embed_dim=300,
+        args: DefaultArguments = DefaultArguments(),
+    ):
         """Load the pretrained ResNet-50 and replace top fc layer."""
         super(ResCNNEncoder, self).__init__()
 
         self.fc_hidden1, self.fc_hidden2 = fc_hidden1, fc_hidden2
         self.drop_p = drop_p
+        self.args = args
 
-        resnet = models.resnet50(pretrained=True)
+        resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
         modules = list(resnet.children())[:-1]  # delete the last fc layer.
         self.resnet = nn.Sequential(*modules)
         self.fc1 = nn.Linear(resnet.fc.in_features, fc_hidden1)
@@ -185,13 +195,16 @@ class ResCNNEncoder(nn.Module):
         self.bn2 = nn.BatchNorm1d(fc_hidden2, momentum=0.01)
         self.fc3 = nn.Linear(fc_hidden2, CNN_embed_dim)
 
-    def forward(self, x_3d):  # Input: bs x ts x C x H x W
+    def forward(self, x_3d):
         cnn_embed_seq = []
         for t in range(x_3d.size(1)):
-            # ResNet CNN
             with torch.no_grad():
-                x = self.resnet(x_3d[:, t, :, :, :])  # ResNet
-                x = x.view(x.size(0), -1)  # flatten output of conv
+                if self.args.freeze_backbone:  # Loaded from disk (bs x ts x 2048)
+                    x = x_3d[:, t, :]  # bs x 1 x 2048
+                    x = x.view(x.size(0), -1)
+                else:  # ResNet CNN (bs x ts x C x H x W)
+                    x = self.resnet(x_3d[:, t, :, :, :])  # ResNet
+                    x = x.view(x.size(0), -1)  # flatten output of conv (bs x 2048)
 
             # FC layers
             x = self.bn1(self.fc1(x))
@@ -252,4 +265,3 @@ class DecoderRNN(nn.Module):
         x = self.fc2(x)
 
         return x
-

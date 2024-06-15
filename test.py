@@ -3,11 +3,12 @@ import os
 
 import torch
 from torch import nn
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard.writer import SummaryWriter
 
 from utils.log import RecordResults
+from utils.args import DefaultArguments
 
-cuda = True if torch.cuda.is_available() else False
+cuda = torch.cuda.is_available()
 device = torch.device("cuda:0" if cuda else "cpu")
 FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
@@ -145,7 +146,12 @@ def validate_traj(
     return recorder
 
 
-def predict_traj(model, dataloader, args, dset="test"):
+def predict_traj(
+    model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    args: DefaultArguments,
+    dset: str = "test",
+) -> None:
     model.eval()
     dt = {}
     for itern, data in enumerate(dataloader):

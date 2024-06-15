@@ -1,6 +1,7 @@
 import json
 import os
 from typing import Any, Optional
+from dataclasses import dataclass
 
 import numpy as np
 from sklearn.metrics import (
@@ -14,7 +15,23 @@ from sklearn.metrics import (
 from utils.args import DefaultArguments
 
 
-def evaluate_intent(groundtruth="", prediction="", args=None):
+def evaluate_intent(
+    groundtruth: str | os.PathLike = "",
+    prediction: str | os.PathLike = "",
+    args: DefaultArguments = DefaultArguments(),
+) -> tuple[float, float, float]:
+    """Evaluates intent from ground truth and prediction json files.
+
+    :param groundtruth: Path to ground truth json, defaults to "".
+    :type groundtruth: str | os.PathLike
+    :param prediction: Path to prediction json, defaults to "".
+    :type prediction: str | os.PathLike
+    :param args: Arguments for running training functions.
+    :type args: DefaultArgument
+
+    :return: Tuple of accuracy, f1 score, and mAcc.
+    :rtype: tuple[float, float, float]
+    """
     with open(groundtruth, "r") as f:
         gt_intent = json.load(f)
 
@@ -31,14 +48,24 @@ def evaluate_intent(groundtruth="", prediction="", args=None):
     gt = np.array(gt)
     pred = np.array(pred)
     res = measure_intent_prediction(gt, pred, args)
-    print("Acc: ", res["Acc"])
-    print("F1: ", res["F1"])
-    print("mAcc: ", res["mAcc"])
-    print("ConfusionMatrix: ", res["ConfusionMatrix"])
-    return res["Acc"], res["F1"], res["mAcc"]
+    print("Acc: ", res.acc)
+    print("F1: ", res.f1)
+    print("mAcc: ", res.mAcc)
+    print("ConfusionMatrix: ", res.confusion_matrix)
+    return res.acc, res.f1, res.mAcc
 
 
-def measure_intent_prediction(target, prediction, args):
+@dataclass
+class IntentPrediction:
+    acc: float
+    f1: float
+    mAcc: float
+    confusion_matrix: np.ndarray
+
+
+def measure_intent_prediction(
+    target: np.ndarray, prediction: np.ndarray, args: DefaultArguments
+) -> IntentPrediction:
     print("Evaluating Intent ...")
     results = {
         "Acc": 0,
@@ -52,7 +79,7 @@ def measure_intent_prediction(target, prediction, args):
     lbl_pred = np.round(prediction)  # bs, use 0.5 as threshold
 
     # hard label evaluation - acc, f1
-    Acc = accuracy_score(lbl_target, lbl_pred)  # calculate acc for all samples
+    Acc: float = accuracy_score(lbl_target, lbl_pred)  # calculate acc for all samples
     F1_score = f1_score(lbl_target, lbl_pred, average="macro")
 
     intent_matrix = confusion_matrix(lbl_target, lbl_pred)  # [2 x 2]
@@ -62,11 +89,11 @@ def measure_intent_prediction(target, prediction, args):
     intent_cls_mean_acc = intent_cls_acc.mean(axis=0)
 
     # results['MSE'] = MSE
-    results["Acc"] = Acc
-    results["F1"] = F1_score
-    results["mAcc"] = intent_cls_mean_acc
-    results["ConfusionMatrix"] = intent_matrix
-    return results
+    # results["Acc"] = Acc
+    # results["F1"] = F1_score
+    # results["mAcc"] = intent_cls_mean_acc
+    # results["ConfusionMatrix"] = intent_matrix
+    return IntentPrediction(Acc, F1_score, intent_cls_mean_acc, intent_matrix)
 
 
 def evaluate_traj(
@@ -170,7 +197,23 @@ def measure_traj_prediction(
     return results
 
 
-def evaluate_driving(groundtruth="", prediction="", args=None):
+def evaluate_driving(
+    groundtruth: str | os.PathLike = "",
+    prediction: str | os.PathLike = "",
+    args: DefaultArguments = DefaultArguments(),
+) -> float:
+    """Evaluate driving performance from dumped json files.
+
+    :param groundtruth: Path to ground truth json, defaults to "".
+    :type groundtruth: str | os.PathLike
+    :param prediction: Path to prediction json, defaults to "".
+    :type prediction: str | os.PathLike
+    :param args: Arguments for running the program.
+    :type args: DefaultArguments
+
+    :return: Mean of `speed_mAcc` and `direction_mAcc`.
+    :rtype: float
+    """
     with open(groundtruth, "r") as f:
         gt_driving = json.load(f)
 
