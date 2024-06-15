@@ -87,6 +87,8 @@ class DefaultArguments:
     :type intent_positive_weight: float
     :param traj_loss: Loss function for trajectory, defaults to ['mse'].
     :type traj_loss: list[str]
+    :param steps_per_epoch: Number of mini-batches per epoch, used for the OneCycleLR, defaults to 0.
+    :type steps_per_epoch: int
 
     :param val_freq: Validation frequency, defaults to 10.
     :type val_freq: int
@@ -98,8 +100,8 @@ class DefaultArguments:
     :type persist_dataloader: bool
     :param n_layers: Number of layers, defaults to 4.
     :type n_layers: int
-    :param tcn_kernel_size: Kernel size for TCN, defaults to 4.
-    :type tcn_kernel_size: int
+    :param kernel_size: Kernel size for TCN, defaults to 4.
+    :type kernel_size: int
     """
 
     dataset: Literal["PSI2.0"] | Literal["PSI1.0"] = "PSI2.0"
@@ -149,12 +151,15 @@ class DefaultArguments:
     batch_size: int = 128
     lr: float = 1e-3
     resume: str = ""  # ckpt path + filename to be resumed
-    loss_weights: dict[str, float] = field(default_factory=dict)  # weight of loss terms {loss_intent, loss_traj}
+    loss_weights: dict[str, float] = field(
+        default_factory=dict
+    )  # weight of loss terms {loss_intent, loss_traj}
     intent_loss: Literal["bce"] | Literal["mse"] | Literal["cross_entropy"] = "bce"
     intent_disagreement: float = -1.0
     ignore_uncertain: bool = False
     intent_positive_weight: float = 1.0
     traj_loss: list[str] = field(default_factory=lambda: ["mse"])
+    steps_per_epoch: int = 0
 
     # Other parameters
     val_freq: int = 10
@@ -162,4 +167,4 @@ class DefaultArguments:
     print_freq: int = 10
     persist_dataloader: bool = True
     n_layers: int = 4
-    tcn_kernel_size: int = 4
+    kernel_size: int = 4

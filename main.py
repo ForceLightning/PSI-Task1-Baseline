@@ -1,18 +1,10 @@
 from datetime import datetime
-import glob
 import json
 import os
 import traceback
 
 import numpy as np
 from sklearn.model_selection import ParameterSampler
-from test import (
-    get_test_traj_gt,
-    predict_intent,
-    predict_traj,
-    test_intent,
-    validate_intent,
-)
 import torch
 import torch.nn as nn
 from torch.utils.tensorboard.writer import SummaryWriter
@@ -21,13 +13,15 @@ from data.prepare_data import get_dataloader
 from database.create_database import create_database
 from models.build_model import build_model
 from opts import get_opts
+from test import get_test_traj_gt, predict_intent, predict_traj
 from train import train_driving, train_intent, train_traj
 from utils.evaluate_results import evaluate_driving, evaluate_intent, evaluate_traj
 from utils.get_test_intent_gt import get_intent_gt, get_test_driving_gt
 from utils.log import RecordResults
+from utils.args import DefaultArguments
 
 
-def main(args) -> tuple[float, float]:
+def main(args: DefaultArguments) -> tuple[float | np.floating, float]:
     writer = SummaryWriter(args.checkpoint_path)
     recorder = RecordResults(args)
     """ 1. Load database """
@@ -36,6 +30,7 @@ def main(args) -> tuple[float, float]:
     else:
         print("Database exists!")
     train_loader, val_loader, test_loader = get_dataloader(args)
+    args.steps_per_epoch = int(np.ceil(len(train_loader.dataset) / args.batch_size))
 
     """ 2. Create models """
     model, optimizer, scheduler = build_model(args)
@@ -106,8 +101,7 @@ def main(args) -> tuple[float, float]:
                 )
                 metrics = {"hparam/val_score": val_score}
             except RuntimeError as e:
-                # TODO(chris): Figure out what is going on here.
-                # ! It appears to have something to do with setting `pin_memory=True` for the dataloaders.
+                # ! This error appears to have something to do with setting `pin_memory=True` for the dataloaders.
                 print(torch.cuda.memory_summary(device="cuda:0", abbreviated=False))
                 print(f"{type(e)} {str(e)}\n{traceback.format_exc()}")
 
@@ -178,13 +172,14 @@ if __name__ == "__main__":
             args.load_image = True
             args.seq_overlap_rate = 1  # overlap rate for train/val set
             args.test_seq_overlap_rate = 1  # overlap for test set. if == 1, means overlap is one frame, following PIE
+
         case "ped_traj":
             args.database_file = "traj_database_train.pkl"
             args.intent_model = False  # if (or not) use intent prediction module to support trajectory prediction
             args.traj_model = True
             args.traj_loss = ["bbox_l1"]
             # args.batch_size = [256]
-            args.batch_size = [144]
+            args.batch_size = [256]
             args.predict_length = 45
             # args.model_name = "tcn_traj_bbox"
             # args.model_name = "tcn_traj_bbox_int"
@@ -199,6 +194,7 @@ if __name__ == "__main__":
             args.freeze_backbone = True
             args.seq_overlap_rate = 1  # overlap rate for train/val set
             args.test_seq_overlap_rate = 1  # overlap for test set. if == 1, means overlap is one frame, following PIE
+
         case "driving_decision":
             args.database_file = "driving_database_train.pkl"
             args.driving_loss = ["cross_entropy"]
@@ -235,10 +231,10 @@ if __name__ == "__main__":
     #     "n_layers-kernel_size": [(2, 8), (3, 3), (4, 2)],
     # }
     hyperparameter_list = {
-        "lr": [3e-3],
+        "lr": [1e-2],
         "batch_size": args.batch_size,
-        "epochs": [50],
-        "n_layers-kernel_size": [(4, 2)],
+        "epochs": [20],
+        "n_layers-kernel_size": [(5, 2)],
     }
 
     n_random_samples = 60

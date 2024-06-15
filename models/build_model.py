@@ -2,12 +2,10 @@ import os
 
 import numpy as np
 import torch
+
 from models.driving_modules.model_lstm_driving_global import ResLSTMDrivingGlobal
 from models.intent_modules.model_tcn_int_bbox import TCNINTBbox
-from models.traj_modules.model_tcn_traj_bbox import (
-    TCNTrajBbox,
-    TCNTrajBboxInt,
-)
+from models.traj_modules.model_tcn_traj_bbox import TCNTrajBbox, TCNTrajBboxInt
 from models.traj_modules.model_tcn_traj_semantic import TCNTrajGlobal
 
 cuda = True if torch.cuda.is_available() else False

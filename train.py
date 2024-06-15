@@ -43,7 +43,7 @@ def train_intent(
     }
     epoch_loss = {"loss_intent": [], "loss_traj": []}
     for epoch in range(1, args.epochs + 1):
-        niters = len(train_loader)
+        niters = np.ceil(len(train_loader.dataset) / args.batch_size)
         recorder.train_epoch_reset(epoch, niters)
         epoch_loss = train_intent_epoch(
             epoch,
@@ -66,7 +66,7 @@ def train_intent(
 
         if (epoch + 1) % args.val_freq == 0:
             print(f"Validate at epoch {epoch}")
-            niters = len(val_loader)
+            niters = np.ceil(len(val_loader.dataset) / args.batch_size)
             recorder.eval_epoch_reset(epoch, niters)
             validate_intent(epoch, model, val_loader, args, recorder, writer)
 
@@ -85,7 +85,7 @@ def train_intent_epoch(
     model.train()
     batch_losses = collections.defaultdict(list)
 
-    niters = len(dataloader)
+    niters = np.ceil(len(dataloader.dataset) / args.batch_size)
     for itern, data in enumerate(dataloader):
         optimizer.zero_grad()
         intent_logit = model(data)
@@ -208,12 +208,13 @@ def train_traj(
     epoch_loss = {"loss_intent": [], "loss_traj": []}
 
     for epoch in range(resume_info.current_epoch, args.epochs + 1):
-        niters = len(train_loader)
+        niters = np.ceil(len(train_loader.dataset) / args.batch_size)
         recorder.train_epoch_reset(epoch, niters)
         epoch_loss = train_traj_epoch(
             epoch,
             model,
             optimizer,
+            scheduler,
             criterions,
             epoch_loss,
             train_loader,
@@ -236,7 +237,7 @@ def train_traj(
 
         if (epoch + 1) % args.val_freq == 0:
             print(f"Validate at epoch {epoch}")
-            niters = len(val_loader)
+            niters = np.ceil(len(val_loader.dataset) / args.batch_size)
             recorder.eval_epoch_reset(epoch, niters)
             validate_traj(epoch, model, val_loader, args, recorder, writer)
 
@@ -252,6 +253,7 @@ def train_traj_epoch(
     epoch: int,
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
     criterions: dict[str, nn.Module],
     epoch_loss: dict,
     dataloader: torch.utils.data.DataLoader,
@@ -262,7 +264,7 @@ def train_traj_epoch(
     model.train()
     batch_losses = collections.defaultdict(list)
 
-    niters = len(dataloader)
+    niters = np.ceil(len(dataloader.dataset) / args.batch_size)
     for itern, data in enumerate(dataloader):
         if cuda and scaler:
             # Automatic mixed precision
@@ -312,6 +314,7 @@ def train_traj_epoch(
             optimizer.step()
 
         # Record results
+        scheduler.step()
         batch_losses["loss"].append(loss.item())
         batch_losses["loss_traj"].append(loss_traj.item())
 
@@ -358,7 +361,7 @@ def train_driving(
     epoch_loss = {"loss_driving": [], "loss_driving_speed": [], "loss_driving_dir": []}
 
     for epoch in range(1, args.epochs + 1):
-        niters = len(train_loader)
+        niters = np.ceil(len(train_loader.dataset) / args.batch_size)
         recorder.train_epoch_reset(epoch, niters)
         epoch_loss = train_driving_epoch(
             epoch,
@@ -382,7 +385,7 @@ def train_driving(
 
         if (epoch + 1) % args.val_freq == 0:
             print(f"Validate at epoch {epoch}")
-            niters = len(val_loader)
+            niters = np.ceil(len(val_loader.dataset) / args.batch_size)
             recorder.eval_epoch_reset(epoch, niters)
             validate_driving(epoch, model, val_loader, args, recorder, writer)
 
@@ -395,7 +398,7 @@ def train_driving_epoch(
     model.train()
     batch_losses = collections.defaultdict(list)
 
-    niters = len(dataloader)
+    niters = np.ceil(len(dataloader.dataset) / args.batch_size)
     for itern, data in enumerate(dataloader):
         optimizer.zero_grad()
         pred_speed_logit, pred_dir_logit = model(data)

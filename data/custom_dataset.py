@@ -166,6 +166,8 @@ class VideoDataset(Dataset):
 
     def set_transform(self) -> None:
         """Sets the transformation for the images based on the stage of the dataset"""
+        # ! Consider that the backbone embeddings are being loaded at training time, should the
+        # ! transformations still perform random resized crops and horizontal flips?
         match (self.stage):
             case "train":
                 resize_size = 256
@@ -173,8 +175,11 @@ class VideoDataset(Dataset):
                 self.transform = v2.Compose(
                     [
                         v2.ToPILImage(),
-                        v2.RandomResizedCrop((resize_size, resize_size)),
-                        v2.RandomHorizontalFlip(),
+                        # Comment the following line if random resized crops + horizontal flips are desired.
+                        v2.Resize((resize_size, resize_size)),
+                        # Comment the following two lines if they are not.
+                        # v2.RandomResizedCrop((resize_size, resize_size)),
+                        # v2.RandomHorizontalFlip(),
                         v2.ToImage(),
                         v2.ToDtype(torch.float32, scale=True),
                         v2.Normalize(

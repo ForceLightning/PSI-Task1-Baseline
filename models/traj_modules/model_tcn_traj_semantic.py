@@ -19,6 +19,7 @@ class TCNTrajGlobal(nn.Module):
     def __init__(self, args, model_opts) -> None:
         super().__init__()
 
+        self.observe_length = args.observe_length
         self.predict_length = args.predict_length
         self.args = args
         self.predict_length = model_opts["predict_length"]
@@ -31,29 +32,34 @@ class TCNTrajGlobal(nn.Module):
         dropout_p = 0.0  # dropout probability
 
         # DecoderTCN architecture
-        TCN_enc_in_dim = model_opts["enc_in_dim"]
-        TCN_dec_out_dim = model_opts["dec_out_dim"]
-        TCN_hidden_layers = model_opts["n_layers"]
-        TCN_dropout = model_opts["dropout"]
-        TCN_kernel_size = model_opts["kernel_size"]
-        TCN_skip_connections = model_opts.get("use_skip_connections", False)
+        self.TCN_enc_in_dim = model_opts["enc_in_dim"]
+        self.TCN_dec_out_dim = model_opts["dec_out_dim"]
+        self.TCN_hidden_layers = model_opts["n_layers"]
+        self.TCN_dropout = model_opts["dropout"]
+        self.TCN_kernel_size = model_opts["kernel_size"]
+        self.TCN_skip_connections = model_opts.get("use_skip_connections", False)
 
         self.cnn_encoder = ResCNNEncoder(
             CNN_fc_hidden1, CNN_fc_hidden2, dropout_p, CNN_embed_dim, args
         )
         self.tcn = TemporalConvNet(
-            num_inputs=CNN_embed_dim + TCN_enc_in_dim,
-            num_channels=[TCN_dec_out_dim] * TCN_hidden_layers,
-            kernel_size=TCN_kernel_size,
-            dropout=TCN_dropout,
-            use_skip_connections=TCN_skip_connections,
+            num_inputs=CNN_embed_dim + self.TCN_enc_in_dim,
+            num_channels=[self.TCN_dec_out_dim] * self.TCN_hidden_layers,
+            kernel_size=self.TCN_kernel_size,
+            dropout=self.TCN_dropout,
+            use_skip_connections=self.TCN_skip_connections,
         )
 
         self.fc = nn.Sequential(
-            nn.Linear(TCN_dec_out_dim, 16),
+            nn.Linear(self.TCN_dec_out_dim * self.observe_length, 64),
+            nn.BatchNorm1d(64, momentum=0.01),
             nn.Mish(),
-            nn.Dropout(TCN_dropout),
-            nn.Linear(16, self.output_dim * self.predict_length),
+            nn.Dropout(self.TCN_dropout),
+            nn.Linear(64, 32),
+            nn.BatchNorm1d(32, momentum=0.01),
+            nn.Mish(),
+            nn.Dropout(self.TCN_dropout),
+            nn.Linear(32, self.output_dim * self.predict_length),
         )
 
         match model_opts["output_activation"]:
@@ -72,6 +78,8 @@ class TCNTrajGlobal(nn.Module):
 
     def forward(self, data):
         visual_feats = None
+
+        # Handle loading embeddings from file (already loaded into the dataset instance)
         if self.args.freeze_backbone:
             visual_embeddings = data["global_featmaps"]
             visual_feats = self.cnn_encoder(visual_embeddings)
@@ -87,12 +95,13 @@ class TCNTrajGlobal(nn.Module):
 
         assert bbox.shape[1] == self.args.observe_length
 
-        # TODO: Handle loading embeddings from file.
-        tcn_input = torch.cat([visual_feats, bbox], dim=2)
+        tcn_input = torch.cat([visual_feats, bbox], dim=2)  # bs x (512 + 4) x ts
 
-        tcn_output = self.tcn(tcn_input.transpose(1, 2)).transpose(1, 2)
-        tcn_last_output = tcn_output[:, -1:, :]
-        output = self.fc(tcn_last_output)
+        tcn_output = self.tcn(tcn_input.transpose(1, 2))  # bs x tcn_dec_out_dim x ts
+        tcn_output = tcn_output.reshape(-1, self.TCN_dec_out_dim * self.observe_length)
+        # tcn_last_output = tcn_output[:, -1:, :]
+        # output = self.fc(tcn_last_output)
+        output = self.fc(tcn_output)
         output = self.activation(output).reshape(
             -1, self.predict_length, self.output_dim
         )
@@ -103,7 +112,7 @@ class TCNTrajGlobal(nn.Module):
         learning_rate = args.lr
 
         for module in self.module_list:
-            # TODO: Only use the non-pretrained layers of the CNN.
+            # Only use the non-pretrained layers of the CNN.
             match module:
                 case ResCNNEncoder():
                     if self.args.freeze_backbone:
@@ -137,7 +146,15 @@ class TCNTrajGlobal(nn.Module):
         for param_group in optimizer.param_groups:
             param_group["lr0"] = param_group["lr"]
 
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+        # ! Breaking change: optimizer to use a one cycle learning rate policy instead.
+        # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            learning_rate,
+            epochs=args.epochs,
+            steps_per_epoch=args.steps_per_epoch,
+            div_factor=10,
+        )
 
         return optimizer, scheduler
 
