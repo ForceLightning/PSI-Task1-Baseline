@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from torch import nn
 from torch.cuda.amp.grad_scaler import GradScaler
+from torch.optim.lr_scheduler import OneCycleLR
 from torch.utils.tensorboard.writer import SummaryWriter
 
 from test import validate_driving, validate_intent, validate_traj
@@ -56,7 +57,8 @@ def train_intent(
             recorder,
             writer,
         )
-        scheduler.step()
+        if not isinstance(scheduler, OneCycleLR):
+            scheduler.step()
 
         if epoch % 1 == 0:
             print(
@@ -222,7 +224,8 @@ def train_traj(
             recorder,
             writer,
         )
-        scheduler.step()
+        if not isinstance(scheduler, OneCycleLR):
+            scheduler.step()
 
         # Purge cache.
         gc.collect()
@@ -314,7 +317,8 @@ def train_traj_epoch(
             optimizer.step()
 
         # Record results
-        scheduler.step()
+        if isinstance(scheduler, OneCycleLR):
+            scheduler.step()
         batch_losses["loss"].append(loss.item())
         batch_losses["loss_traj"].append(loss_traj.item())
 

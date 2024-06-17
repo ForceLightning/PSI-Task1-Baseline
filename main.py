@@ -232,9 +232,9 @@ if __name__ == "__main__":
     #     "n_layers-kernel_size": [(2, 8), (3, 3), (4, 2)],
     # }
     hyperparameter_list = {
-        "lr": [1e-2],
+        "lr": [6e-3],
         "batch_size": args.batch_size,
-        "epochs": [20],
+        "epochs": [50],
         "n_layers-kernel_size": [(5, 2)],
     }
 

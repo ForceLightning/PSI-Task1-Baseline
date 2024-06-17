@@ -148,14 +148,14 @@ class TCNTrajGlobal(nn.Module):
             param_group["lr0"] = param_group["lr"]
 
         # ! Breaking change: optimizer to use a one cycle learning rate policy instead.
-        # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
-        scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            optimizer,
-            learning_rate,
-            epochs=args.epochs,
-            steps_per_epoch=args.steps_per_epoch,
-            div_factor=10,
-        )
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+        # scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        #     optimizer,
+        #     learning_rate,
+        #     epochs=args.epochs,
+        #     steps_per_epoch=args.steps_per_epoch,
+        #     div_factor=10,
+        # )
 
         return optimizer, scheduler
 

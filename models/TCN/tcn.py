@@ -139,8 +139,8 @@ class AttentionBlock(nn.Module):
         # Causal attention mask.
         # WARNING: This actually causes NaN values to show up due to the implementation of the
         # Softmax function. See: https://github.com/pytorch/pytorch/issues/41508
-        self.attn_mask = torch.tril(
-            torch.ones((self.seq_length, self.seq_length), dtype=torch.bool)
+        self.attn_mask = torch.triu(
+            torch.ones((self.seq_length, self.seq_length), dtype=torch.bool), diagonal=1
         ).to(device)
 
     def forward(self, x) -> tuple[torch.Tensor, torch.Tensor]:
