@@ -183,7 +183,8 @@ if __name__ == "__main__":
             args.predict_length = 45
             # args.model_name = "tcn_traj_bbox"
             # args.model_name = "tcn_traj_bbox_int"
-            args.model_name = "tcn_traj_global"
+            # args.model_name = "tcn_traj_global"
+            args.model_name = "tcan_traj_global"
             args.loss_weights = {
                 "loss_intent": 0.0,
                 "loss_traj": 1.0,

@@ -3,10 +3,13 @@ import os
 import numpy as np
 import torch
 
+from torch import nn
+
 from models.driving_modules.model_lstm_driving_global import ResLSTMDrivingGlobal
 from models.intent_modules.model_tcn_int_bbox import TCNINTBbox
 from models.traj_modules.model_tcn_traj_bbox import TCNTrajBbox, TCNTrajBboxInt
-from models.traj_modules.model_tcn_traj_semantic import TCNTrajGlobal
+from models.traj_modules.model_tcn_traj_semantic import TCANTrajGlobal, TCNTrajGlobal
+from utils.args import DefaultArguments
 
 cuda = True if torch.cuda.is_available() else False
 device = torch.device("cuda:0" if cuda else "cpu")
@@ -25,6 +28,8 @@ def build_model(args):
             model = get_tcn_traj_bbox_int(args).to(device)
         case "tcn_traj_global":
             model = get_tcn_traj_bbox_global(args).to(device)
+        case "tcan_traj_global":
+            model = get_tcan_traj_bbox_global(args).to(device)
         case "reslstm_driving_global":
             model = get_lstm_driving_global(args).to(device)
         case _:
@@ -121,6 +126,28 @@ def get_tcn_traj_bbox_global(args):
     return model
 
 
+def get_tcan_traj_bbox_global(args):
+    model_configs = {}
+    model_configs["traj_model_opts"] = {
+        "enc_in_dim": 516,
+        "enc_out_dim": 64,
+        "dec_in_emb_dim": 0,
+        "dec_out_dim": 64,
+        "output_dim": 4,
+        "n_layers": args.n_layers,
+        "dropout": 0.125,
+        "kernel_size": args.kernel_size,
+        "observe_length": args.observe_length,
+        "predict_length": args.predict_length,
+        "return_sequence": True,
+        "output_activation": "None",
+        "num_heads": 4,
+    }
+    args.model_configs = model_configs
+    model = TCANTrajGlobal(args, model_configs["traj_model_opts"])
+    return model
+
+
 # 3. driving decision prediction
 # 3.1 input global images only
 def get_lstm_driving_global(args):
@@ -141,3 +168,60 @@ def get_lstm_driving_global(args):
     args.model_configs = model_configs
     model = ResLSTMDrivingGlobal(args, model_configs["driving_model_opts"])
     return model
+
+
+if __name__ == "__main__":
+    from torchinfo import summary
+
+    args = DefaultArguments()
+    args.n_layers = 8
+    args.kernel_size = 2
+    args.observe_length = 15
+    args.predict_length = 45
+    args.freeze_backbone = True
+    args.backbone = "resnet50"
+    args.load_image = True
+    model_configs = {}
+    model_configs["traj_model_opts"] = {
+        "enc_in_dim": 516,
+        "enc_out_dim": 64,
+        "dec_in_emb_dim": 0,
+        "dec_out_dim": 64,
+        "output_dim": 4,
+        "n_layers": args.n_layers,
+        "dropout": 0.125,
+        "kernel_size": args.kernel_size,
+        "observe_length": args.observe_length,
+        "predict_length": args.predict_length,
+        "return_sequence": True,
+        "output_activation": "None",
+        "num_heads": 4,
+    }
+    args.model_configs = model_configs
+    args.batch_size = 256
+    model = TCANTrajGlobal(args, model_configs["traj_model_opts"]).to(device)
+
+    # Get summary of each segment
+    # input_size_1 = (args.batch_size, 15, 2048)
+    # print(summary(model.cnn_encoder, input_size_1))
+    #
+    # input_size_2 = (args.batch_size, args.observe_length, 516)
+    # print(summary(model.tcn, input_size_2))
+
+    # input_size = (args.batch_size, args.observe_length, 516)
+    # submodel = nn.Sequential(*[x for _, x in list(model.named_children())[1:]])
+    # print(summary(submodel, input_size))
+
+    data = [
+        {
+            "global_featmaps": torch.rand(
+                (args.batch_size, args.observe_length, 2048)
+            ).to(device),
+            "bboxes": torch.rand((args.batch_size, args.observe_length, 4)).to(device),
+        }
+    ]
+    out = model(data[0])
+    print(out.shape)
+    print(out)
+    print("\n\n")
+    print(summary(model, input_data=data, batch_dim=0))

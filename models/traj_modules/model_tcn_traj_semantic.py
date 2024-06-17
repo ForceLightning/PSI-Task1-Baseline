@@ -1,11 +1,12 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.nn.utils import weight_norm
+from torch.nn.utils.weight_norm import weight_norm
 from torchvision import models
 
-from models.TCN.tcn import TemporalConvNet
+from models.TCN.tcn import TemporalConvNet, TemporalConvAttnNet
 from models.driving_modules.model_lstm_driving_global import ResCNNEncoder
+from utils.args import DefaultArguments
 
 cuda = True if torch.cuda.is_available() else False
 device = torch.device("cuda:0" if cuda else "cpu")
@@ -170,3 +171,66 @@ class TCNTrajGlobal(nn.Module):
     def _reset_parameters(self):
         nn.init.xavier_uniform_(self.fc.weight)
         self.fc.bias.data.fill_(0)
+
+
+class TCANTrajGlobal(TCNTrajGlobal):
+    def __init__(self, args: DefaultArguments, model_opts: dict) -> None:
+        super().__init__(args, model_opts)
+        self.TCN_num_heads = model_opts["num_heads"]
+        self.temp_attn = True
+        self.tcn = TemporalConvAttnNet(
+            emb_size=self.TCN_enc_in_dim,
+            num_channels=[self.TCN_dec_out_dim] * self.TCN_hidden_layers,
+            num_sub_blocks=2,
+            temp_attn=self.temp_attn,
+            num_heads=self.TCN_num_heads,
+            en_res=True,
+            conv=True,
+            key_size=self.TCN_enc_in_dim,
+            kernel_size=self.TCN_kernel_size,
+            visual=True,
+            seq_length=self.observe_length,
+            dropout=self.TCN_dropout,
+        )
+
+        self.module_list = [self.cnn_encoder, self.tcn, self.fc]
+
+    def forward(self, data) -> tuple[torch.Tensor | list] | torch.Tensor:
+        # bs x ts x 256
+        visual_feats = None
+
+        # Handle loading embeddings from file (already loaded into the dataset instance)
+        if self.args.freeze_backbone:
+            visual_embeddings = data["global_featmaps"]
+            visual_feats = self.cnn_encoder(visual_embeddings)
+        else:
+            images = data["image"][:, : self.args.observe_length, :, :, :].type(
+                FloatTensor
+            )
+            assert images.shape[1] == self.args.observe_length
+            visual_feats = self.cnn_encoder(images)
+
+        # bs x ts x 4
+        bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
+
+        assert bbox.shape[1] == self.args.observe_length
+
+        # TCAN input should be (bs, channels, ts)
+        tcn_input = torch.cat([visual_feats, bbox], dim=2)  # bs x ts x (512 + 4)
+        # tcn_input = tcn_input.transpose(1, 2)  # bs x (512 + 4) x ts
+
+        tcn_output, attn_weight_list = None, None
+        if self.temp_attn:
+            tcn_output, attn_weight_list = self.tcn(tcn_input)
+        else:
+            tcn_output = self.tcn(tcn_input)
+
+        tcn_output = tcn_output.transpose(1, 2)
+        tcn_output = tcn_output.reshape(-1, self.TCN_dec_out_dim * self.observe_length)
+
+        output = self.fc(tcn_output)
+        output = self.activation(output).reshape(
+            -1, self.predict_length, self.output_dim
+        )
+
+        return output
