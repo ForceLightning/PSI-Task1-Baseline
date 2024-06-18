@@ -1,23 +1,24 @@
+from typing import Any
+
+import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.nn.utils.weight_norm import weight_norm
+from torch.nn.utils.parametrizations import weight_norm
 from torchvision import models
 
-from models.TCN.tcn import TemporalConvNet, TemporalConvAttnNet
+from models.TCN.tcn import TemporalConvAttnNet, TemporalConvNet
 from models.driving_modules.model_lstm_driving_global import ResCNNEncoder
 from utils.args import DefaultArguments
-
-cuda = True if torch.cuda.is_available() else False
-device = torch.device("cuda:0" if cuda else "cpu")
-FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
-LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
+from utils.cuda import *
 
 # TODO(chris): Rename file to model_tcn_traj_global.py
 
 
 class TCNTrajGlobal(nn.Module):
-    def __init__(self, args, model_opts) -> None:
+    def __init__(
+        self, args: DefaultArguments, model_opts: dict[str, int | float]
+    ) -> None:
         super().__init__()
 
         self.observe_length = args.observe_length
@@ -174,7 +175,9 @@ class TCNTrajGlobal(nn.Module):
 
 
 class TCANTrajGlobal(TCNTrajGlobal):
-    def __init__(self, args: DefaultArguments, model_opts: dict) -> None:
+    def __init__(
+        self, args: DefaultArguments, model_opts: dict[str, float | int]
+    ) -> None:
         super().__init__(args, model_opts)
         self.TCN_num_heads = model_opts["num_heads"]
         self.temp_attn = True
@@ -195,7 +198,9 @@ class TCANTrajGlobal(TCNTrajGlobal):
 
         self.module_list = [self.cnn_encoder, self.tcn, self.fc]
 
-    def forward(self, data) -> tuple[torch.Tensor | list] | torch.Tensor:
+    def forward(
+        self, data: dict[str, torch.Tensor | np.ndarray[Any, Any] | float | int]
+    ) -> tuple[torch.Tensor | list[float]] | torch.Tensor:
         # bs x ts x 256
         visual_feats = None
 

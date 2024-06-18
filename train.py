@@ -7,39 +7,37 @@ import torch
 from torch import nn
 from torch.cuda.amp.grad_scaler import GradScaler
 from torch.optim.lr_scheduler import OneCycleLR
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard.writer import SummaryWriter
 
 from test import validate_driving, validate_intent, validate_traj
 from utils.args import DefaultArguments
 from utils.log import RecordResults
 from utils.resume_training import ResumeTrainingInfo
+from utils.cuda import *
 
-cuda = True if torch.cuda.is_available() else False
-device = torch.device("cuda:0" if cuda else "cpu")
-FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
-LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
-scaler = GradScaler() if cuda else None
+scaler = GradScaler() if CUDA else None
 
 
 def train_intent(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler,
-    train_loader: torch.utils.data.DataLoader,
-    val_loader: torch.utils.data.DataLoader,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
     args: DefaultArguments,
     recorder: RecordResults,
     writer: SummaryWriter,
-):
+) -> None:
     pos_weight = torch.tensor(args.intent_positive_weight).to(
-        device
+        DEVICE
     )  # n_neg_class_samples(5118)/n_pos_class_samples(11285)
     criterions = {
         "BCEWithLogitsLoss": torch.nn.BCEWithLogitsLoss(
             reduction="none", pos_weight=pos_weight
-        ).to(device),
-        "MSELoss": torch.nn.MSELoss(reduction="none").to(device),
-        "BCELoss": torch.nn.BCELoss().to(device),
+        ).to(DEVICE),
+        "MSELoss": torch.nn.MSELoss(reduction="none").to(DEVICE),
+        "BCELoss": torch.nn.BCELoss().to(DEVICE),
         "CELoss": torch.nn.CrossEntropyLoss(),
     }
     epoch_loss = {"loss_intent": [], "loss_traj": []}
@@ -95,7 +93,7 @@ def train_intent_epoch(
         # traj_pred: logit, bs x ts x 4
 
         # 1. intent loss
-        loss_intent: torch.Tensor = torch.tensor(0.0).type(FloatTensor).to(device)  # type: ignore
+        loss_intent: torch.Tensor = torch.tensor(0.0).type(FloatTensor).to(DEVICE)  # type: ignore
         gt_intent: torch.Tensor
         gt_intent_prob: torch.Tensor
         if args.intent_type == "mean" and args.intent_num == 2:  # BCEWithLogitsLoss
@@ -107,7 +105,7 @@ def train_intent_epoch(
             )
 
             gt_disagreement = data["disagree_score"][:, args.observe_length]
-            gt_consensus = (1 - gt_disagreement).to(device)
+            gt_consensus = (1 - gt_disagreement).to(DEVICE)
 
             if "bce" in args.intent_loss:
                 loss_intent_bce = criterions["BCEWithLogitsLoss"](
@@ -180,12 +178,31 @@ def train_traj(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler,
-    train_loader: torch.utils.data.DataLoader,
-    val_loader: torch.utils.data.DataLoader,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
     args: DefaultArguments,
     recorder: RecordResults,
     writer: SummaryWriter,
-):
+) -> None:
+    """Trains the model for the trajectory task.
+
+    :param model: The model to train.
+    :type model: nn.Module
+    :param optimizer: Pytorch optimizer to use.
+    :type optimizer: torch.optim.Optimizer
+    :param scheduler: Learning rate scheduler.
+    :type scheduler: torch.optim.lr_scheduler.LRScheduler
+    :param train_loader: Train set dataloader.
+    :type train_loader: DataLoader
+    :param val_loader: Validation set dataloader.
+    :type val_loader: DataLoader
+    :param args: Training arguments.
+    :type args: DefaultArguments
+    :param recorder: Recorder object to log metrics.
+    :type recorder: RecordResults
+    :param writer: Tensorboard logging object.
+    :type writer: SummaryWriter
+    """
     # Handles some form of resumption of training.
     resume_info = ResumeTrainingInfo.load_resume_info(args.checkpoint_path)
     if resume_info is None:
@@ -196,16 +213,17 @@ def train_traj(
             args.checkpoint_path, model, optimizer, scheduler
         )
     pos_weight = torch.tensor(args.intent_positive_weight).to(
-        device
+        DEVICE
     )  # n_neg_class_samples(5118)/n_pos_class_samples(11285)
+    # NOTE: Chris: I suspect that the NaN values may be due to the implementation of the loss functions.
     criterions = {
         "BCEWithLogitsLoss": torch.nn.BCEWithLogitsLoss(
             reduction="none", pos_weight=pos_weight
-        ).to(device),
-        "MSELoss": torch.nn.MSELoss(reduction="none").to(device),
-        "BCELoss": torch.nn.BCELoss().to(device),
-        "CELoss": torch.nn.CrossEntropyLoss().to(device),
-        "L1Loss": torch.nn.L1Loss().to(device),
+        ).to(DEVICE),
+        "MSELoss": torch.nn.MSELoss(reduction="none").to(DEVICE),
+        "BCELoss": torch.nn.BCELoss().to(DEVICE),
+        "CELoss": torch.nn.CrossEntropyLoss().to(DEVICE),
+        "L1Loss": torch.nn.L1Loss().to(DEVICE),
     }
     epoch_loss = {"loss_intent": [], "loss_traj": []}
 
@@ -258,83 +276,113 @@ def train_traj_epoch(
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler,
     criterions: dict[str, nn.Module],
-    epoch_loss: dict,
-    dataloader: torch.utils.data.DataLoader,
+    epoch_loss: dict[str, np.floating | float],
+    dataloader: DataLoader,
     args: DefaultArguments,
     recorder: RecordResults,
     writer: SummaryWriter,
-) -> dict:
+) -> dict[str, np.floating | float]:
+    """Trains the model over 1 epoch.
+
+    :param epoch: Current epoch value.
+    :type epoch: int
+    :param model: Model to train for 1 epoch.
+    :type model: nn.Module
+    :param optimizer: PyTorch optimizer used for training.
+    :type optimizer: torch.optim.Optimizer
+    :param scheduler: Learning rate scheduler used for training.
+    :type scheduler: torch.optim.lr_scheduler.LRScheduler
+    :param criterions: List of criterion names and callable criterions used to calculate loss.
+    :type criterions: dict[str, nn.Module]
+    :param epoch_loss: Dictionary containing various loss types. This object is used as a return
+        value for the function.
+    :type epoch_loss: dict
+    :param args: Training arguments.
+    :type args: DefaultArguments
+    :param recorder: Recorder object to log metrics.
+    :type recorder: RecordResults
+    :param writer: Tensorboard logging object.
+    :type writer: SummaryWriter
+
+    :returns: Losses for the epoch.
+    :rtype: dict[str, np.floating | float]
+    """
     model.train()
     batch_losses = collections.defaultdict(list)
 
-    niters = np.ceil(len(dataloader.dataset) / args.batch_size)
+    niters: int = int(np.ceil(len(dataloader.dataset) / args.batch_size))
     for itern, data in enumerate(dataloader):
-        if cuda and scaler:
-            # Automatic mixed precision
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+        with torch.autograd.set_detect_anomaly(True):
+            if CUDA and scaler:
+                # Automatic mixed precision
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    optimizer.zero_grad()
+                    traj_pred = model(data)
+                    traj_gt: torch.Tensor = (
+                        data["bboxes"][:, args.observe_length :, :]
+                        .type(FloatTensor)
+                        .to(DEVICE)
+                    )
+                    # loss_traj = torch.tensor(0.0).type(torch.bfloat16).to(DEVICE)
+                    # if "bbox_l1" in args.traj_loss:
+                    #     loss_bbox_l1 = torch.mean(criterions["L1Loss"](traj_pred, traj_gt))
+                    #     batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
+                    #     loss_traj += loss_bbox_l1
+                    #
+                    # loss = args.loss_weights["loss_traj"] * loss_traj
+                    loss_traj = torch.mean(criterions["L1Loss"](traj_pred, traj_gt))
+                    loss = loss_traj * args.loss_weights["loss_traj"]
+                    batch_losses["loss_bbox_l1"].append(loss_traj.item())
+
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                if isinstance(scheduler, OneCycleLR):
+                    scheduler.step()
+                scaler.update()
+
+            else:
                 optimizer.zero_grad()
                 traj_pred = model(data)
-                traj_gt = (
-                    data["bboxes"][:, args.observe_length :, :]
-                    .type(torch.bfloat16)
-                    .to(device)
-                )
-                loss_traj = torch.tensor(0.0).type(torch.bfloat16).to(device)
+                # intent_pred: sigmoid output, (0, 1), bs
+                # traj_pred: logit, bs x ts x 4
+
+                traj_gt = data["bboxes"][:, args.observe_length :, :].type(FloatTensor)
+                bs, ts, _ = traj_gt.shape
+                # center: bs x ts x 2
+                # traj_center_gt = torch.cat((((traj_gt[:, :, 0] + traj_gt[:, :, 2]) / 2).unsqueeze(-1),
+                #                             ((traj_gt[:, :, 1] + traj_gt[:, :, 3]) / 2).unsqueeze(-1)), dim=-1)
+                # traj_center_pred = torch.cat((((traj_pred[:, :, 0] + traj_pred[:, :, 2]) / 2).unsqueeze(-1),
+                #                               ((traj_pred[:, :, 1] + traj_pred[:, :, 3]) / 2).unsqueeze(-1)), dim=-1)
+
+                loss_traj = torch.tensor(0.0).type(FloatTensor)
                 if "bbox_l1" in args.traj_loss:
                     loss_bbox_l1 = torch.mean(criterions["L1Loss"](traj_pred, traj_gt))
                     batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
                     loss_traj += loss_bbox_l1
 
                 loss = args.loss_weights["loss_traj"] * loss_traj
+                loss.backward()
+                optimizer.step()
+                if isinstance(scheduler, OneCycleLR):
+                    scheduler.step()
 
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            optimizer.zero_grad()
+            # Record results
+            batch_losses["loss"].append(loss.item())
+            # batch_losses["loss_traj"].append(loss_traj.item())
 
-        else:
-            optimizer.zero_grad()
-            traj_pred = model(data)
-            # intent_pred: sigmoid output, (0, 1), bs
-            # traj_pred: logit, bs x ts x 4
-
-            traj_gt = data["bboxes"][:, args.observe_length :, :].type(FloatTensor)
-            bs, ts, _ = traj_gt.shape
-            # center: bs x ts x 2
-            # traj_center_gt = torch.cat((((traj_gt[:, :, 0] + traj_gt[:, :, 2]) / 2).unsqueeze(-1),
-            #                             ((traj_gt[:, :, 1] + traj_gt[:, :, 3]) / 2).unsqueeze(-1)), dim=-1)
-            # traj_center_pred = torch.cat((((traj_pred[:, :, 0] + traj_pred[:, :, 2]) / 2).unsqueeze(-1),
-            #                               ((traj_pred[:, :, 1] + traj_pred[:, :, 3]) / 2).unsqueeze(-1)), dim=-1)
-
-            loss_traj = torch.tensor(0.0).type(FloatTensor)
-            if "bbox_l1" in args.traj_loss:
-                loss_bbox_l1 = torch.mean(criterions["L1Loss"](traj_pred, traj_gt))
-                batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
-                loss_traj += loss_bbox_l1
-
-            loss = args.loss_weights["loss_traj"] * loss_traj
-            loss.backward()
-            optimizer.step()
-
-        # Record results
-        if isinstance(scheduler, OneCycleLR):
-            scheduler.step()
-        batch_losses["loss"].append(loss.item())
-        batch_losses["loss_traj"].append(loss_traj.item())
-
-        if itern % args.print_freq == 0:
-            print(
-                f"Epoch {epoch}/{args.epochs} | Batch {itern}/{niters} - "
-                f"loss_traj = {np.mean(batch_losses['loss_traj']): .4f}, "
+            if itern % args.print_freq == 0:
+                print(
+                    f"Epoch {epoch}/{args.epochs} | Batch {itern}/{niters} - "
+                    f"loss_traj = {np.mean(batch_losses['loss_traj']): .4f}, "
+                )
+            recorder.train_traj_batch_update(
+                itern,
+                data,
+                traj_gt.type(FloatTensor).detach().cpu().numpy(),
+                traj_pred.type(FloatTensor).detach().cpu().numpy(),
+                loss.item(),
+                loss_traj.item(),
             )
-        recorder.train_traj_batch_update(
-            itern,
-            data,
-            traj_gt.type(FloatTensor).detach().cpu().numpy(),
-            traj_pred.type(FloatTensor).detach().cpu().numpy(),
-            loss.item(),
-            loss_traj.item(),
-        )
 
     epoch_loss["loss_traj"].append(np.mean(batch_losses["loss_traj"]))
 
@@ -351,16 +399,16 @@ def train_driving(
     model, optimizer, scheduler, train_loader, val_loader, args, recorder, writer
 ):
     pos_weight = torch.tensor(args.intent_positive_weight).to(
-        device
+        DEVICE
     )  # n_neg_class_samples(5118)/n_pos_class_samples(11285)
     criterions = {
         "BCEWithLogitsLoss": torch.nn.BCEWithLogitsLoss(
             reduction="none", pos_weight=pos_weight
-        ).to(device),
-        "MSELoss": torch.nn.MSELoss(reduction="none").to(device),
-        "BCELoss": torch.nn.BCELoss().to(device),
-        "CELoss": torch.nn.CrossEntropyLoss().to(device),
-        "L1Loss": torch.nn.L1Loss().to(device),
+        ).to(DEVICE),
+        "MSELoss": torch.nn.MSELoss(reduction="none").to(DEVICE),
+        "BCELoss": torch.nn.BCELoss().to(DEVICE),
+        "CELoss": torch.nn.CrossEntropyLoss().to(DEVICE),
+        "L1Loss": torch.nn.L1Loss().to(DEVICE),
     }
     epoch_loss = {"loss_driving": [], "loss_driving_speed": [], "loss_driving_dir": []}
 

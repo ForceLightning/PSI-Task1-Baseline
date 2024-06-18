@@ -1,14 +1,11 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.nn.utils import weight_norm
+from torch.nn.utils.parametrizations import weight_norm
 
 from models.TCN.tcn import TemporalConvNet
 
-cuda = True if torch.cuda.is_available() else False
-device = torch.device("cuda:0" if cuda else "cpu")
-FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
-LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
+from utils.cuda import *
 
 
 class TCNTrajBbox(nn.Module):
@@ -128,4 +125,4 @@ class TCNTrajBboxInt(TCNTrajBbox):
             -1, self.predict_length, self.output_dim
         )
         return output
-        
+

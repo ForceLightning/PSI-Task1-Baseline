@@ -21,7 +21,7 @@ from utils.args import DefaultArguments
 
 CUDA: bool = True if torch.cuda.is_available() else False
 DEVICE = torch.device("cuda:0" if CUDA else "cpu")
-FloatTensor = torch.cuda.FloatTensor if CUDA else torch.FloatTensor
+FloatTensor = torch.cuda.BFloat16Tensor if CUDA else torch.FloatTensor
 LongTensor = torch.cuda.LongTensor if CUDA else torch.LongTensor
 
 

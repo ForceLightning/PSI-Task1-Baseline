@@ -11,27 +11,24 @@ from models.traj_modules.model_tcn_traj_bbox import TCNTrajBbox, TCNTrajBboxInt
 from models.traj_modules.model_tcn_traj_semantic import TCANTrajGlobal, TCNTrajGlobal
 from utils.args import DefaultArguments
 
-cuda = True if torch.cuda.is_available() else False
-device = torch.device("cuda:0" if cuda else "cpu")
-FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
-LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
+from utils.cuda import *
 
 
 def build_model(args):
     # Intent models
     match args.model_name:
         case "tcn_int_bbox":
-            model = get_tcn_intent_bbox(args).to(device)
+            model = get_tcn_intent_bbox(args).to(DEVICE)
         case "tcn_traj_bbox":
-            model = get_tcn_traj_bbox(args).to(device)
+            model = get_tcn_traj_bbox(args).to(DEVICE)
         case "tcn_traj_bbox_int":
-            model = get_tcn_traj_bbox_int(args).to(device)
+            model = get_tcn_traj_bbox_int(args).to(DEVICE)
         case "tcn_traj_global":
-            model = get_tcn_traj_bbox_global(args).to(device)
+            model = get_tcn_traj_bbox_global(args).to(DEVICE)
         case "tcan_traj_global":
-            model = get_tcan_traj_bbox_global(args).to(device)
+            model = get_tcan_traj_bbox_global(args).to(DEVICE)
         case "reslstm_driving_global":
-            model = get_lstm_driving_global(args).to(device)
+            model = get_lstm_driving_global(args).to(DEVICE)
         case _:
             raise ValueError(f"Model {args.model_name} not implemented yet.")
 
@@ -199,7 +196,7 @@ if __name__ == "__main__":
     }
     args.model_configs = model_configs
     args.batch_size = 256
-    model = TCANTrajGlobal(args, model_configs["traj_model_opts"]).to(device)
+    model = TCANTrajGlobal(args, model_configs["traj_model_opts"]).to(DEVICE)
 
     # Get summary of each segment
     # input_size_1 = (args.batch_size, 15, 2048)
@@ -216,8 +213,8 @@ if __name__ == "__main__":
         {
             "global_featmaps": torch.rand(
                 (args.batch_size, args.observe_length, 2048)
-            ).to(device),
-            "bboxes": torch.rand((args.batch_size, args.observe_length, 4)).to(device),
+            ).to(DEVICE),
+            "bboxes": torch.rand((args.batch_size, args.observe_length, 4)).to(DEVICE),
         }
     ]
     out = model(data[0])

@@ -2,12 +2,9 @@ import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.nn.utils.weight_norm import weight_norm
+from torch.nn.utils.parametrizations import weight_norm
 
-cuda = True if torch.cuda.is_available() else False
-device = torch.device("cuda:0" if cuda else "cpu")
-FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
-LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
+from utils.cuda import *
 
 
 class Chomp1d(nn.Module):
@@ -141,7 +138,7 @@ class AttentionBlock(nn.Module):
         # Softmax function. See: https://github.com/pytorch/pytorch/issues/41508
         self.attn_mask = torch.triu(
             torch.ones((self.seq_length, self.seq_length), dtype=torch.bool), diagonal=1
-        ).to(device)
+        ).to(DEVICE)
 
     def forward(self, x) -> tuple[torch.Tensor, torch.Tensor]:
         attn_output, attn_output_weights = self.attention(

@@ -5,13 +5,9 @@ import torch
 from torch import nn
 from torch.utils.tensorboard.writer import SummaryWriter
 
-from utils.log import RecordResults
 from utils.args import DefaultArguments
-
-cuda = torch.cuda.is_available()
-device = torch.device("cuda:0" if cuda else "cpu")
-FloatTensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
-LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
+from utils.cuda import *
+from utils.log import RecordResults
 
 
 def validate_intent(epoch, model, dataloader, args, recorder, writer):
