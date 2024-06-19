@@ -64,9 +64,15 @@ class TCANTrajBbox(nn.Module):
         self.speed_embedding = "speed" in self.args.model_name
 
     def forward(
-        self, data: dict[str, torch.Tensor | np.ndarray[Any, Any] | float | int]
+        self,
+        data: (
+            dict[str, torch.Tensor | np.ndarray[Any, Any] | float | int] | torch.Tensor
+        ),
     ) -> torch.Tensor:
-        bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
+        if isinstance(data, dict):
+            bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
+        else:
+            bbox = data
         assert (
             bbox.shape[1] == self.args.observe_length
         ), "bbox temporal dimension size does not match `observe_length`"

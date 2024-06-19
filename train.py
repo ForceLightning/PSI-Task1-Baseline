@@ -16,8 +16,8 @@ from utils.log import RecordResults
 from utils.resume_training import ResumeTrainingInfo
 from utils.cuda import *
 
-scaler = GradScaler() if CUDA else None
-# scaler = None
+# scaler = GradScaler() if CUDA else None
+scaler = None
 
 
 def train_intent(
@@ -329,6 +329,10 @@ def train_traj_epoch(
                     loss_bbox_l1 = criterions["L1Loss"](traj_pred, traj_gt)
                     batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
                     loss_traj += loss_bbox_l1
+                if "bbox_l2" in args.traj_loss:
+                    loss_bbox_l2 = torch.mean(criterions["MSELoss"](traj_pred, traj_gt))
+                    batch_losses["loss_bbox_l2"].append(loss_bbox_l2.item())
+                    loss_traj += loss_bbox_l2
 
                 loss = args.loss_weights["loss_traj"] * loss_traj
                 # loss_traj = torch.mean(criterions["L1Loss"](traj_pred, traj_gt))
@@ -360,6 +364,10 @@ def train_traj_epoch(
                 loss_bbox_l1 = torch.mean(criterions["L1Loss"](traj_pred, traj_gt))
                 batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
                 loss_traj += loss_bbox_l1
+            if "bbox_l2" in args.traj_loss:
+                loss_bbox_l2 = torch.mean(criterions["MSELoss"](traj_pred, traj_gt))
+                batch_losses["loss_bbox_l2"].append(loss_bbox_l2.item())
+                loss_traj += loss_bbox_l2
 
             loss = args.loss_weights["loss_traj"] * loss_traj
             loss.backward()

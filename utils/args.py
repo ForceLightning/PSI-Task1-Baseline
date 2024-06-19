@@ -173,7 +173,7 @@ class DefaultArguments:
 class ModelOpts(TypedDict):
     enc_in_dim: int
     enc_out_dim: int
-    dec_in_emb_dim: int | None
+    dec_in_emb_dim: int
     dec_out_dim: int
     output_dim: int
     n_layers: int

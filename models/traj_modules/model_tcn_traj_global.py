@@ -75,17 +75,37 @@ class TCNTrajGlobal(nn.Module):
         self.reason_embedding = "rsn" in self.args.model_name
         self.speed_embedding = "speed" in self.args.model_name
 
-    def forward(self, data: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        data: (
+            dict[str, torch.Tensor | np.ndarray[Any, Any] | float | int]
+            | tuple[torch.Tensor, torch.Tensor]
+        ),
+    ) -> torch.Tensor:
         visual_feats = None
 
         # Handle loading embeddings from file (already loaded into the dataset instance)
         if self.args.freeze_backbone:
-            visual_embeddings = data["global_featmaps"]
+            if isinstance(
+                data, dict
+            ):  # Handles the case where data is passed as a dict
+                visual_embeddings = data["global_featmaps"], data["bboxes"]
+                bbox = data["bboxes"][:, : self.args.observe_length, :].type(
+                    FloatTensor
+                )  # bs x ts x 4
+            else:  # Otherwise, unpack the tuple.
+                visual_embeddings, bbox = data
             visual_feats = self.cnn_encoder(visual_embeddings)
         else:
-            images = data["image"][:, : self.args.observe_length, :, :, :].type(
-                FloatTensor
-            )
+            if isinstance(data, dict):
+                images = data["image"][:, : self.args.observe_length, :, :, :].type(
+                    FloatTensor
+                )
+                bbox = data["bboxes"][:, : self.args.observe_length, :].type(
+                    FloatTensor
+                )  # bs x ts x 4
+            else:
+                images, bbox = data
             assert images.shape[1] == self.args.observe_length
             visual_feats = self.cnn_encoder(images)  # bs x ts x 256
         bbox = data["bboxes"][:, : self.args.observe_length, :].type(
@@ -145,7 +165,8 @@ class TCNTrajGlobal(nn.Module):
         for opt_param_group in optimizer.param_groups:
             opt_param_group["lr0"] = opt_param_group["lr"]
 
-        # ! Breaking change: optimizer to use a one cycle learning rate policy instead.
+        # WARNING: Breaking change: optimizer to use a one cycle learning rate policy instead.
+        #
         # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
         scheduler = torch.optim.lr_scheduler.OneCycleLR(
             optimizer,
@@ -214,24 +235,38 @@ class TCANTrajGlobal(TCNTrajGlobal):
         self.module_list = [self.cnn_encoder, self.tcn, self.fc]
 
     def forward(
-        self, data: dict[str, torch.Tensor | np.ndarray[Any, Any] | float | int]
-    ) -> tuple[torch.Tensor | list[float]] | torch.Tensor:
-
-        visual_feats = None  # bs x ts x 256
+        self,
+        data: (
+            dict[str, torch.Tensor | np.ndarray[Any, Any] | float | int]
+            | tuple[torch.Tensor, torch.Tensor]
+        ),
+    ) -> torch.Tensor:
+        visual_feats = None
 
         # Handle loading embeddings from file (already loaded into the dataset instance)
         if self.args.freeze_backbone:
-            visual_embeddings = data["global_featmaps"]
+            if isinstance(
+                data, dict
+            ):  # Handles the case where data is passed as a dict
+                visual_embeddings = data["global_featmaps"]
+                bbox = data["bboxes"][:, : self.args.observe_length, :].type(
+                    FloatTensor
+                )  # bs x ts x 4
+            else:  # Otherwise, unpack the tuple.
+                visual_embeddings, bbox = data
             visual_feats = self.cnn_encoder(visual_embeddings)
         else:
-            images = data["image"][:, : self.args.observe_length, :, :, :].type(
-                FloatTensor
-            )
+            if isinstance(data, dict):
+                images = data["image"][:, : self.args.observe_length, :, :, :].type(
+                    FloatTensor
+                )
+                bbox = data["bboxes"][:, : self.args.observe_length, :].type(
+                    FloatTensor
+                )  # bs x ts x 4
+            else:
+                images, bbox = data
             assert images.shape[1] == self.args.observe_length
-            visual_feats = self.cnn_encoder(images)
-
-        # bs x ts x 4
-        bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
+            visual_feats = self.cnn_encoder(images)  # bs x ts x 256
 
         assert bbox.shape[1] == self.args.observe_length
 

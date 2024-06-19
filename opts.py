@@ -207,8 +207,6 @@ def get_opts():
     parser.add_argument(
         "--n_layers", type=int, default=4, help="number of layers in the model"
     )
-    parser.add_argument(
-        "--tcn_kernel_size", type=int, default=4, help="kernel size of TCN"
-    )
+    parser.add_argument("--kernel_size", type=int, default=4, help="kernel size of TCN")
 
     return parser.parse_args()

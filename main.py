@@ -178,7 +178,7 @@ if __name__ == "__main__":
             args.database_file = "traj_database_train.pkl"
             args.intent_model = False  # if (or not) use intent prediction module to support trajectory prediction
             args.traj_model = True
-            args.traj_loss = ["bbox_l1"]
+            args.traj_loss = ["bbox_l2"]
             # args.batch_size = [256]
             # args.batch_size = [64]
             args.batch_size = [256]
@@ -186,20 +186,20 @@ if __name__ == "__main__":
             # args.model_name = "tcn_traj_bbox"
             # args.model_name = "tcn_traj_bbox_int"
             # args.model_name = "tcn_traj_global"
-            args.model_name = "tcan_traj_bbox"
+            # args.model_name = "tcan_traj_bbox"
             # args.model_name = "tcan_traj_bbox_int"
-            # args.model_name = "tcan_traj_global"
+            args.model_name = "tcan_traj_global"
             args.loss_weights = {
                 "loss_intent": 0.0,
                 "loss_traj": 1.0,
                 "loss_driving": 0.0,
             }
             args.load_image = False
-            args.backbone = ""
-            args.freeze_backbone = False
+            # args.backbone = ""
+            # args.freeze_backbone = False
             # args.load_image = True
-            # args.backbone = "resnet50"
-            # args.freeze_backbone = True
+            args.backbone = "resnet50"
+            args.freeze_backbone = True
             args.seq_overlap_rate = 1  # overlap rate for train/val set
             args.test_seq_overlap_rate = 1  # overlap for test set. if == 1, means overlap is one frame, following PIE
 
@@ -239,10 +239,10 @@ if __name__ == "__main__":
     #     "n_layers-kernel_size": [(2, 8), (3, 3), (4, 2)],
     # }
     hyperparameter_list = {
-        # "lr": [1e-2],
-        "lr": [3e-3],
+        "lr": [1e-2],
+        # "lr": [3e-3],
         "batch_size": args.batch_size,
-        "epochs": [50],
+        "epochs": [20],
         "n_layers-kernel_size": [(4, 2)],
     }
 
