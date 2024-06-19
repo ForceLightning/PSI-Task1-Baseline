@@ -4,6 +4,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.parametrizations import weight_norm
 
+from models.TCN.custom_transformer import MultiheadAttention
 from utils.cuda import *
 
 
@@ -126,7 +127,7 @@ class AttentionBlock(nn.Module):
     ):
         super().__init__()
         self.seq_length = seq_length
-        self.attention = nn.MultiheadAttention(
+        self.attention = MultiheadAttention(
             embed_dim=in_channels,
             num_heads=num_heads,
             kdim=key_size,
@@ -146,7 +147,7 @@ class AttentionBlock(nn.Module):
             x,
             x,
             attn_mask=self.attn_mask,
-            is_causal=True,
+            # is_causal=True,
         )
         return attn_output, attn_output_weights
 

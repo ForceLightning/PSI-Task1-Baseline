@@ -12,7 +12,7 @@ from models.driving_modules.model_lstm_driving_global import ResCNNEncoder
 from utils.args import DefaultArguments
 from utils.cuda import *
 
-# TODO(chris): Rename file to model_tcn_traj_global.py
+# TODO: (chris) Rename file to model_tcn_traj_global.py
 
 
 class TCNTrajGlobal(nn.Module):
@@ -54,14 +54,14 @@ class TCNTrajGlobal(nn.Module):
 
         self.fc = nn.Sequential(
             nn.Linear(self.TCN_dec_out_dim * self.observe_length, 64),
-            nn.BatchNorm1d(64, momentum=0.01),
+            nn.BatchNorm1d(64, momentum=0.1),
             nn.Mish(),
             nn.Dropout(self.TCN_dropout),
-            nn.Linear(64, 32),
-            nn.BatchNorm1d(32, momentum=0.01),
+            nn.Linear(64, 64),
+            nn.BatchNorm1d(64, momentum=0.1),
             nn.Mish(),
             nn.Dropout(self.TCN_dropout),
-            nn.Linear(32, self.output_dim * self.predict_length),
+            nn.Linear(64, self.output_dim * self.predict_length),
         )
 
         match model_opts["output_activation"]:
@@ -149,14 +149,14 @@ class TCNTrajGlobal(nn.Module):
             param_group["lr0"] = param_group["lr"]
 
         # ! Breaking change: optimizer to use a one cycle learning rate policy instead.
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
-        # scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        #     optimizer,
-        #     learning_rate,
-        #     epochs=args.epochs,
-        #     steps_per_epoch=args.steps_per_epoch,
-        #     div_factor=10,
-        # )
+        # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            learning_rate,
+            epochs=args.epochs,
+            steps_per_epoch=args.steps_per_epoch,
+            div_factor=10,
+        )
 
         return optimizer, scheduler
 

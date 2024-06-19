@@ -232,10 +232,10 @@ if __name__ == "__main__":
     #     "n_layers-kernel_size": [(2, 8), (3, 3), (4, 2)],
     # }
     hyperparameter_list = {
-        "lr": [6e-3],
+        "lr": [1e-2],
         "batch_size": args.batch_size,
-        "epochs": [50],
-        "n_layers-kernel_size": [(5, 2)],
+        "epochs": [20],
+        "n_layers-kernel_size": [(4, 2)],
     }
 
     n_random_samples = 60

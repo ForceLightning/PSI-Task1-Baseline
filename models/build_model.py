@@ -129,7 +129,7 @@ def get_tcan_traj_bbox_global(args):
         "enc_in_dim": 516,
         "enc_out_dim": 64,
         "dec_in_emb_dim": 0,
-        "dec_out_dim": 64,
+        "dec_out_dim": 128,
         "output_dim": 4,
         "n_layers": args.n_layers,
         "dropout": 0.125,
