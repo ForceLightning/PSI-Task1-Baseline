@@ -104,6 +104,7 @@ def main(args: DefaultArguments) -> tuple[float | np.floating, float]:
                 # ! This error appears to have something to do with setting `pin_memory=True` for the dataloaders.
                 print(torch.cuda.memory_summary(device="cuda:0", abbreviated=False))
                 print(f"{type(e)} {str(e)}\n{traceback.format_exc()}")
+                raise e
 
         case "driving_decision":
             train_driving(
@@ -179,20 +180,26 @@ if __name__ == "__main__":
             args.traj_model = True
             args.traj_loss = ["bbox_l1"]
             # args.batch_size = [256]
+            # args.batch_size = [64]
             args.batch_size = [256]
             args.predict_length = 45
             # args.model_name = "tcn_traj_bbox"
             # args.model_name = "tcn_traj_bbox_int"
             # args.model_name = "tcn_traj_global"
-            args.model_name = "tcan_traj_global"
+            args.model_name = "tcan_traj_bbox"
+            # args.model_name = "tcan_traj_bbox_int"
+            # args.model_name = "tcan_traj_global"
             args.loss_weights = {
                 "loss_intent": 0.0,
                 "loss_traj": 1.0,
                 "loss_driving": 0.0,
             }
-            args.load_image = True
-            args.backbone = "resnet50"
-            args.freeze_backbone = True
+            args.load_image = False
+            args.backbone = ""
+            args.freeze_backbone = False
+            # args.load_image = True
+            # args.backbone = "resnet50"
+            # args.freeze_backbone = True
             args.seq_overlap_rate = 1  # overlap rate for train/val set
             args.test_seq_overlap_rate = 1  # overlap for test set. if == 1, means overlap is one frame, following PIE
 
@@ -232,9 +239,10 @@ if __name__ == "__main__":
     #     "n_layers-kernel_size": [(2, 8), (3, 3), (4, 2)],
     # }
     hyperparameter_list = {
-        "lr": [1e-2],
+        # "lr": [1e-2],
+        "lr": [3e-3],
         "batch_size": args.batch_size,
-        "epochs": [20],
+        "epochs": [50],
         "n_layers-kernel_size": [(4, 2)],
     }
 

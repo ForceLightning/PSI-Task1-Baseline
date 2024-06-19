@@ -1,49 +1,57 @@
 import os
 import abc
 from copy import deepcopy
+from typing import Any, Generator, Literal
 
 import cv2
 import numpy as np
 import PIL
 import torch
 from PIL import Image
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Sampler
 from torchvision.transforms import v2
 
 from utils.args import DefaultArguments
 
 
-class VideoDataset(Dataset):
-    def __init__(self, data: dict, args: DefaultArguments, stage="train") -> None:
+class VideoDataset(Dataset[Any]):
+    def __init__(
+        self, data: dict[str, Any], args: DefaultArguments, stage: str = "train"
+    ) -> None:
         super().__init__()
         self.data = data
         self.args = args
         self.stage = stage
+        self.transform: v2.Compose
         self.set_transform()
         self.images_path = os.path.join(args.dataset_root_path, "frames")
 
     @abc.abstractmethod
-    def __getitem__(self, index: int) -> dict:
+    def __getitem__(self, index: int) -> dict[str, Any]:
         raise NotImplementedError("Method not implemented")
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.data["frame"])
 
     def load_images(
-        self, video_ids: list, frame_list: list, bboxes: list
+        self,
+        video_ids: list[str],
+        frame_list: list[int],
+        bboxes: list[list[float | int]],
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Loads the images from the local storage
 
-        Args:
-            video_ids (list): List of video ids
-            frame_list (list): List of frame ids
-            bboxes (list): List of frames of bounding boxes
+        :param video_ids: List of video IDs
+        :type video_ids: list[int]
+        :param frame_list: List of frame IDs
+        :type frame_list: list[int]
+        :param bboxes: List of sets of bounding boxes.
+        :type bboxes: list[list[float | int]]
 
-        Raises:
-            ValueError: Cropped image shape is empty
+        :raises ValueError: Cropped image shape is empty.
 
-        Returns:
-            tuple[Tensor | list]: Tuple of images and cropped images
+        :returns: Tuple of images and cropped images.
+        :rtype: tuple[torch.Tensor | torch.Tensor]
         """
         images = []
         cropped_images = []
@@ -75,7 +83,7 @@ class VideoDataset(Dataset):
 
         return torch.stack(images), torch.stack(cropped_images)
 
-    def rgb_loader(self, img_path: os.PathLike | str) -> cv2.typing.MatLike:
+    def rgb_loader(self, img_path: os.PathLike[Any] | str) -> cv2.typing.MatLike:
         """Loads the image in RGB format using OpenCV
 
         Args:
@@ -88,18 +96,21 @@ class VideoDataset(Dataset):
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         return img
 
-    def load_reason_features(self, video_ids, ped_ids, frame_list):
+    def load_reason_features(
+        self, video_ids: list[str], ped_ids: list[str], frame_list: list[int]
+    ) -> torch.Tensor | list[Any]:
         """Loads the reason features from the local storage
 
-        Args:
-            video_ids (list): List of video ids
-            ped_ids (list): List of pedestrian ids
-            frame_list (list): List of frame ids
-
-        Returns:
-            Tensor | list: List of reason features
+        :param video_ids: List of video IDs.
+        :type video_ids: list[str]
+        :param ped_ids: List of pedestrian IDs.
+        :type ped_ids: list[str]
+        :param frame_list: List of frame IDs.
+        :type frame_lsit: list[int]
+        :returns: List of reason features
+        :rtype: torch.Tensor | list[torch.Tensor]
         """
-        feature_list = []
+        feature_list: list[torch.Tensor] | torch.Tensor = []
         video_name = video_ids[0]
         if "rsn" in self.args.model_name:
             for i, fid in enumerate(frame_list):
@@ -116,19 +127,22 @@ class VideoDataset(Dataset):
         feature_list = [] if len(feature_list) < 1 else torch.stack(feature_list)
         return feature_list
 
-    def load_features(self, video_ids, ped_ids, frame_list):
+    def load_features(
+        self, video_ids: list[str], ped_ids: list[str], frame_list: list[int]
+    ) -> tuple[torch.Tensor | list[torch.Tensor], torch.Tensor | list[torch.Tensor]]:
         """Loads the features from the local storage
 
-        Args:
-            video_ids (list): List of video ids
-            ped_ids (list): List of pedestrian ids
-            frame_list (list): List of frame ids
-
-        Returns:
-            Tuple[Tensor | list]: Tuple of global and local features
+        :param video_ids: List of video IDs.
+        :type video_ids: list[str]
+        :param ped_ids: List of pedestrian IDs.
+        :type ped_ids: list[str]
+        :param frame_list: List of frame IDs.
+        :type frame_lsit: list[int]
+        :returns: Tuple of global and local features.
+        :rtype: tuple[torch.Tensor | list[torch.Tensor], torch.Tensor | list[torch.Tensor]]
         """
-        global_featmaps = []
-        local_featmaps = []
+        global_featmaps: list[torch.Tensor] | torch.Tensor = []
+        local_featmaps: list[torch.Tensor] | torch.Tensor = []
         video_name = video_ids[0]
         if "global" in self.args.model_name and self.args.freeze_backbone:
             for i, fid in enumerate(frame_list):
@@ -166,8 +180,8 @@ class VideoDataset(Dataset):
 
     def set_transform(self) -> None:
         """Sets the transformation for the images based on the stage of the dataset"""
-        # ! Consider that the backbone embeddings are being loaded at training time, should the
-        # ! transformations still perform random resized crops and horizontal flips?
+        # ! Chris: Consider that the backbone embeddings are being loaded at training time, should
+        # ! the transformations still perform random resized crops and horizontal flips?
         match (self.stage):
             case "train":
                 resize_size = 256
@@ -203,16 +217,19 @@ class VideoDataset(Dataset):
                     ]
                 )
 
-    def squarify(self, bbox: list, squarify_ratio: list, img_width: int) -> list:
+    def squarify(
+        self, bbox: list[float | int], squarify_ratio: float, img_width: int
+    ) -> list[float | int]:
         """Squarifies the bounding box based on the given ratio (1 for square, rectangle otherwise)
 
-        Args:
-            bbox (list): Bounding box coordinates
-            squarify_ratio (float): Ratio for squarifying the bounding box
-            img_width (int): Width of the image
-
-        Returns:
-            list: Squarified bounding box coordinates
+        :param bbox: Bounding box coordinates.
+        :type bbox: list[float | int]
+        :param squarify_ratio: Ratio for squarifying the bounding box.
+        :type squarify_ratio: float
+        :param img_width: Width of the image.
+        :type img_width: int
+        :returns: Squarified bounding box coordinates.
+        :rtype: list[float | int]
         """
         width = abs(bbox[0] - bbox[2])
         height = abs(bbox[1] - bbox[3])
@@ -232,28 +249,28 @@ class VideoDataset(Dataset):
 
     def jitter_bbox(
         self,
-        img: cv2.typing.MatLike | np.ndarray | PIL.Image.Image,
-        bbox: list,
-        mode: str,
+        img: cv2.typing.MatLike | np.ndarray[Any, Any] | Image.Image,
+        bboxes: list[list[float | int]],
+        mode: Literal["same", "enlarge", "move", "random_enlarge", "random_move"],
         ratio: float,
-    ) -> list:
+    ) -> list[list[float | int]]:
         """This method jitters the position or dimensions of the bounding box.
 
-        Args:
-            img (cv2.typing.MatLike | np.ndarray | PIL.Image.Image): Image to be cropped and/or
-            padded
-            bbox (list): Bounding box dimensions for cropping
-            mode (str): The type of padding or resizing:
-                'same' returns the bounding box unchanged
-                'enlarge' increases the size of bounding box based on the given ratio
-                'random_enlarge' increases the size of bounding box by randomly sampling a
-                value in [0,ratio)
-                'move' moves the center of the bounding box in each direction based on the given ratio
-            ratio (float): The ratio of change relative to the size of the bounding box
-                (for modes 'enlarge' and 'random_enlarge')
-
-        Returns:
-            list: Jittered bounding box coordinates
+        :param img: Image to be cropped and/or padded.
+        :type img: cv2.typing.MatLike | np.ndarray[Any, Any] | Image.Image
+        :param bboxes: List of bounding boxes for cropping.
+        :type bboxes: list[list[float | int]]
+        :param mode: The type of padding or resizing:
+            'same' returns the bounding box unchanged
+            'enlarge' increases the size of bounding box based on the given ratio
+            'random_enlarge' increases the size of bounding box by randomly sampling a
+            value in [0,ratio)
+            'move' moves the center of the bounding box in each direction based on the given ratio
+        :type mode: str
+        :param ratio: The ratio of change relative to the size of the bounding box (for modes
+            'enlarge' and 'random_enlarge')
+        :returns: Jittered bounding box coordinates.
+        :rtype: list[list[float | int]]
         """
         assert mode in [
             "same",
@@ -264,7 +281,7 @@ class VideoDataset(Dataset):
         ], f"mode {mode} is invalid."
 
         if mode == "same":
-            return bbox
+            return bboxes
 
         if mode in ["random_enlarge", "enlarge"]:
             jitter_ratio = abs(ratio)
@@ -279,8 +296,8 @@ class VideoDataset(Dataset):
             # random_sample * (b-a) + a
             jitter_ratio = np.random.random_sample() * jitter_ratio * 2 - jitter_ratio
 
-        jit_boxes = []
-        for b in bbox:
+        jit_boxes: list[list[float | int]] = []
+        for b in bboxes:
             bbox_width = b[2] - b[0]
             bbox_height = b[3] - b[1]
 
@@ -309,8 +326,10 @@ class VideoDataset(Dataset):
         return jit_boxes
 
     def bbox_sanity_check(
-        self, img: cv2.typing.MatLike | np.ndarray | PIL.Image.Image, bbox: list
-    ) -> list:
+        self,
+        img: cv2.typing.MatLike | np.ndarray[Any, Any] | Image.Image,
+        bbox: list[int | float],
+    ) -> list[int | float]:
         """This is to confirm that the bounding boxes are within image boundaries.
         Otherwise, modifications are applied.
 
@@ -336,10 +355,10 @@ class VideoDataset(Dataset):
 
     def img_pad(
         self,
-        img: cv2.typing.MatLike | np.ndarray | PIL.Image.Image,
+        img: cv2.typing.MatLike | np.ndarray[Any, Any] | Image.Image,
         mode: str = "warp",
         size: int = 224,
-    ) -> cv2.typing.MatLike | np.ndarray | PIL.Image.Image:
+    ) -> cv2.typing.MatLike | np.ndarray[Any, Any] | Image.Image | None:
         """Pads a given image, crops and/or pads a image given the boundries of the box needed.
 
         Args:
@@ -387,7 +406,7 @@ class VideoDataset(Dataset):
                     print("Error from np-array to Image: ", image.shape)
                     print(e)
 
-            padded_image = PIL.Image.new("RGB", (size, size))
+            padded_image = Image.new("RGB", (size, size))
             padded_image.paste(
                 image, ((size - img_size[0]) // 2, (size - img_size[1]) // 2)
             )
@@ -395,7 +414,7 @@ class VideoDataset(Dataset):
 
 
 class PedestrianIntentDataset(VideoDataset):
-    def __getitem__(self, index) -> dict:
+    def __getitem__(self, index: int) -> dict[str, Any]:
         """Gets the item with the given index
 
         Args:
@@ -418,15 +437,17 @@ class PedestrianIntentDataset(VideoDataset):
         # Do not load images if global_featmaps are used.
         if self.args.freeze_backbone:
             images = []
-        else:
+        elif self.args.load_image:
             images = self.load_images(video_ids[0], frame_list)  # load images
+        else:
+            images = []
 
         disagree_score = self.data["disagree_score"][index]
 
         assert len(bboxes) == self.args.max_track_size
         assert len(frame_list) == self.args.observe_length
 
-        if self.args.freeze_backbone:
+        if self.args.freeze_backbone and not self.args.load_image:
             global_featmaps, local_featmaps = self.load_features(
                 video_ids, ped_ids, frame_list
             )
@@ -468,8 +489,17 @@ class PedestrianIntentDataset(VideoDataset):
 
         return data
 
-    def load_images(self, video_name: str, frame_list: list) -> torch.Tensor:
-        images = []
+    def load_images(self, video_name: str, frame_list: list[int]) -> torch.Tensor:
+        """Loads images given the video name and list of frames
+
+        :param video_name: Name of the video file (without the extension).
+        :type video_name: str
+        :param frame_list: List of frames to load.
+        :type frame_list: list[int]
+        :returns: Video frames in tensor format.
+        :rtype: torch.Tensor
+        """
+        images: list[cv2.typing.MatLike | torch.Tensor] = []
 
         for frame_id in frame_list:
             # load original image
@@ -493,11 +523,13 @@ class PedestrianIntentDataset(VideoDataset):
 
 
 class DrivingDecisionDataset(VideoDataset):
-    def __getitem__(self, index: int):
+    def __getitem__(self, index: int) -> dict[str, Any]:
         """Gets the item with the given index
 
-        Args:
-            index (int): Index of the item
+        :param index: Index of the item.
+        :type index: int
+        :returns: Data dictionary at index.
+        :rtype: dict[str, Any]
         """
         video_ids = self.data["video_id"][index]
         frame_list = self.data["frame"][index][
@@ -543,8 +575,17 @@ class DrivingDecisionDataset(VideoDataset):
 
         return data
 
-    def load_images(self, video_name: str, frame_list: list) -> torch.Tensor:
-        images = []
+    def load_images(self, video_name: str, frame_list: list[int]) -> torch.Tensor:
+        """Loads images given the video filename (without ext) and the frame list.
+
+        :param video_name: Name of the video file (without file ext).
+        :type video_name: str
+        :param frame_list: List of frames to load.
+        :type frame_list: list[int]
+        :returns: Loaded frames.
+        :rtype: torch.Tensor
+        """
+        images: list[cv2.typing.MatLike | torch.Tensor] = []
 
         for frame_id in frame_list:
             # load original image
@@ -567,7 +608,7 @@ class DrivingDecisionDataset(VideoDataset):
         return torch.stack(images, dim=0)
 
 
-class MultiEpochsDataLoader(DataLoader):
+class MultiEpochsDataLoader(DataLoader[Any]):
     """Custom DataLoader to support caching of the dataset over multiple epochs."""
 
     def __init__(self, *args, **kwargs):
@@ -602,7 +643,7 @@ class MultiEpochsDataLoader(DataLoader):
 class _RepeatSampler:
     """Repeat sampler to support caching of the dataset over multiple epochs."""
 
-    def __init__(self, sampler) -> None:
+    def __init__(self, sampler: Sampler[Any]) -> None:
         self.sampler = sampler
 
     def __iter__(self):

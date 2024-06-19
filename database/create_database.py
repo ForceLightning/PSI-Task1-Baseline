@@ -2,6 +2,9 @@ import json
 import os
 import time
 import pickle
+from typing import Any
+
+from utils.args import DefaultArguments
 
 """
 Database organization
@@ -25,14 +28,14 @@ db = {
 """
 
 
-def create_database(args):
+def create_database(args: DefaultArguments):
     for split_name in ["train", "val", "test"]:
         with open(args.video_splits) as f:
             datasplits = json.load(f)
         db_log = os.path.join(args.database_path, split_name + "_db_log.txt")
         with open(db_log, "w") as f:
-            f.write(f"Initialize {split_name} database \n")
-            f.write(time.strftime("%d%b%Y-%Hh%Mm%Ss") + "\n")
+            _ = f.write(f"Initialize {split_name} database \n")
+            _ = f.write(time.strftime("%d%b%Y-%Hh%Mm%Ss") + "\n")
         # 1. Init db
         db = init_db(sorted(datasplits[split_name]), db_log, args)
         # 2. get intent, remove missing frames
@@ -73,7 +76,9 @@ def add_ped_case(db, video_name, ped_name, nlp_vid_uid_pairs):
         }
 
 
-def add_case(db, video_name, cog_annotation, cv_annotation, db_log):
+def add_case(
+    db: dict[str, Any], video_name: str, cog_annotation, cv_annotation, db_log
+):
     if video_name not in db:
         db[video_name] = {}
 
@@ -170,7 +175,9 @@ def add_case(db, video_name, cog_annotation, cv_annotation, db_log):
         ][vid_uid]["key_frame"][first_ann_idx : last_ann_idx + 1]
 
 
-def init_db(video_list, db_log, args):
+def init_db(
+    video_list: list[str], db_log: str, args: DefaultArguments
+) -> dict[str, Any]:
     db = {}
     #     data_split = 'train' # 'train', 'val', 'test'
     dataroot = args.dataset_root_path
@@ -194,7 +201,7 @@ def init_db(video_list, db_log, args):
                     cog_annotation = json.load(f)
             except:
                 with open(db_log, "a") as f:
-                    f.write(
+                    _ = f.write(
                         f"Error loading {video_name} driving decision annotation json \n"
                     )
                 continue
@@ -212,7 +219,7 @@ def init_db(video_list, db_log, args):
                     cv_annotation = json.load(f)
             except:
                 with open(db_log, "a") as f:
-                    f.write(f"Error loading {video_name} cv annotation json \n")
+                    _ = f.write(f"Error loading {video_name} cv annotation json \n")
                 continue
 
             db[video_name] = {}

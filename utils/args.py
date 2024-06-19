@@ -1,5 +1,5 @@
 import os
-from typing import Literal
+from typing import Any, Literal, TypedDict
 from dataclasses import dataclass, field
 
 ROOT_DIR = "../"
@@ -108,11 +108,11 @@ class DefaultArguments:
     task_name: (
         Literal["ped_intent"] | Literal["ped_traj"] | Literal["driving_decision"]
     ) = "ped_intent"
-    video_splits: os.PathLike | str = os.path.join(
+    video_splits: os.PathLike[Any] | str = os.path.join(
         ROOT_DIR, "splits", "PSI2_split.json"
     )
-    dataset_root_path: os.PathLike | str = os.path.abspath(ROOT_DIR)
-    database_path: os.PathLike | str = os.path.join(ROOT_DIR, "database")
+    dataset_root_path: os.PathLike[Any] | str = os.path.abspath(ROOT_DIR)
+    database_path: os.PathLike[Any] | str = os.path.join(ROOT_DIR, "database")
     database_file: str = "intent_database_train.pkl"
     fps: int = 30
     seq_overlap_rate: float = 0.9
@@ -168,3 +168,26 @@ class DefaultArguments:
     persist_dataloader: bool = True
     n_layers: int = 4
     kernel_size: int = 4
+
+
+class ModelOpts(TypedDict):
+    enc_in_dim: int
+    enc_out_dim: int
+    dec_in_emb_dim: int | None
+    dec_out_dim: int
+    output_dim: int
+    n_layers: int
+    dropout: float
+    kernel_size: int
+    observe_length: int
+    predict_length: int
+    return_sequence: bool
+    output_activation: (
+        Literal["None"]
+        | Literal["tanh"]
+        | Literal["sigmoid"]
+        | Literal["softmax"]
+        | None
+    )
+    use_skip_connections: bool
+    num_heads: int

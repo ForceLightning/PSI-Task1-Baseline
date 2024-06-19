@@ -1,21 +1,25 @@
-import os
-
-import numpy as np
 import torch
-
 from torch import nn
 
 from models.driving_modules.model_lstm_driving_global import ResLSTMDrivingGlobal
 from models.intent_modules.model_tcn_int_bbox import TCNINTBbox
 from models.traj_modules.model_tcn_traj_bbox import TCNTrajBbox, TCNTrajBboxInt
-from models.traj_modules.model_tcn_traj_semantic import TCANTrajGlobal, TCNTrajGlobal
+from models.traj_modules.model_tcn_traj_global import TCANTrajGlobal, TCNTrajGlobal
+from models.traj_modules.model_tcan_traj_bbox import TCANTrajBbox, TCANTrajBboxInt
 from utils.args import DefaultArguments
-
 from utils.cuda import *
 
 
-def build_model(args):
-    # Intent models
+def build_model(
+    args: DefaultArguments,
+) -> tuple[nn.Module, torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]:
+    """Builds the model, optimizer, and scheduler objects for training.
+
+    :param args: Training arguments.
+    :type args: DefaultArguments
+    :returns: Model, Optimizer, and Scheduler in a tuple.
+    :rtype: tuple[nn.Module, torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]
+    """
     match args.model_name:
         case "tcn_int_bbox":
             model = get_tcn_intent_bbox(args).to(DEVICE)
@@ -25,6 +29,10 @@ def build_model(args):
             model = get_tcn_traj_bbox_int(args).to(DEVICE)
         case "tcn_traj_global":
             model = get_tcn_traj_bbox_global(args).to(DEVICE)
+        case "tcan_traj_bbox":
+            model = get_tcan_traj_bbox(args).to(DEVICE)
+        case "tcan_traj_bbox_int":
+            model = get_tcan_traj_bbox_int(args).to(DEVICE)
         case "tcan_traj_global":
             model = get_tcan_traj_bbox_global(args).to(DEVICE)
         case "reslstm_driving_global":
@@ -38,7 +46,7 @@ def build_model(args):
 
 # 1. Intent prediction
 # 1.1 input bboxes only
-def get_tcn_intent_bbox(args):
+def get_tcn_intent_bbox(args: DefaultArguments) -> TCNINTBbox:
     model_configs = {}
     model_configs["intent_model_opts"] = {
         "enc_in_dim": 4,  # input bbox (normalized OR not) + img_context_feat_dim
@@ -52,15 +60,15 @@ def get_tcn_intent_bbox(args):
         "observe_length": args.observe_length,  # 15
         "predict_length": 1,  # only predict one intent
         "return_sequence": False,  # False for reason/intent/trust. True for trajectory
-        "output_activation": "None",
-        "use_skip_connection": True,  # [None | tanh | sigmoid | softmax]
+        "output_activation": "None",  # [None | tanh | sigmoid | softmax]
+        "use_skip_connection": True,
     }
     args.model_configs = model_configs
     model = TCNINTBbox(args, model_configs)
     return model
 
 
-def get_tcn_traj_bbox(args):
+def get_tcn_traj_bbox(args: DefaultArguments) -> TCNTrajBbox:
     model_configs = {}
     model_configs["traj_model_opts"] = {
         "enc_in_dim": 4,
@@ -81,7 +89,7 @@ def get_tcn_traj_bbox(args):
     return model
 
 
-def get_tcn_traj_bbox_int(args):
+def get_tcn_traj_bbox_int(args: DefaultArguments) -> TCNTrajBboxInt:
     model_configs = {}
     model_configs["traj_model_opts"] = {
         "enc_in_dim": 5,
@@ -102,7 +110,49 @@ def get_tcn_traj_bbox_int(args):
     return model
 
 
-def get_tcn_traj_bbox_global(args):
+def get_tcan_traj_bbox(args: DefaultArguments) -> TCNTrajBbox:
+    model_configs = {}
+    model_configs["traj_model_opts"] = {
+        "enc_in_dim": 4,
+        "enc_out_dim": 64,
+        "dec_in_emb_dim": 0,
+        "dec_out_dim": 64,
+        "output_dim": 4,
+        "n_layers": args.n_layers,
+        "dropout": 0.125,
+        "kernel_size": args.kernel_size,
+        "observe_length": args.observe_length,
+        "predict_length": args.predict_length,
+        "return_sequence": True,
+        "output_activation": "None",
+    }
+    args.model_configs = model_configs
+    model = TCANTrajBbox(args, model_configs["traj_model_opts"])
+    return model
+
+
+def get_tcan_traj_bbox_int(args: DefaultArguments) -> TCNTrajBboxInt:
+    model_configs = {}
+    model_configs["traj_model_opts"] = {
+        "enc_in_dim": 5,
+        "enc_out_dim": 64,
+        "dec_in_emb_dim": 0,
+        "dec_out_dim": 64,
+        "output_dim": 4,
+        "n_layers": args.n_layers,
+        "dropout": 0.125,
+        "kernel_size": args.kernel_size,
+        "observe_length": args.observe_length,
+        "predict_length": args.predict_length,
+        "return_sequence": True,
+        "output_activation": "None",
+    }
+    args.model_configs = model_configs
+    model = TCANTrajBboxInt(args, model_configs["traj_model_opts"])
+    return model
+
+
+def get_tcn_traj_bbox_global(args: DefaultArguments) -> TCNTrajGlobal:
     model_configs = {}
     model_configs["traj_model_opts"] = {
         "enc_in_dim": 4,
@@ -123,7 +173,7 @@ def get_tcn_traj_bbox_global(args):
     return model
 
 
-def get_tcan_traj_bbox_global(args):
+def get_tcan_traj_bbox_global(args: DefaultArguments) -> TCANTrajGlobal:
     model_configs = {}
     model_configs["traj_model_opts"] = {
         "enc_in_dim": 516,

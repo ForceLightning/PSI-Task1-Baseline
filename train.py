@@ -16,8 +16,8 @@ from utils.log import RecordResults
 from utils.resume_training import ResumeTrainingInfo
 from utils.cuda import *
 
-# scaler = GradScaler() if CUDA else None
-scaler = None
+scaler = GradScaler() if CUDA else None
+# scaler = None
 
 
 def train_intent(

@@ -125,4 +125,3 @@ class TCNTrajBboxInt(TCNTrajBbox):
             -1, self.predict_length, self.output_dim
         )
         return output
-

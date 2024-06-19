@@ -1,24 +1,21 @@
 from typing import Any
+import warnings
 
 import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.parametrizations import weight_norm
-from torchvision import models
 
-from models.TCN.tcn import TemporalConvAttnNet, TemporalConvNet
+from models.TCAN.tcan import TemporalConvAttnNet
+from models.TCN.tcn import TemporalConvNet
 from models.driving_modules.model_lstm_driving_global import ResCNNEncoder
-from utils.args import DefaultArguments
+from utils.args import DefaultArguments, ModelOpts
 from utils.cuda import *
-
-# TODO: (chris) Rename file to model_tcn_traj_global.py
 
 
 class TCNTrajGlobal(nn.Module):
-    def __init__(
-        self, args: DefaultArguments, model_opts: dict[str, int | float]
-    ) -> None:
+    def __init__(self, args: DefaultArguments, model_opts: ModelOpts) -> None:
         super().__init__()
 
         self.observe_length = args.observe_length
@@ -78,7 +75,7 @@ class TCNTrajGlobal(nn.Module):
         self.reason_embedding = "rsn" in self.args.model_name
         self.speed_embedding = "speed" in self.args.model_name
 
-    def forward(self, data):
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
         visual_feats = None
 
         # Handle loading embeddings from file (already loaded into the dataset instance)
@@ -109,8 +106,8 @@ class TCNTrajGlobal(nn.Module):
         )
         return output
 
-    def build_optimizer(self, args):
-        param_group = []
+    def build_optimizer(self, args: DefaultArguments):
+        param_group: list[dict[str, Any]] = []
         learning_rate = args.lr
 
         for module in self.module_list:
@@ -145,8 +142,8 @@ class TCNTrajGlobal(nn.Module):
 
         optimizer = torch.optim.Adam(param_group, lr=learning_rate, eps=1e-7)
 
-        for param_group in optimizer.param_groups:
-            param_group["lr0"] = param_group["lr"]
+        for opt_param_group in optimizer.param_groups:
+            opt_param_group["lr0"] = opt_param_group["lr"]
 
         # ! Breaking change: optimizer to use a one cycle learning rate policy instead.
         # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
@@ -160,8 +157,15 @@ class TCNTrajGlobal(nn.Module):
 
         return optimizer, scheduler
 
-    def lr_scheduler(self, optimizer, cur_epoch, args, gamma=10, power=0.75) -> None:
-        decay = (1 + gamma * cur_epoch / args.epoch) ** (-power)
+    def lr_scheduler(
+        self,
+        optimizer: torch.optim.Optimizer,
+        cur_epoch: int,
+        args: DefaultArguments,
+        gamma: float | int = 10,
+        power: float | int = 0.75,
+    ) -> None:
+        decay = (1 + gamma * cur_epoch / args.epochs) ** (-power)
         for param_group in optimizer.param_groups:
             param_group["lr"] = param_group["lr0"] * decay
             param_group["weight_decay"] = 1e-3
@@ -175,11 +179,22 @@ class TCNTrajGlobal(nn.Module):
 
 
 class TCANTrajGlobal(TCNTrajGlobal):
-    def __init__(
-        self, args: DefaultArguments, model_opts: dict[str, float | int]
-    ) -> None:
+    """A Temporal Convolutional Attention-based Network (TCAN) with a CNN backbone.
+
+    :param args: Training arguments.
+    :type args: DefaultArguments
+    :param model_opts: Model configuration options.
+    :type model_opts: ModelOpts
+    """
+
+    def __init__(self, args: DefaultArguments, model_opts: ModelOpts) -> None:
         super().__init__(args, model_opts)
         self.TCN_num_heads = model_opts["num_heads"]
+        if not self.TCN_num_heads:
+            warnings.warn(
+                '`model_opts["num_heads"]` value was missing, defaulting to 4.'
+            )
+            self.TCN_num_heads = 4
         self.temp_attn = True
         self.tcn = TemporalConvAttnNet(
             emb_size=self.TCN_enc_in_dim,
@@ -201,8 +216,8 @@ class TCANTrajGlobal(TCNTrajGlobal):
     def forward(
         self, data: dict[str, torch.Tensor | np.ndarray[Any, Any] | float | int]
     ) -> tuple[torch.Tensor | list[float]] | torch.Tensor:
-        # bs x ts x 256
-        visual_feats = None
+
+        visual_feats = None  # bs x ts x 256
 
         # Handle loading embeddings from file (already loaded into the dataset instance)
         if self.args.freeze_backbone:
