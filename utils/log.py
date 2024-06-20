@@ -1,7 +1,9 @@
 import json
 import os
+from typing import Any
 
 import numpy as np
+from numpy import typing as npt
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
@@ -13,13 +15,13 @@ from utils.args import DefaultArguments
 class RecordResults:
     def __init__(
         self,
-        args: DefaultArguments = DefaultArguments(),
-        intent=True,
-        traj=True,
-        driving=True,
-        reason=False,
-        evidential=False,
-        extract_prediction=False,
+        args: DefaultArguments,
+        intent: bool = True,
+        traj: bool = True,
+        driving: bool = True,
+        reason: bool = False,
+        evidential: bool = False,
+        extract_prediction: bool = False,
     ):
         self.args: DefaultArguments = args
         self.save_output = extract_prediction
@@ -43,7 +45,7 @@ class RecordResults:
 
         # self.log_args(self.args)
 
-    def log_args(self, args):
+    def log_args(self, args: DefaultArguments):
         args_file = os.path.join(self.args.checkpoint_path, "args.txt")
         with open(args_file, "a") as f:
             json.dump(args.__dict__, f, indent=2)
@@ -54,7 +56,7 @@ class RecordResults:
             args.__dict__ = json.load(f)
         """
 
-    def train_epoch_reset(self, epoch, nitern):
+    def train_epoch_reset(self, epoch: int, nitern: int):
         # 1. initialize log info
         # (1.1) loss log list
         self.log_loss_total = AverageMeter()
@@ -139,7 +141,14 @@ class RecordResults:
                     val = intent_results["ConfusionMatrix"][i][j]
                     writer.add_scalar(f"ConfusionMatrix/train{i}_{j}", val, self.epoch)
 
-    def eval_epoch_reset(self, epoch, nitern, intent=True, traj=True, args=None):
+    def eval_epoch_reset(
+        self,
+        epoch: int,
+        nitern: int,
+        intent: bool = True,
+        traj: bool = True,
+        args: DefaultArguments | None = None,
+    ):
         # 1. initialize log info
         self.log_loss_total = AverageMeter()
         self.log_loss_driving_speed = AverageMeter()
@@ -262,8 +271,8 @@ class RecordResults:
         self,
         itern: int,
         data: dict[str, torch.Tensor],
-        traj_gt: np.ndarray,
-        traj_pred: np.ndarray,
+        traj_gt: npt.NDArray[np.float32 | np.float64],
+        traj_pred: npt.NDArray[np.float32 | np.float64],
         loss: float,
         loss_traj: float,
     ):
@@ -321,8 +330,8 @@ class RecordResults:
         self,
         itern: int,
         data: dict[str, torch.Tensor],
-        traj_gt: np.ndarray,
-        traj_pred: np.ndarray,
+        traj_gt: npt.NDArray[np.float32 | np.float64],
+        traj_pred: npt.NDArray[np.float32 | np.float64],
     ):
         # 3. Update training info
         self.frames_list.extend(
@@ -332,7 +341,7 @@ class RecordResults:
         self.video_list.extend(data["video_id"])  # bs
         self.ped_list.extend(data["ped_id"])
         # (3.1) loss log list
-        bs, ts, dim = traj_gt.shape  # bs x 45 x 4
+        # bs, ts, dim = traj_gt.shape  # bs x 45 x 4
         self.traj_ori_gt.extend(data["original_bboxes"].detach().cpu().numpy())
 
         if traj_pred.size != 0:

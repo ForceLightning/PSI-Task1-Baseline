@@ -4,6 +4,7 @@ from typing import Any, Optional
 from dataclasses import dataclass
 
 import numpy as np
+from numpy import typing as npt
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
@@ -60,11 +61,13 @@ class IntentPrediction:
     acc: float
     f1: float
     mAcc: float
-    confusion_matrix: np.ndarray
+    confusion_matrix: npt.NDArray[np.int32 | np.int64 | np.float32 | np.float64]
 
 
 def measure_intent_prediction(
-    target: np.ndarray, prediction: np.ndarray, args: DefaultArguments
+    target: npt.NDArray[np.float32 | np.float64],
+    prediction: npt.NDArray[np.float32 | np.float64],
+    args: DefaultArguments,
 ) -> IntentPrediction:
     print("Evaluating Intent ...")
     results = {
@@ -97,10 +100,10 @@ def measure_intent_prediction(
 
 
 def evaluate_traj(
-    groundtruth: str | os.PathLike = "",
-    prediction: str | os.PathLike = "",
+    groundtruth: str | os.PathLike = "",  # type: ignore[reportMissingTypeArgument]
+    prediction: str | os.PathLike = "",  # type: ignore[reportMissingTypeArgument]
     args: DefaultArguments = DefaultArguments(),
-) -> np.floating:
+) -> np.floating[Any]:
     with open(groundtruth, "r") as f:
         gt_traj = json.load(f)
 
@@ -114,9 +117,9 @@ def evaluate_traj(
             for fid in gt_traj[vid][pid].keys():
                 gt.append(gt_traj[vid][pid][fid]["traj"])
                 pred.append(pred_traj[vid][pid][fid]["traj"])
-    gt = np.array(gt)
-    pred = np.array(pred)
-    traj_results = measure_traj_prediction(gt, pred, args)
+    gt_np: npt.NDArray[np.float32 | np.float64] = np.array(gt)
+    pred_np: npt.NDArray[np.float32 | np.float64] = np.array(pred)
+    traj_results = measure_traj_prediction(gt_np, pred_np, args)
 
     for key in [
         "ADE",
@@ -133,7 +136,9 @@ def evaluate_traj(
 
 
 def measure_traj_prediction(
-    target: np.ndarray, prediction: np.ndarray, args: DefaultArguments
+    target: npt.NDArray[np.float32 | np.float64],
+    prediction: npt.NDArray[np.float32 | np.float64],
+    args: DefaultArguments,
 ) -> dict[str, dict[str, int]]:
     print("Evaluating Trajectory ...")
     target = np.array(target)

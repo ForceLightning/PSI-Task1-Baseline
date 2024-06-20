@@ -1,4 +1,5 @@
 import os
+from typing import Any
 
 import numpy as np
 from torch import nn
@@ -28,20 +29,30 @@ class TrainIterGlobal(TrainDataLoaderIter):
         super().__init__(*args, **kwargs)
         self.args = ag
 
-    def inputs_labels_from_batch(self, batch_data):
+    def inputs_labels_from_batch(
+        self,
+        batch_data: dict[
+            {
+                "global_featmaps": list[Any] | torch.Tensor,
+                "image": list[Any] | torch.Tensor,
+                "bboxes": torch.Tensor,
+            }
+        ],
+    ) -> tuple[tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         out: torch.Tensor = batch_data["bboxes"][:, self.args.observe_length :, :].type(
             FloatTensor
         )
+        bbox: torch.Tensor
         if self.args.freeze_backbone:
-            visual_embeddings = batch_data["global_featmaps"]
+            visual_embeddings: torch.Tensor = batch_data["global_featmaps"]
             bbox = batch_data["bboxes"][:, : self.args.observe_length, :].type(
                 FloatTensor
             )
             return (visual_embeddings, bbox), out
 
-        images = batch_data["image"][:, : self.args.observe_length, :, :, :].type(
-            FloatTensor
-        )
+        images: torch.Tensor = batch_data["image"][
+            :, : self.args.observe_length, :, :, :
+        ].type(FloatTensor)
         bbox = batch_data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
 
         return (images, bbox), out

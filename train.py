@@ -1,12 +1,13 @@
 import collections
 import gc
 import os
+from typing import Any
 
 import numpy as np
 import torch
 from torch import nn
 from torch.cuda.amp.grad_scaler import GradScaler
-from torch.optim.lr_scheduler import OneCycleLR
+from torch.optim.lr_scheduler import OneCycleLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard.writer import SummaryWriter
 
@@ -24,8 +25,8 @@ def train_intent(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler,
-    train_loader: DataLoader,
-    val_loader: DataLoader,
+    train_loader: DataLoader[Any],
+    val_loader: DataLoader[Any],
     args: DefaultArguments,
     recorder: RecordResults,
     writer: SummaryWriter,
@@ -39,7 +40,8 @@ def train_intent(
         ).to(DEVICE),
         "MSELoss": torch.nn.MSELoss(reduction="none").to(DEVICE),
         "BCELoss": torch.nn.BCELoss().to(DEVICE),
-        "CELoss": torch.nn.CrossEntropyLoss(),
+        "CELoss": torch.nn.CrossEntropyLoss().to(DEVICE),
+        "SmoothL1Loss": torch.nn.SmoothL1Loss().to(DEVICE),
     }
     epoch_loss = {"loss_intent": [], "loss_traj": []}
     for epoch in range(1, args.epochs + 1):
@@ -217,19 +219,24 @@ def train_traj(
         DEVICE
     )  # n_neg_class_samples(5118)/n_pos_class_samples(11285)
     # NOTE: Chris: I suspect that the NaN values may be due to the implementation of the loss functions.
-    criterions = {
+    criterions: dict[str, nn.Module] = {
         "BCEWithLogitsLoss": torch.nn.BCEWithLogitsLoss(
             reduction="none", pos_weight=pos_weight
         ).to(DEVICE),
-        "MSELoss": torch.nn.MSELoss(reduction="none").to(DEVICE),
+        "MSELoss": torch.nn.MSELoss().to(DEVICE),
         "BCELoss": torch.nn.BCELoss().to(DEVICE),
         "CELoss": torch.nn.CrossEntropyLoss().to(DEVICE),
         "L1Loss": torch.nn.L1Loss().to(DEVICE),
+        "SmoothL1Loss": torch.nn.SmoothL1Loss().to(DEVICE),
+        "HuberLoss": torch.nn.HuberLoss().to(DEVICE),
     }
-    epoch_loss = {"loss_intent": [], "loss_traj": []}
+    epoch_loss: dict[str, list[float | np.floating[Any]]] = {
+        "loss_intent": [],
+        "loss_traj": [],
+    }
 
     for epoch in range(resume_info.current_epoch, args.epochs + 1):
-        niters = np.ceil(len(train_loader.dataset) / args.batch_size)
+        niters = int(np.ceil(len(train_loader.dataset) / args.batch_size))
         recorder.train_epoch_reset(epoch, niters)
         epoch_loss = train_traj_epoch(
             epoch,
@@ -243,7 +250,9 @@ def train_traj(
             recorder,
             writer,
         )
-        if not isinstance(scheduler, OneCycleLR):
+        if not isinstance(scheduler, OneCycleLR) and not isinstance(
+            scheduler, ReduceLROnPlateau
+        ):
             scheduler.step()
 
         # Purge cache.
@@ -259,9 +268,19 @@ def train_traj(
 
         if (epoch + 1) % args.val_freq == 0:
             print(f"Validate at epoch {epoch}")
-            niters = np.ceil(len(val_loader.dataset) / args.batch_size)
+            niters = int(np.ceil(len(val_loader.dataset) / args.batch_size))
             recorder.eval_epoch_reset(epoch, niters)
-            validate_traj(epoch, model, val_loader, args, recorder, writer)
+            val_loss = validate_traj(
+                epoch,
+                model,
+                val_loader,
+                args,
+                recorder,
+                writer,
+                criterions["MSELoss"],
+            )
+            if isinstance(scheduler, ReduceLROnPlateau):
+                scheduler.step(val_loss)
 
         # Save training resumption info.
         torch.save(model.state_dict(), f"{args.checkpoint_path}/latest.pth")
@@ -277,12 +296,12 @@ def train_traj_epoch(
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler,
     criterions: dict[str, nn.Module],
-    epoch_loss: dict[str, np.floating | float],
-    dataloader: DataLoader,
+    epoch_loss: dict[str, list[np.floating[Any] | float]],
+    dataloader: DataLoader[Any],
     args: DefaultArguments,
     recorder: RecordResults,
     writer: SummaryWriter,
-) -> dict[str, np.floating | float]:
+) -> dict[str, list[np.floating[Any] | float]]:
     """Trains the model over 1 epoch.
 
     :param epoch: Current epoch value.
@@ -330,7 +349,7 @@ def train_traj_epoch(
                     batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
                     loss_traj += loss_bbox_l1
                 if "bbox_l2" in args.traj_loss:
-                    loss_bbox_l2 = torch.mean(criterions["MSELoss"](traj_pred, traj_gt))
+                    loss_bbox_l2 = criterions["MSELoss"](traj_pred, traj_gt)
                     batch_losses["loss_bbox_l2"].append(loss_bbox_l2.item())
                     loss_traj += loss_bbox_l2
 

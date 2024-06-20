@@ -1,8 +1,10 @@
 import os
 import pickle
+from typing import Any
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 
 from data.custom_dataset import (
     DrivingDecisionDataset,
@@ -10,9 +12,12 @@ from data.custom_dataset import (
     PedestrianIntentDataset,
 )
 from data.process_sequence import generate_data_sequence
+from utils.args import DefaultArguments
 
 
-def get_dataloader(args, shuffle_train=True, drop_last_train=True):
+def get_dataloader(
+    args: DefaultArguments, shuffle_train: bool = True, drop_last_train: bool = True
+) -> tuple[DataLoader[Any], DataLoader[Any], DataLoader[Any]]:
     task = args.task_name.split("_")[1]
 
     with open(
@@ -56,7 +61,7 @@ def get_dataloader(args, shuffle_train=True, drop_last_train=True):
     print(len(train_dataset), len(val_dataset), len(test_dataset))
 
     if not args.persist_dataloader:
-        train_loader = torch.utils.data.DataLoader(
+        train_loader = DataLoader(
             train_dataset,
             batch_size=args.batch_size,
             shuffle=shuffle_train,
@@ -65,7 +70,7 @@ def get_dataloader(args, shuffle_train=True, drop_last_train=True):
             drop_last=drop_last_train,
             num_workers=8,
         )
-        val_loader = torch.utils.data.DataLoader(
+        val_loader = DataLoader(
             val_dataset,
             batch_size=args.batch_size,
             shuffle=False,
@@ -76,7 +81,7 @@ def get_dataloader(args, shuffle_train=True, drop_last_train=True):
         )
         test_loader = None
         if len(test_dataset) > 0:
-            test_loader = torch.utils.data.DataLoader(
+            test_loader = DataLoader(
                 test_dataset,
                 batch_size=args.batch_size,
                 shuffle=False,

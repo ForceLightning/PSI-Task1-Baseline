@@ -249,7 +249,11 @@ class VideoDataset(Dataset[Any]):
 
     def jitter_bbox(
         self,
-        img: cv2.typing.MatLike | np.ndarray[Any, Any] | Image.Image,
+        img: (
+            cv2.typing.MatLike
+            | npt.NDArray[np.float32 | np.float64 | np.uint8]
+            | Image.Image
+        ),
         bboxes: list[list[float | int]],
         mode: Literal["same", "enlarge", "move", "random_enlarge", "random_move"],
         ratio: float,
@@ -257,7 +261,7 @@ class VideoDataset(Dataset[Any]):
         """This method jitters the position or dimensions of the bounding box.
 
         :param img: Image to be cropped and/or padded.
-        :type img: cv2.typing.MatLike | np.ndarray[Any, Any] | Image.Image
+        :type img: cv2.typing.MatLike | np.NDArray[np.float32 | np.float64 | np.uint8] | Image.Image
         :param bboxes: List of bounding boxes for cropping.
         :type bboxes: list[list[float | int]]
         :param mode: The type of padding or resizing:
@@ -327,14 +331,18 @@ class VideoDataset(Dataset[Any]):
 
     def bbox_sanity_check(
         self,
-        img: cv2.typing.MatLike | np.ndarray[Any, Any] | Image.Image,
+        img: (
+            cv2.typing.MatLike
+            | npt.NDArray[np.float32 | np.float64 | np.uint8]
+            | Image.Image
+        ),
         bbox: list[int | float],
     ) -> list[int | float]:
         """This is to confirm that the bounding boxes are within image boundaries.
         Otherwise, modifications are applied.
 
         Args:
-            img (cv2.typing.MatLike | np.ndarray | PIL.Image.Image): Image to be cropped and/or
+            img (cv2.typing.MatLike | npt.NDArray[np.float32 | np.float64 | np.uint8] | PIL.Image.Image): Image to be cropped and/or
             padded
             bbox (list): Bounding box dimensions for cropping
 
@@ -355,14 +363,23 @@ class VideoDataset(Dataset[Any]):
 
     def img_pad(
         self,
-        img: cv2.typing.MatLike | np.ndarray[Any, Any] | Image.Image,
+        img: (
+            cv2.typing.MatLike
+            | npt.NDArray[np.float32 | np.float64 | np.uint8]
+            | Image.Image
+        ),
         mode: str = "warp",
         size: int = 224,
-    ) -> cv2.typing.MatLike | np.ndarray[Any, Any] | Image.Image | None:
+    ) -> (
+        cv2.typing.MatLike
+        | npt.NDArray[np.float32 | np.float64 | np.uint8]
+        | Image.Image
+        | None
+    ):
         """Pads a given image, crops and/or pads a image given the boundries of the box needed.
 
         Args:
-            img (cv2.typing.MatLike | np.ndarray | PIL.Image.Image): Image to be cropped and/or
+            img (cv2.typing.MatLike | npt.NDArray | PIL.Image.Image): Image to be cropped and/or
             padded
             mode (str, optional): The type of padding or resizing. Defaults to "warp".
                 - 'warp': crops the bounding box and resize to the output size.
@@ -376,7 +393,7 @@ class VideoDataset(Dataset[Any]):
             size (int, optional): The desired size of output. Defaults to 224.
 
         Returns:
-            cv2.typing.MatLike | np.ndarray | PIL.Image.Image: Padded image
+            cv2.typing.MatLike | npt.NDArray | PIL.Image.Image: Padded image
         """
         assert mode in [
             "same",

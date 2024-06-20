@@ -2,6 +2,7 @@ from datetime import datetime
 import json
 import os
 import traceback
+from typing import Any
 
 import numpy as np
 from sklearn.model_selection import ParameterSampler
@@ -21,7 +22,7 @@ from utils.log import RecordResults
 from utils.args import DefaultArguments
 
 
-def main(args: DefaultArguments) -> tuple[float | np.floating, float]:
+def main(args: DefaultArguments) -> tuple[float | np.floating[Any], float]:
     writer = SummaryWriter(args.checkpoint_path)
     recorder = RecordResults(args)
     """ 1. Load database """
@@ -242,7 +243,7 @@ if __name__ == "__main__":
         "lr": [1e-2],
         # "lr": [3e-3],
         "batch_size": args.batch_size,
-        "epochs": [20],
+        "epochs": [50],
         "n_layers-kernel_size": [(4, 2)],
     }
 

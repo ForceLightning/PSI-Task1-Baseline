@@ -1,9 +1,11 @@
 import json
 import os
+from typing import Any
 
 import torch
 from torch import nn
 from torch.utils.tensorboard.writer import SummaryWriter
+from torch.utils.data import DataLoader
 
 from utils.args import DefaultArguments
 from utils.cuda import *
@@ -114,16 +116,22 @@ def predict_intent(model, dataloader, args, dset="test"):
 def validate_traj(
     epoch: int,
     model: nn.Module,
-    dataloader: torch.utils.data.DataLoader,
-    args,
+    dataloader: DataLoader[Any],
+    args: DefaultArguments,
     recorder: RecordResults,
     writer: SummaryWriter,
+    criterion: nn.Module,
 ):
-    model.eval()
+    _ = model.eval()
     niters = len(dataloader)
+    val_losses: list[torch.Tensor] = []
     for itern, data in enumerate(dataloader):
-        traj_pred = model(data)
-        traj_gt = data["bboxes"][:, args.observe_length :, :].type(FloatTensor)
+        traj_pred: torch.Tensor = model(data)
+        traj_gt: torch.Tensor = data["bboxes"][:, args.observe_length :, :].type(
+            FloatTensor
+        )
+        val_loss: torch.Tensor = criterion(traj_pred, traj_gt)
+        val_losses.append(val_loss)
         # bs, ts, _ = traj_gt.shape
         # if args.normalize_bbox == 'subtract_first_frame':
         #     traj_pred = traj_pred + data['bboxes'][:, :1, :].type(FloatTensor)
@@ -137,30 +145,33 @@ def validate_traj(
         if itern % args.print_freq == 0:
             print(f"Epoch {epoch}/{args.epochs} | Batch {itern}/{niters}")
 
+    val_loss_agg: torch.Tensor = torch.mean(torch.stack(val_losses))
     recorder.eval_traj_epoch_calculate(writer)
 
-    return recorder
+    return val_loss_agg
 
 
 def predict_traj(
     model: nn.Module,
-    dataloader: torch.utils.data.DataLoader,
+    dataloader: DataLoader[Any],
     args: DefaultArguments,
     dset: str = "test",
 ) -> None:
-    model.eval()
+    _ = model.eval()
     dt = {}
     for itern, data in enumerate(dataloader):
-        traj_pred = model(data)
+        traj_pred: torch.Tensor = model(data)
         # traj_gt = data['original_bboxes'][:, args.observe_length:, :].type(FloatTensor)
-        traj_gt = data["bboxes"][:, args.observe_length :, :].type(FloatTensor)
-        bs, ts, _ = traj_gt.shape
+        traj_gt: torch.Tensor = data["bboxes"][:, args.observe_length :, :].type(
+            FloatTensor
+        )
+        # bs, ts, _ = traj_gt.shape
         # print("Prediction: ", traj_pred.shape)
 
         for i in range(len(data["frames"])):  # for each sample in a batch
-            vid = data["video_id"][i]  # str list, bs x 60
-            pid = data["ped_id"][i]  # str list, bs x 60
-            fid = (
+            vid: str = data["video_id"][i]  # str list, bs x 60
+            pid: str = data["ped_id"][i]  # str list, bs x 60
+            fid: int = (
                 data["frames"][i][-1] + 1
             ).item()  # int list, bs x 15, observe 0~14, predict 15th intent
 
@@ -179,20 +190,27 @@ def predict_traj(
         json.dump(dt, f)
 
 
-def get_test_traj_gt(model, dataloader, args, dset="test"):
-    model.eval()
+def get_test_traj_gt(
+    model: nn.Module,
+    dataloader: DataLoader,  # type: ignore[reportMissingTypeArgument]
+    args: DefaultArguments,
+    dset: str = "test",
+) -> None:
+    _ = model.eval()
     gt = {}
-    for itern, data in enumerate(dataloader):
-        traj_pred = model(data)
-        traj_gt = data["bboxes"][:, args.observe_length :, :].type(FloatTensor)
+    for data in dataloader:
+        # traj_pred: torch.Tensor = model(data)
+        traj_gt: torch.Tensor = data["bboxes"][:, args.observe_length :, :].type(
+            FloatTensor
+        )
         # traj_gt = data['original_bboxes'][:, args.observe_length:, :].type(FloatTensor)
-        bs, ts, _ = traj_gt.shape
+        # bs, ts, _ = traj_gt.shape
         # print("Prediction: ", traj_pred.shape)
 
         for i in range(len(data["frames"])):  # for each sample in a batch
-            vid = data["video_id"][i]  # str list, bs x 60
-            pid = data["ped_id"][i]  # str list, bs x 60
-            fid = (
+            vid: str = data["video_id"][i]  # str list, bs x 60
+            pid: str = data["ped_id"][i]  # str list, bs x 60
+            fid: int = (
                 data["frames"][i][-1] + 1
             ).item()  # int list, bs x 15, observe 0~14, predict 15th intent
 

@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, overload
 import warnings
 
 import numpy as np
@@ -75,44 +75,64 @@ class TCNTrajGlobal(nn.Module):
         self.reason_embedding = "rsn" in self.args.model_name
         self.speed_embedding = "speed" in self.args.model_name
 
+    @overload
+    def forward(self, data: tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor: ...
+
+    @overload
+    def forward(
+        self,
+        data: dict[
+            {
+                "global_featmaps": list[Any] | torch.Tensor,
+                "image": list[Any] | torch.Tensor,
+                "bboxes": torch.Tensor,
+            }
+        ],
+    ) -> torch.Tensor: ...
+
     def forward(
         self,
         data: (
-            dict[str, torch.Tensor | np.ndarray[Any, Any] | float | int]
+            dict[
+                {
+                    "global_featmaps": list[Any] | torch.Tensor,
+                    "image": list[Any] | torch.Tensor,
+                    "bboxes": torch.Tensor,
+                }
+            ]
             | tuple[torch.Tensor, torch.Tensor]
         ),
     ) -> torch.Tensor:
-        visual_feats = None
+        visual_feats: torch.Tensor
+        match data:
+            case (visuals, bbox):
+                assert (
+                    visuals.shape[1] == self.args.observe_length
+                ), f"Temporal dimension of visual embeddings or images {visuals.shape[1]} does not match `observe_length` {self.args.observe_length}"
+                visual_feats = self.cnn_encoder(visuals)
+            case dict():  # The TypedDict becomes a plain dict at runtime.
+                # Handle loading embeddings from file (already loaded into the dataset instance)
+                if self.args.freeze_backbone:
+                    visuals = data["global_featmaps"]
+                    bbox = data["bboxes"][:, : self.args.observe_length, :].type(
+                        FloatTensor
+                    )  # bs x ts x 4
+                else:
+                    visuals = data["image"][
+                        :, : self.args.observe_length, :, :, :
+                    ].type(FloatTensor)
+                    bbox = data["bboxes"][:, : self.args.observe_length, :].type(
+                        FloatTensor
+                    )  # bs x ts x 4
+                assert (
+                    visuals.shape[1] == self.args.observe_length
+                ), f"Temporal dimension of visual embeddings or images {visuals.shape[1]} does not match `observe_length` {self.args.observe_length}"
 
-        # Handle loading embeddings from file (already loaded into the dataset instance)
-        if self.args.freeze_backbone:
-            if isinstance(
-                data, dict
-            ):  # Handles the case where data is passed as a dict
-                visual_embeddings = data["global_featmaps"], data["bboxes"]
-                bbox = data["bboxes"][:, : self.args.observe_length, :].type(
-                    FloatTensor
-                )  # bs x ts x 4
-            else:  # Otherwise, unpack the tuple.
-                visual_embeddings, bbox = data
-            visual_feats = self.cnn_encoder(visual_embeddings)
-        else:
-            if isinstance(data, dict):
-                images = data["image"][:, : self.args.observe_length, :, :, :].type(
-                    FloatTensor
-                )
-                bbox = data["bboxes"][:, : self.args.observe_length, :].type(
-                    FloatTensor
-                )  # bs x ts x 4
-            else:
-                images, bbox = data
-            assert images.shape[1] == self.args.observe_length
-            visual_feats = self.cnn_encoder(images)  # bs x ts x 256
-        bbox = data["bboxes"][:, : self.args.observe_length, :].type(
-            FloatTensor
-        )  # bs x ts x 4
+                visual_feats = self.cnn_encoder(visuals)
 
-        assert bbox.shape[1] == self.args.observe_length
+        assert (
+            bbox.shape[1] == self.args.observe_length
+        ), f"Temporal dimension of bounding boxes {bbox.shape[1]} does not match `observe_length` {self.args.observe_length}"
 
         tcn_input = torch.cat([visual_feats, bbox], dim=2)  # bs x (512 + 4) x ts
 
@@ -167,14 +187,14 @@ class TCNTrajGlobal(nn.Module):
 
         # WARNING: Breaking change: optimizer to use a one cycle learning rate policy instead.
         #
-        # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
-        scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            optimizer,
-            learning_rate,
-            epochs=args.epochs,
-            steps_per_epoch=args.steps_per_epoch,
-            div_factor=10,
-        )
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+        # scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        #     optimizer,
+        #     learning_rate,
+        #     epochs=args.epochs,
+        #     steps_per_epoch=args.steps_per_epoch,
+        #     div_factor=10,
+        # )
 
         return optimizer, scheduler
 
@@ -234,56 +254,81 @@ class TCANTrajGlobal(TCNTrajGlobal):
 
         self.module_list = [self.cnn_encoder, self.tcn, self.fc]
 
+    @overload
+    def forward(
+        self,
+        data: dict[
+            {
+                "global_featmaps": list[Any] | torch.Tensor,
+                "image": list[Any] | torch.Tensor,
+                "bboxes": torch.Tensor,
+            }
+        ],
+    ) -> torch.Tensor: ...
+
+    @overload
+    def forward(self, data: tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor: ...
+
     def forward(
         self,
         data: (
-            dict[str, torch.Tensor | np.ndarray[Any, Any] | float | int]
+            dict[
+                {
+                    "global_featmaps": list[Any] | torch.Tensor,
+                    "image": list[Any] | torch.Tensor,
+                    "bboxes": torch.Tensor,
+                }
+            ]
             | tuple[torch.Tensor, torch.Tensor]
         ),
     ) -> torch.Tensor:
-        visual_feats = None
+        visual_feats: torch.Tensor
+        match data:
+            case (visuals, bbox):
+                assert (
+                    visuals.shape[1] == self.args.observe_length
+                ), f"Temporal dimension of visual embeddings or images {visuals.shape[1]} does not match `observe_length` {self.args.observe_length}"
+                visual_feats = self.cnn_encoder(visuals)
+            case dict():  # The TypedDict becomes a plain dict at runtime.
+                # Handle loading embeddings from file (already loaded into the dataset instance)
+                if self.args.freeze_backbone:
+                    visuals = data["global_featmaps"]
+                    bbox = data["bboxes"][:, : self.args.observe_length, :].type(
+                        FloatTensor
+                    )  # bs x ts x 4
+                else:
+                    visuals = data["image"][
+                        :, : self.args.observe_length, :, :, :
+                    ].type(FloatTensor)
+                    bbox = data["bboxes"][:, : self.args.observe_length, :].type(
+                        FloatTensor
+                    )  # bs x ts x 4
+                assert (
+                    visuals.shape[1] == self.args.observe_length
+                ), f"Temporal dimension of visual embeddings or images {visuals.shape[1]} does not match `observe_length` {self.args.observe_length}"
 
-        # Handle loading embeddings from file (already loaded into the dataset instance)
-        if self.args.freeze_backbone:
-            if isinstance(
-                data, dict
-            ):  # Handles the case where data is passed as a dict
-                visual_embeddings = data["global_featmaps"]
-                bbox = data["bboxes"][:, : self.args.observe_length, :].type(
-                    FloatTensor
-                )  # bs x ts x 4
-            else:  # Otherwise, unpack the tuple.
-                visual_embeddings, bbox = data
-            visual_feats = self.cnn_encoder(visual_embeddings)
-        else:
-            if isinstance(data, dict):
-                images = data["image"][:, : self.args.observe_length, :, :, :].type(
-                    FloatTensor
-                )
-                bbox = data["bboxes"][:, : self.args.observe_length, :].type(
-                    FloatTensor
-                )  # bs x ts x 4
-            else:
-                images, bbox = data
-            assert images.shape[1] == self.args.observe_length
-            visual_feats = self.cnn_encoder(images)  # bs x ts x 256
+                visual_feats = self.cnn_encoder(visuals)
 
-        assert bbox.shape[1] == self.args.observe_length
+        assert (
+            bbox.shape[1] == self.args.observe_length
+        ), f"Temporal dimension of bounding boxes {bbox.shape[1]} does not match `observe_length` {self.args.observe_length}"
+
+        visual_feats: torch.Tensor = self.cnn_encoder(visuals)
 
         # TCAN input should be (bs, channels, ts)
         tcn_input = torch.cat([visual_feats, bbox], dim=2)  # bs x ts x (512 + 4)
         # tcn_input = tcn_input.transpose(1, 2)  # bs x (512 + 4) x ts
 
-        tcn_output, attn_weight_list = None, None
+        tcn_output: torch.Tensor
         if self.temp_attn:
-            tcn_output, attn_weight_list = self.tcn(tcn_input)
+            tcn_output, _ = self.tcn(tcn_input)
         else:
             tcn_output = self.tcn(tcn_input)
 
         tcn_output = tcn_output.transpose(1, 2)
         tcn_output = tcn_output.reshape(-1, self.TCN_dec_out_dim * self.observe_length)
 
-        output = self.fc(tcn_output)
+        output: torch.Tensor = self.fc(tcn_output)
         output = self.activation(output).reshape(
             -1, self.predict_length, self.output_dim
         )

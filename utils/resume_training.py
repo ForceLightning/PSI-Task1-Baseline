@@ -21,7 +21,7 @@ class ResumeTrainingInfo:
     num_epochs: int
     current_epoch: int
 
-    def dump_resume_info(self, checkpoint_path: str | os.PathLike):
+    def dump_resume_info(self, checkpoint_path: str | os.PathLike):  # type: ignore[reportMissingTypeArgument]
         """Dumps training resumption info.
 
         :param checkpoint_path: Path to checkpoint directory.
@@ -33,7 +33,7 @@ class ResumeTrainingInfo:
             json.dump(dataclasses.asdict(self), f)
 
     @classmethod
-    def load_resume_info(cls, checkpoint_path: str | os.PathLike):
+    def load_resume_info(cls, checkpoint_path: str | os.PathLike) -> None:  # type: ignore[reportMissingTypeArgument]
         """Loads training resumption info.
 
         :param checkpoint_path: Path to checkpoint directory.
@@ -43,7 +43,7 @@ class ResumeTrainingInfo:
         """
         if os.path.exists(resume_path := os.path.join(checkpoint_path, "resume.json")):
             with open(resume_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+                data: dict[{"num_epochs": int, "current_epoch": int}] = json.load(f)
                 assert all(
                     x in data.keys() for x in ["num_epochs", "current_epoch"]
                 ), "malformed training resumption data"
@@ -52,7 +52,7 @@ class ResumeTrainingInfo:
 
     def load_state_dicts(
         self,
-        checkpoint_path: str | os.PathLike,
+        checkpoint_path: str | os.PathLike,  # type: ignore[reportMissingTypeArgument]
         model: nn.Module,
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler.LRScheduler,
