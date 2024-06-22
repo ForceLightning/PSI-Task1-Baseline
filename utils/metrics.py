@@ -1,3 +1,4 @@
+from typing import Any
 from sklearn.metrics import (
     mean_squared_error,
     confusion_matrix,
@@ -6,12 +7,28 @@ from sklearn.metrics import (
     f1_score,
 )
 import numpy as np
+from numpy import typing as npt
 from scipy.special import softmax
 from scipy.special import expit as sigmoid
 import torch.nn.functional as F
 
+from utils.args import DefaultArguments
 
-def evaluate_intent(target, target_prob, prediction, args):
+
+def evaluate_intent(
+    target: npt.NDArray[np.float32 | np.float64],
+    target_prob: npt.NDArray[np.float32 | np.float64],
+    prediction: npt.NDArray[np.float32 | np.float64],
+    args: DefaultArguments,
+) -> dict[
+    {
+        "MSE": float | np.floating[Any],
+        "Acc": float | np.floating[Any],
+        "F1": float,
+        "mAcc": float,
+        "ConfusionMatrix": npt.NDArray[np.float64 | Any],
+    }
+]:
     """
     Here we only predict one 'intention' for one track (15 frame observation). (not a sequence as before)
     :param target: (bs x 1), hard label; target_prob: soft probability, 0-1, agreement mean([0, 0.5, 1]).
@@ -19,13 +36,15 @@ def evaluate_intent(target, target_prob, prediction, args):
     :return:
     """
     print("Evaluating Intent ...")
-    results = {
-        "MSE": 0,
-        "Acc": 0,
-        "F1": 0,
-        "mAcc": 0,
-        "ConfusionMatrix": [[]],
-    }
+    results: dict[
+        {
+            "MSE": float | np.floating[Any],
+            "Acc": float | np.floating[Any],
+            "F1": float,
+            "mAcc": float,
+            "ConfusionMatrix": npt.NDArray[np.float64 | Any],
+        }
+    ] = {}
 
     bs = target.shape[0]
     # lbl_target = np.argmax(target, axis=-1) # bs x ts
@@ -33,10 +52,10 @@ def evaluate_intent(target, target_prob, prediction, args):
     lbl_taeget_prob = target_prob
     lbl_pred = np.round(prediction)  # bs, use 0.5 as threshold
 
-    MSE = np.mean(np.square(lbl_taeget_prob - prediction))
+    mse = np.mean(np.square(lbl_taeget_prob - prediction))
     # hard label evaluation - acc, f1
-    Acc = accuracy_score(lbl_target, lbl_pred)  # calculate acc for all samples
-    F1 = f1_score(lbl_target, lbl_pred, average="macro")
+    acc: float = accuracy_score(lbl_target, lbl_pred)  # calculate acc for all samples
+    f1 = f1_score(lbl_target, lbl_pred, average="macro")
 
     intent_matrix = confusion_matrix(lbl_target, lbl_pred)  # [2 x 2]
     intent_cls_acc = np.array(
@@ -44,21 +63,49 @@ def evaluate_intent(target, target_prob, prediction, args):
     )  # 2
     intent_cls_mean_acc = intent_cls_acc.mean(axis=0)
 
-    results["MSE"] = MSE
-    results["Acc"] = Acc
-    results["F1"] = F1
+    results["MSE"] = mse
+    results["Acc"] = acc
+    results["F1"] = f1
     results["mAcc"] = intent_cls_mean_acc
     results["ConfusionMatrix"] = intent_matrix
 
     return results
 
 
-def evaluate_traj(target, prediction, args):
+def evaluate_traj(
+    target: npt.NDArray[np.float32 | np.float64],
+    prediction: npt.NDArray[np.float32 | np.float64],
+    args: DefaultArguments,
+) -> dict[
+    {
+        "ADE": dict[{"0.5": float, "1.0": float, "1.5": float}],
+        "FDE": dict[{"0.5": float, "1.0": float, "1.5": float}],
+        "ARB": dict[{"0.5": float, "1.0": float, "1.5": float}],
+        "FRB": dict[{"0.5": float, "1.0": float, "1.5": float}],
+    }
+]:
     """
+    Evaluates the predicted trajectory of a pedestrian.
+
     :param target: (n_samples x ts x 4), original size coordinates. Notice: the 1st dimension is not batch-size
+    :type target: npt.NDArray[np.float32 | np.float64]
     :param prediction: (n_samples x ts x 4), directly predict coordinates
-    :return:
+    :type prediction: npt.NDArray[np.float32 | np.float64]
+    :return: Dictionary of metrics measured at [0.5s, 1.0s, 1.5s] in the future.
+        `ADE`: Average Displacement Error
+        `FDE`: Final Displacement Error
+        `ARB`: Average RMSE of Bounding Boxes
+        `FRB`: Final RMSE of Bounding Boxes
+    :rtype: dict[
+        {
+            "ADE": dict[{"0.5": float, "1.0": float, "1.5": float}],
+            "FDE": dict[{"0.5": float, "1.0": float, "1.5": float}],
+            "ARB": dict[{"0.5": float, "1.0": float, "1.5": float}],
+            "FRB": dict[{"0.5": float, "1.0": float, "1.5": float}],
+        }
+    ]
     """
+
     print("Evaluating Trajectory ...")
     target = np.array(target)
     prediction = np.array(prediction)
@@ -66,7 +113,14 @@ def evaluate_traj(target, prediction, args):
     assert target.shape[2] == 4  # bbox
     assert prediction.shape[1] == args.predict_length
     assert prediction.shape[2] == 4
-    results = {
+    results: dict[
+        {
+            "ADE": dict[{"0.5": float, "1.0": float, "1.5": float}],
+            "FDE": dict[{"0.5": float, "1.0": float, "1.5": float}],
+            "ARB": dict[{"0.5": float, "1.0": float, "1.5": float}],
+            "FRB": dict[{"0.5": float, "1.0": float, "1.5": float}],
+        }
+    ] = {
         # 'Bbox_MSE': {'0.5': 0, '1.0': 0, '1.5': 0},
         # 'Bbox_FMSE': {'0.5': 0, '1.0': 0, '1.5': 0},
         # 'Center_MSE': {'0.5': 0, '1.0': 0, '1.5': 0},
@@ -122,34 +176,55 @@ def evaluate_traj(target, prediction, args):
     return results
 
 
-def evaluate_driving(target_speed, target_dir, pred_speed, pred_dir, args):
-    results = {
-        "speed_Acc": 0.0,
-        "speed_mAcc": 0.0,
-        "speed_confusion_matrix": None,
-        "direction_Acc": 0,
-        "direction_mAcc": 0,
-        "dir_confusion_matrix": None,
+def evaluate_driving(
+    target_speed: npt.NDArray[np.float32 | np.float64],
+    target_dir: npt.NDArray[np.float32 | np.float64],
+    pred_speed: npt.NDArray[np.float32 | np.float64],
+    pred_dir: npt.NDArray[np.float32 | np.float64],
+    args: DefaultArguments,
+) -> dict[
+    {
+        "speed_Acc": float,
+        "speed_mAcc": float,
+        "speed_confusion_matrix": npt.NDArray[np.float64 | Any],
+        "direction_Acc": float,
+        "direction_mAcc": float,
+        "dir_confusion_matrix": npt.NDArray[np.float64 | Any],
     }
+]:
+    results: dict[
+        {
+            "speed_Acc": float,
+            "speed_mAcc": float,
+            "speed_confusion_matrix": npt.NDArray[np.float64 | Any],
+            "direction_Acc": float,
+            "direction_mAcc": float,
+            "dir_confusion_matrix": npt.NDArray[np.float64 | Any],
+        }
+    ] = {}
     print("Evaluating Driving Decision Prediction ...")
 
     bs = target_speed.shape[0]
-    results["speed_Acc"] = accuracy_score(target_speed, pred_speed)
-    results["direction_Acc"] = accuracy_score(target_dir, pred_dir)
+    speed_acc: float = accuracy_score(target_speed, pred_speed)
+    direction_acc: float = accuracy_score(target_dir, pred_dir)
+    results["speed_Acc"] = speed_acc
+    results["direction_Acc"] = direction_acc
 
     speed_matrix = confusion_matrix(target_speed, pred_speed)
     results["speed_confusion_matrix"] = speed_matrix
-    sum_cnt = speed_matrix.sum(axis=1)
+    sum_cnt: npt.NDArray[np.float32 | np.float64] = speed_matrix.sum(axis=1)
     sum_cnt = np.array([max(1, i) for i in sum_cnt])
     speed_cls_wise_acc = speed_matrix.diagonal() / sum_cnt
-    results["speed_mAcc"] = np.mean(speed_cls_wise_acc)
+    speed_mAcc: float = np.mean(speed_cls_wise_acc)
+    results["speed_mAcc"] = speed_mAcc
 
     dir_matrix = confusion_matrix(target_dir, pred_dir)
     results["dir_confusion_matrix"] = dir_matrix
     sum_cnt = dir_matrix.sum(axis=1)
     sum_cnt = np.array([max(1, i) for i in sum_cnt])
     dir_cls_wise_acc = dir_matrix.diagonal() / sum_cnt
-    results["dir_mAcc"] = np.mean(dir_cls_wise_acc)
+    dir_mAcc: float = np.mean(dir_cls_wise_acc)
+    results["direction_mAcc"] = dir_mAcc
 
     return results
 

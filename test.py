@@ -2,6 +2,8 @@ import json
 import os
 from typing import Any
 
+import numpy as np
+from numpy import typing as npt
 import torch
 from torch import nn
 from torch.utils.tensorboard.writer import SummaryWriter
@@ -121,17 +123,25 @@ def validate_traj(
     recorder: RecordResults,
     writer: SummaryWriter,
     criterion: nn.Module,
-):
+) -> float:
     _ = model.eval()
-    niters = len(dataloader)
-    val_losses: list[torch.Tensor] = []
+    niters: int = len(dataloader)
+    num_samples: int = len(dataloader.dataset)
+    val_losses: float = 0.0
     for itern, data in enumerate(dataloader):
+        curr_batch_size: int = data["bboxes"].shape[0]
         traj_pred: torch.Tensor = model(data)
         traj_gt: torch.Tensor = data["bboxes"][:, args.observe_length :, :].type(
             FloatTensor
         )
-        val_loss: torch.Tensor = criterion(traj_pred, traj_gt)
-        val_losses.append(val_loss)
+        val_loss: float = (
+            criterion(
+                traj_pred / args.image_shape[0], traj_gt / args.image_shape[0]
+            ).item()
+            / 4
+            / args.observe_length
+        )
+        val_losses += val_loss
         # bs, ts, _ = traj_gt.shape
         # if args.normalize_bbox == 'subtract_first_frame':
         #     traj_pred = traj_pred + data['bboxes'][:, :1, :].type(FloatTensor)
@@ -143,12 +153,16 @@ def validate_traj(
         )
 
         if itern % args.print_freq == 0:
-            print(f"Epoch {epoch}/{args.epochs} | Batch {itern}/{niters}")
+            print(
+                f"Epoch {epoch}/{args.epochs} | Batch {itern}/{niters} | Val Loss: {val_loss / curr_batch_size :.4f}"
+            )
 
-    val_loss_agg: torch.Tensor = torch.mean(torch.stack(val_losses))
+    val_losses /= num_samples
+    print(f"Epoch {epoch}/{args.epochs} Val Loss: {val_losses:.4f}")
+    writer.add_scalar("Losses/val_loss", val_losses, epoch)
     recorder.eval_traj_epoch_calculate(writer)
 
-    return val_loss_agg
+    return val_losses
 
 
 def predict_traj(

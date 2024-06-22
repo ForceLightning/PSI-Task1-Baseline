@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any
+from typing import Any, Mapping
 
 import numpy as np
 from numpy import typing as npt
@@ -31,9 +31,9 @@ class RecordResults:
         self.reason = reason
         self.evidential = evidential
 
-        self.all_train_results = {}
-        self.all_eval_results = {}
-        self.all_val_results = {}
+        self.all_train_results: dict[str, Any] = {}
+        self.all_eval_results: dict[str, Any] = {}
+        self.all_val_results: dict[str, Any] = {}
 
         # cur_time = datetime.datetime.now().strftime('%Y%m%d%H%M')
         self.result_path = os.path.join(self.args.checkpoint_path, "results")
@@ -44,6 +44,43 @@ class RecordResults:
         open(self._log_file, "w").close()
 
         # self.log_args(self.args)
+
+        # 1. Initalize log info
+        # (1.1) Loss log list
+        self.log_loss_total: AverageMeter
+        self.log_loss_intent: AverageMeter
+        self.log_loss_traj: AverageMeter
+        self.log_loss_driving_speed: AverageMeter
+        self.log_loss_driving_dir: AverageMeter
+
+        # (1.2) Intent
+        self.intention_gt: list[npt.NDArray[np.float32 | np.float64]]
+        self.intention_prob_gt: list[npt.NDArray[np.float32 | np.float64]]
+        self.intention_pred: list[npt.NDArray[np.float32 | np.float64]]
+        self.intention_rsn_gt: list[npt.NDArray[np.float32 | np.float64]]
+        self.intention_rsn_pred: list[npt.NDArray[np.float32 | np.float64]]
+
+        # (1.2.1) Training data info
+        self.frames_list: list[str]
+        self.video_list: list[str]
+        self.ped_list: list[str]
+
+        # (1.3) Trajectory
+        self.traj_gt: list[npt.NDArray[np.float32 | np.float64]]
+        self.traj_ori_gt: list[npt.NDArray[np.float32 | np.float64]]
+        self.traj_pred: list[npt.NDArray[np.float32 | np.float64]]
+
+        # (1.4) Driving
+        self.driving_speed_gt: list[npt.NDArray[np.float32 | np.float64]]
+        self.driving_speed_pred: list[npt.NDArray[np.float32 | np.float64]]
+        self.driving_dir_gt: list[npt.NDArray[np.float32 | np.float64]]
+        self.driving_dir_pred: list[npt.NDArray[np.float32 | np.float64]]
+
+        # (1.5) Store all results
+        self.train_epoch_results: dict[str, Any]
+        self.eval_epoch_results: dict[str, Any]
+        self.epoch: int
+        self.nitern: int
 
     def log_args(self, args: DefaultArguments):
         args_file = os.path.join(self.args.checkpoint_path, "args.txt")
@@ -83,7 +120,14 @@ class RecordResults:
         self.nitern = nitern
 
     def train_intent_batch_update(
-        self, itern, data, intent_gt, intent_prob_gt, intent_prob, loss, loss_intent
+        self,
+        itern: int,
+        data: dict[str, torch.Tensor],
+        intent_gt: npt.NDArray[np.float32 | np.float64],
+        intent_prob_gt: npt.NDArray[np.float32 | np.float64],
+        intent_prob: npt.NDArray[np.float32 | np.float64],
+        loss: float,
+        loss_intent: float,
     ):
         # 3. Update training info
         # (3.1) loss log list
@@ -103,7 +147,7 @@ class RecordResults:
 
         if (itern + 1) % self.args.print_freq == 0:
             with open(self.args.checkpoint_path + "/training_info.txt", "a") as f:
-                f.write(
+                _ = f.write(
                     "Epoch {}/{} Batch: {}/{} | Total Loss: {:.4f} |  Intent Loss: {:.4f} \n".format(
                         self.epoch,
                         self.args.epochs,
@@ -114,7 +158,8 @@ class RecordResults:
                     )
                 )
 
-    def train_intent_epoch_calculate(self, writer=None):
+    def train_intent_epoch_calculate(self, writer: SummaryWriter | None = None):
+        intent_results = None
         print("----------- Training results: ------------------------------------ ")
         if self.intention_pred:
             intent_results = evaluate_intent(
@@ -131,7 +176,7 @@ class RecordResults:
         self.log_info(epoch=self.epoch, info=self.train_epoch_results, filename="train")
 
         # write scalar to tensorboard
-        if writer:
+        if writer and intent_results:
             for key in ["MSE", "Acc", "F1", "mAcc"]:
                 val = intent_results[key]
                 writer.add_scalar(f"Train/Results/{key}", val, self.epoch)
@@ -184,11 +229,11 @@ class RecordResults:
 
     def eval_intent_batch_update(
         self,
-        itern,
-        data,
-        intent_gt,
-        intent_prob,
-        intent_prob_gt,
+        itern: int,
+        data: dict[str, Any],
+        intent_gt: npt.NDArray[np.float32 | np.float64],
+        intent_prob: npt.NDArray[np.float32 | np.float64],
+        intent_prob_gt: npt.NDArray[np.float32 | np.float64],
         intent_rsn_gt=None,
         intent_rsn_pred=None,
     ):
@@ -216,9 +261,10 @@ class RecordResults:
         else:
             pass
 
-    def eval_intent_epoch_calculate(self, writer):
+    def eval_intent_epoch_calculate(self, writer: SummaryWriter):
         print("----------- Evaluate results: ------------------------------------ ")
 
+        intent_results = None
         if self.intention_pred:
             intent_results = evaluate_intent(
                 np.array(self.intention_gt),
@@ -236,7 +282,7 @@ class RecordResults:
         print("log info finished")
 
         # write scalar to tensorboard
-        if writer:
+        if writer and intent_results:
             for key in ["MSE", "Acc", "F1", "mAcc"]:
                 val = intent_results[key]
                 writer.add_scalar(f"Eval/Results/{key}", val, self.epoch)
@@ -279,7 +325,7 @@ class RecordResults:
         # evidence: bs x ts x 4: mu,v,alpha,beta
 
         # (3.1) loss log list
-        bs, ts, dim = traj_gt.shape  # bs x 45 x 4
+        bs, _, _ = traj_gt.shape  # bs x 45 x 4
         self.log_loss_total.update(loss, bs)
         self.log_loss_traj.update(loss_traj, bs)
         # (3.2) training data info
@@ -291,7 +337,7 @@ class RecordResults:
 
         if (itern + 1) % self.args.print_freq == 0:
             with open(self.args.checkpoint_path + "/training_info.txt", "a") as f:
-                f.write(
+                _ = f.write(
                     "Epoch {}/{} Batch: {}/{} | Total Loss: {:.4f} |  Intent Loss: {:.4f} |  Traj Loss: {:.4f}\n".format(
                         self.epoch,
                         self.args.epochs,
@@ -303,8 +349,9 @@ class RecordResults:
                     )
                 )
 
-    def train_traj_epoch_calculate(self, writer=None):
+    def train_traj_epoch_calculate(self, writer: SummaryWriter | None = None):
         print("----------- Training results: ------------------------------------ ")
+        traj_results = None
         if self.traj_pred != []:
             traj_results = evaluate_traj(
                 np.array(self.traj_gt), np.array(self.traj_pred), self.args
@@ -315,7 +362,7 @@ class RecordResults:
 
         self.log_info(epoch=self.epoch, info=self.train_epoch_results, filename="train")
         # write scalar to tensorboard
-        if writer:
+        if writer and traj_results:
             for key in [
                 "ADE",
                 "FDE",
@@ -329,7 +376,7 @@ class RecordResults:
     def eval_traj_batch_update(
         self,
         itern: int,
-        data: dict[str, torch.Tensor],
+        data: dict[str, torch.Tensor | list[str | float | int]],
         traj_gt: npt.NDArray[np.float32 | np.float64],
         traj_pred: npt.NDArray[np.float32 | np.float64],
     ):
@@ -353,6 +400,7 @@ class RecordResults:
 
     def eval_traj_epoch_calculate(self, writer: SummaryWriter):
         print("----------- Eval results: ------------------------------------ ")
+        traj_results = None
         if self.traj_pred != []:
             traj_results = evaluate_traj(
                 np.array(self.traj_gt), np.array(self.traj_pred), self.args
@@ -364,7 +412,7 @@ class RecordResults:
         # self.log_msg(msg='Epoch {} \n --------------------------'.format(self.epoch), filename='train_results.txt')
         self.log_info(epoch=self.epoch, info=self.eval_epoch_results, filename="eval")
         # write scalar to tensorboard
-        if writer:
+        if writer and traj_results:
             for key in [
                 "ADE",
                 "FDE",
@@ -379,8 +427,8 @@ class RecordResults:
 
     def train_driving_batch_update(
         self,
-        itern,
-        data,
+        itern: int,
+        data: dict[str, torch.Tensor | list[str | int | float]],
         speed_gt,
         direction_gt,
         speed_pred_logit,
@@ -416,8 +464,9 @@ class RecordResults:
                     )
                 )
 
-    def train_driving_epoch_calculate(self, writer=None):
+    def train_driving_epoch_calculate(self, writer: SummaryWriter | None = None):
         print("----------- Training results: ------------------------------------ ")
+        driving_results = None
         if self.driving:
             driving_results = evaluate_driving(
                 np.array(self.driving_speed_gt),
@@ -434,7 +483,7 @@ class RecordResults:
         self.log_info(epoch=self.epoch, info=self.train_epoch_results, filename="train")
 
         # write scalar to tensorboard
-        if writer:
+        if writer and driving_results:
             for key in [
                 "speed_Acc",
                 "speed_mAcc",
@@ -450,12 +499,12 @@ class RecordResults:
 
     def eval_driving_batch_update(
         self,
-        itern,
-        data,
-        speed_gt,
-        direction_gt,
-        speed_pred_logit,
-        dir_pred_logit,
+        itern: int,
+        data: dict[str, torch.Tensor | list[float | int | str]],
+        speed_gt: npt.NDArray[np.float32 | np.float64],
+        direction_gt: npt.NDArray[np.float32 | np.float64],
+        speed_pred_logit: npt.NDArray[np.float32 | np.float64],
+        dir_pred_logit: npt.NDArray[np.float32 | np.float64],
         reason_gt=None,
         reason_pred=None,
     ):
@@ -474,8 +523,9 @@ class RecordResults:
         if reason_pred is not None:
             pass  # store reason prediction
 
-    def eval_driving_epoch_calculate(self, writer):
+    def eval_driving_epoch_calculate(self, writer: SummaryWriter | None = None):
         print("----------- Evaluate results: ------------------------------------ ")
+        driving_results = None
         if self.driving:
             driving_results = evaluate_driving(
                 np.array(self.driving_speed_gt),
@@ -493,7 +543,7 @@ class RecordResults:
         self.log_info(epoch=self.epoch, info=self.eval_epoch_results, filename="eval")
 
         # write scalar to tensorboard
-        if writer:
+        if writer and driving_results:
             for key in ["speed_Acc", "speed_mAcc", "direction_Acc", "direction_mAcc"]:
                 if key not in driving_results.keys():
                     continue
@@ -505,16 +555,16 @@ class RecordResults:
             "----------------------finished results calculation------------------------------------- "
         )
 
-    def log_msg(self, msg: str, filename: str = None):
+    def log_msg(self, msg: str, filename: str | None = None):
         if not filename:
             filename = os.path.join(self.args.checkpoint_path, "log.txt")
         else:
             pass
         savet_to_file = filename
         with open(savet_to_file, "a") as f:
-            f.write(str(msg) + "\n")
+            _ = f.write(str(msg) + "\n")
 
-    def log_info(self, epoch: int, info: dict, filename: str = None):
+    def log_info(self, epoch: int, info: dict[str, Any], filename: str | None = None):
         if not filename:
             filename = "log.txt"
         else:
@@ -528,13 +578,13 @@ class RecordResults:
                 filename=savet_to_file,
             )
             with open(savet_to_file, "a") as f:
-                if type(info[key]) == str:
-                    f.write(info[key] + "\n")
-                elif type(info[key]) == dict:
+                if isinstance(info[key], str):
+                    _ = f.write(info[key] + "\n")
+                elif isinstance(info[key], dict):
                     for k in info[key]:
-                        f.write(k + ": " + str(info[key][k]) + "\n")
+                        _ = f.write(k + ": " + str(info[key][k]) + "\n")
                 else:
-                    f.write(str(info[key]) + "\n")
+                    _ = f.write(str(info[key]) + "\n")
             self.log_msg(
                 msg=".................................................".format(
                     self.epoch
