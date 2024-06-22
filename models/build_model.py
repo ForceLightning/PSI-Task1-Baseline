@@ -3,9 +3,9 @@ from torch import nn
 
 from models.driving_modules.model_lstm_driving_global import ResLSTMDrivingGlobal
 from models.intent_modules.model_tcn_int_bbox import TCNINTBbox
+from models.traj_modules.model_tcan_traj_bbox import TCANTrajBbox, TCANTrajBboxInt
 from models.traj_modules.model_tcn_traj_bbox import TCNTrajBbox, TCNTrajBboxInt
 from models.traj_modules.model_tcn_traj_global import TCANTrajGlobal, TCNTrajGlobal
-from models.traj_modules.model_tcan_traj_bbox import TCANTrajBbox, TCANTrajBboxInt
 from utils.args import DefaultArguments
 from utils.cuda import *
 
@@ -110,7 +110,7 @@ def get_tcn_traj_bbox_int(args: DefaultArguments) -> TCNTrajBboxInt:
     return model
 
 
-def get_tcan_traj_bbox(args: DefaultArguments) -> TCNTrajBbox:
+def get_tcan_traj_bbox(args: DefaultArguments) -> TCANTrajBbox:
     model_configs = {}
     model_configs["traj_model_opts"] = {
         "enc_in_dim": 4,
@@ -131,7 +131,7 @@ def get_tcan_traj_bbox(args: DefaultArguments) -> TCNTrajBbox:
     return model
 
 
-def get_tcan_traj_bbox_int(args: DefaultArguments) -> TCNTrajBboxInt:
+def get_tcan_traj_bbox_int(args: DefaultArguments) -> TCANTrajBboxInt:
     model_configs = {}
     model_configs["traj_model_opts"] = {
         "enc_in_dim": 5,
@@ -197,7 +197,7 @@ def get_tcan_traj_bbox_global(args: DefaultArguments) -> TCANTrajGlobal:
 
 # 3. driving decision prediction
 # 3.1 input global images only
-def get_lstm_driving_global(args):
+def get_lstm_driving_global(args: DefaultArguments):
     model_configs = {}
     model_configs["driving_model_opts"] = {
         "enc_in_dim": 4,  # input bbox (normalized OR not) + img_context_feat_dim
@@ -267,7 +267,7 @@ if __name__ == "__main__":
             "bboxes": torch.rand((args.batch_size, args.observe_length, 4)).to(DEVICE),
         }
     ]
-    out = model(data[0])
+    out: torch.Tensor = model(data[0])
     print(out.shape)
     print(out)
     print("\n\n")

@@ -146,7 +146,9 @@ class TCNTrajGlobal(nn.Module):
         )
         return output
 
-    def build_optimizer(self, args: DefaultArguments):
+    def build_optimizer(
+        self, args: DefaultArguments
+    ) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]:
         param_group: list[dict[str, Any]] = []
         learning_rate = args.lr
 
@@ -180,14 +182,18 @@ class TCNTrajGlobal(nn.Module):
                         {"params": module.parameters(), "lr": learning_rate}
                     ]
 
-        optimizer = torch.optim.Adam(param_group, lr=learning_rate, eps=1e-7)
+        # NOTE: set eps to 1e-4 to prevent NaNs?
+        # TODO: Expose weight decay as a hyperparameter.
+        optimizer = torch.optim.Adam(
+            param_group, lr=learning_rate, eps=1e-4, weight_decay=1e-2
+        )
 
         for opt_param_group in optimizer.param_groups:
             opt_param_group["lr0"] = opt_param_group["lr"]
 
         # WARNING: Breaking change: optimizer to use a one cycle learning rate policy instead.
         #
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+        # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
         # scheduler = torch.optim.lr_scheduler.OneCycleLR(
         #     optimizer,
         #     learning_rate,
@@ -195,6 +201,9 @@ class TCNTrajGlobal(nn.Module):
         #     steps_per_epoch=args.steps_per_epoch,
         #     div_factor=10,
         # )
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min", factor=10**0.5 * 0.1, threshold=1e-2
+        )
 
         return optimizer, scheduler
 
@@ -320,10 +329,11 @@ class TCANTrajGlobal(TCNTrajGlobal):
         # tcn_input = tcn_input.transpose(1, 2)  # bs x (512 + 4) x ts
 
         tcn_output: torch.Tensor
-        if self.temp_attn:
-            tcn_output, _ = self.tcn(tcn_input)
-        else:
-            tcn_output = self.tcn(tcn_input)
+        # if self.temp_attn:
+        #     tcn_output, _ = self.tcn(tcn_input)
+        # else:
+        #     tcn_output = self.tcn(tcn_input)
+        tcn_output = self.tcn(tcn_input)
 
         tcn_output = tcn_output.transpose(1, 2)
         tcn_output = tcn_output.reshape(-1, self.TCN_dec_out_dim * self.observe_length)

@@ -5,11 +5,12 @@ from torch.nn.utils.parametrizations import weight_norm
 
 from models.TCN.tcn import TemporalConvNet
 
+from utils.args import DefaultArguments, ModelOpts
 from utils.cuda import *
 
 
 class TCNTrajBbox(nn.Module):
-    def __init__(self, args, model_opts) -> None:
+    def __init__(self, args: DefaultArguments, model_opts: ModelOpts) -> None:
         super().__init__()
         self.enc_in_dim = model_opts["enc_in_dim"]
         self.enc_out_dim = model_opts["enc_out_dim"]
@@ -54,7 +55,7 @@ class TCNTrajBbox(nn.Module):
         self.reason_embedding = "rsn" in self.args.model_name
         self.speed_embedding = "speed" in self.args.model_name
 
-    def forward(self, data):
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
         bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
         assert bbox.shape[1] == self.args.observe_length
         enc_input = bbox
@@ -68,7 +69,9 @@ class TCNTrajBbox(nn.Module):
         )
         return output
 
-    def build_optimizer(self, args):
+    def build_optimizer(
+        self, args: DefaultArguments
+    ) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]:
         param_group = []
         learning_rate = args.lr
         if self.backbone is not None:
@@ -90,8 +93,15 @@ class TCNTrajBbox(nn.Module):
         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
         return optimizer, scheduler
 
-    def lr_scheduler(self, optimizer, cur_epoch, args, gamma=10, power=0.75):
-        decay = (1 + gamma * cur_epoch / args.epoch) ** (-power)
+    def lr_scheduler(
+        self,
+        optimizer: torch.optim.Optimizer,
+        cur_epoch: int,
+        args: DefaultArguments,
+        gamma: float = 10.0,
+        power: float = 0.75,
+    ) -> None:
+        decay: float = (1 + gamma * cur_epoch / args.epochs) ** (-power)
         for param_group in optimizer.param_groups:
             param_group["lr"] = param_group["lr0"] * decay
             param_group["weight_decay"] = 1e-3
@@ -99,8 +109,8 @@ class TCNTrajBbox(nn.Module):
             param_group["nesterov"] = True
         return
 
-    def _reset_parameters(self):
-        nn.init.xavier_uniform_(self.fc.weight)
+    def _reset_parameters(self) -> None:
+        _ = nn.init.xavier_uniform_(self.fc.weight)
         self.fc.bias.data.fill_(0)
 
 
@@ -108,7 +118,7 @@ class TCNTrajBboxInt(TCNTrajBbox):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def forward(self, data):
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
         bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
         intent = data["intention_prob"][:, : self.args.observe_length].type(FloatTensor)
         intent = intent.unsqueeze(2)

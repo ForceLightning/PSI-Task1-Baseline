@@ -5,11 +5,12 @@ from torch.nn.utils.parametrizations import weight_norm
 
 from models.TCN.tcn import TemporalConvNet
 
+from utils.args import DefaultArguments, ModelOpts
 from utils.cuda import *
 
 
 class TCNINTBbox(nn.Module):
-    def __init__(self, args, model_configs):
+    def __init__(self, args: DefaultArguments, model_configs: ModelOpts):
         super(TCNINTBbox, self).__init__()
         self.args = args
         self.model_configs = model_configs
@@ -24,14 +25,16 @@ class TCNINTBbox(nn.Module):
         self.module_list = self.intent_predictor.module_list
         self.network_list = [self.intent_predictor]
 
-    def forward(self, data):
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
         bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
         assert bbox.shape[1] == self.observe_length
 
         intent_pred = self.intent_predictor(bbox)
         return intent_pred.squeeze()
 
-    def build_optimizer(self, args):
+    def build_optimizer(
+        self, args: DefaultArguments
+    ) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]:
         param_group = []
         learning_rate = args.lr
         if self.backbone is not None:

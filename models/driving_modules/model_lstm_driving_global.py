@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.optim import lr_scheduler
 import torchvision.models as models
 
 from utils.args import DefaultArguments
@@ -130,7 +131,9 @@ class ResLSTMDrivingGlobal(nn.Module):
 
         # return traj_pred
 
-    def build_optimizer(self, args):
+    def build_optimizer(
+        self, args: DefaultArguments
+    ) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]:
         param_group = []
         learning_rate = args.lr
         # if self.backbone is not None:
@@ -221,6 +224,11 @@ class ResCNNEncoder(nn.Module):
         # cnn_embed_seq: shape=(batch, time_step, input_size)
 
         return cnn_embed_seq
+
+    def _init_weights(self) -> None:
+        for module in [self.fc1, self.fc2, self.fc3]:
+            torch.nn.init.xavier_uniform(module.weight)
+            module.bias.data.fill_(0.01)
 
 
 class DecoderRNN(nn.Module):
