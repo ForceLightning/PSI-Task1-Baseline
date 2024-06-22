@@ -80,33 +80,26 @@ def main(args: DefaultArguments) -> tuple[float | np.floating[Any], float]:
                 metrics["hparam/test_f1"] = test_f1
                 metrics["hparam/test_mAcc"] = test_mAcc
         case "ped_traj":
-            try:
-                train_traj(
-                    model,
-                    optimizer,
-                    scheduler,
-                    train_loader,
-                    val_loader,
-                    args,
-                    recorder,
-                    writer,
-                )
-                val_gt_file = "./test_gt/val_traj_gt.json"
-                if not os.path.exists(val_gt_file):
-                    get_test_traj_gt(model, val_loader, args, dset="val")
-                predict_traj(model, val_loader, args, dset="val")
-                val_score = evaluate_traj(
-                    val_gt_file,
-                    args.checkpoint_path + "/results/val_traj_pred.json",
-                    args,
-                )
-                metrics = {"hparam/val_score": val_score}
-            except RuntimeError as e:
-                # ! This error appears to have something to do with setting `pin_memory=True` for the dataloaders.
-                print(torch.cuda.memory_summary(device="cuda:0", abbreviated=False))
-                print(f"{type(e)} {str(e)}\n{traceback.format_exc()}")
-                raise e
-
+            train_traj(
+                model,
+                optimizer,
+                scheduler,
+                train_loader,
+                val_loader,
+                args,
+                recorder,
+                writer,
+            )
+            val_gt_file = "./test_gt/val_traj_gt.json"
+            if not os.path.exists(val_gt_file):
+                get_test_traj_gt(model, val_loader, args, dset="val")
+            predict_traj(model, val_loader, args, dset="val")
+            val_score = evaluate_traj(
+                val_gt_file,
+                args.checkpoint_path + "/results/val_traj_pred.json",
+                args,
+            )
+            metrics = {"hparam/val_score": val_score}
         case "driving_decision":
             train_driving(
                 model,
@@ -143,7 +136,6 @@ def main(args: DefaultArguments) -> tuple[float | np.floating[Any], float]:
 
 
 if __name__ == "__main__":
-    # /home/scott/Work/Toyota/PSI_Competition/Dataset
     args = get_opts()
     # Task
     args.task_name = args.task_name if args.task_name else "ped_traj"
@@ -270,7 +262,10 @@ if __name__ == "__main__":
 
         # Record
         now = datetime.now()
-        time_folder = now.strftime("%Y%m%d%H%M%S")
+        if args.comment is None:
+            time_folder = now.strftime("%Y%m%d%H%M%S")
+        else:
+            time_folder = args.comment
         if args.checkpoint_path == "./ckpts" and args.resume == "":
             args.checkpoint_path = os.path.join(
                 checkpoint_path,
@@ -287,16 +282,17 @@ if __name__ == "__main__":
             ), f"checkpoint path and resume path directories do not match, {os.path.abspath(args.checkpoint_path)}, {os.path.abspath(os.path.dirname(args.resume))}"
 
         print(f"Checkpoint path: {args.checkpoint_path}")
+        # TODO: Move args dumping to after model_opts are created.
         if not os.path.exists(args.checkpoint_path):
             os.makedirs(args.checkpoint_path)
             with open(
-                os.path.join(args.checkpoint_path, "args.txt"), "w", encoding="utf-8"
+                os.path.join(args.checkpoint_path, "args.json"), "w", encoding="utf-8"
             ) as f:
                 json.dump(args.__dict__, f, indent=4)
         else:
             # Load arguments if resume is provided.
             with open(
-                os.path.join(args.checkpoint_path, "args.txt"), "r", encoding="utf-8"
+                os.path.join(args.checkpoint_path, "args.json"), "r", encoding="utf-8"
             ) as f:
                 args.__dict__ = json.load(f)
 

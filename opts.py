@@ -209,4 +209,8 @@ def get_opts():
     )
     parser.add_argument("--kernel_size", type=int, default=4, help="kernel size of TCN")
 
+    parser.add_argument(
+        "--comment", type=str, default="", help="Description of experiment"
+    )
+
     return parser.parse_args()

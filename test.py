@@ -81,7 +81,12 @@ def test_intent(epoch, model, dataloader, args, recorder, writer):
     return recorder
 
 
-def predict_intent(model, dataloader, args, dset="test"):
+def predict_intent(
+    model: nn.Module,
+    dataloader: DataLoader[Any],
+    args: DefaultArguments,
+    dset: str = "test",
+) -> None:
     model.eval()
     dt = {}
     for itern, data in enumerate(dataloader):
@@ -127,7 +132,7 @@ def validate_traj(
     _ = model.eval()
     niters: int = len(dataloader)
     num_samples: int = len(dataloader.dataset)
-    val_losses: float = 0.0
+    val_losses: list[float] = []
     for itern, data in enumerate(dataloader):
         curr_batch_size: int = data["bboxes"].shape[0]
         traj_pred: torch.Tensor = model(data)
@@ -138,10 +143,10 @@ def validate_traj(
             criterion(
                 traj_pred / args.image_shape[0], traj_gt / args.image_shape[0]
             ).item()
-            / 4
-            / args.observe_length
+            # / 4
+            # / args.observe_length
         )
-        val_losses += val_loss
+        val_losses.append(val_loss)
         # bs, ts, _ = traj_gt.shape
         # if args.normalize_bbox == 'subtract_first_frame':
         #     traj_pred = traj_pred + data['bboxes'][:, :1, :].type(FloatTensor)
@@ -154,10 +159,10 @@ def validate_traj(
 
         if itern % args.print_freq == 0:
             print(
-                f"Epoch {epoch}/{args.epochs} | Batch {itern}/{niters} | Val Loss: {val_loss / curr_batch_size :.4f}"
+                f"Epoch {epoch}/{args.epochs} | Batch {itern}/{niters} | Val Loss: {val_loss:.4f}"
             )
 
-    val_losses /= num_samples
+    val_losses: float = np.mean(val_losses)
     print(f"Epoch {epoch}/{args.epochs} Val Loss: {val_losses:.4f}")
     writer.add_scalar("Losses/val_loss", val_losses, epoch)
     recorder.eval_traj_epoch_calculate(writer)
@@ -206,7 +211,7 @@ def predict_traj(
 
 def get_test_traj_gt(
     model: nn.Module,
-    dataloader: DataLoader,  # type: ignore[reportMissingTypeArgument]
+    dataloader: DataLoader[Any],
     args: DefaultArguments,
     dset: str = "test",
 ) -> None:

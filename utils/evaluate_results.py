@@ -17,9 +17,9 @@ from utils.args import DefaultArguments
 
 
 def evaluate_intent(
-    groundtruth: str | os.PathLike = "",
-    prediction: str | os.PathLike = "",
-    args: DefaultArguments = DefaultArguments(),
+    groundtruth: str | os.PathLike[Any],
+    prediction: str | os.PathLike[Any],
+    args: DefaultArguments,
 ) -> tuple[float, float, float]:
     """Evaluates intent from ground truth and prediction json files.
 
@@ -100,9 +100,9 @@ def measure_intent_prediction(
 
 
 def evaluate_traj(
-    groundtruth: str | os.PathLike = "",  # type: ignore[reportMissingTypeArgument]
-    prediction: str | os.PathLike = "",  # type: ignore[reportMissingTypeArgument]
-    args: DefaultArguments = DefaultArguments(),
+    groundtruth: str | os.PathLike[Any],
+    prediction: str | os.PathLike[Any],
+    args: DefaultArguments,
 ) -> np.floating[Any]:
     with open(groundtruth, "r") as f:
         gt_traj = json.load(f)
@@ -203,9 +203,9 @@ def measure_traj_prediction(
 
 
 def evaluate_driving(
-    groundtruth: str | os.PathLike = "",
-    prediction: str | os.PathLike = "",
-    args: DefaultArguments = DefaultArguments(),
+    groundtruth: str | os.PathLike[Any],
+    prediction: str | os.PathLike[Any],
+    args: DefaultArguments,
 ) -> float:
     """Evaluate driving performance from dumped json files.
 

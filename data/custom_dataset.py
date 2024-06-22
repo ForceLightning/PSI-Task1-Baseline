@@ -1,14 +1,15 @@
-import os
 import abc
 from copy import deepcopy
+import os
 from typing import Any, Generator, Literal
 
+import PIL
+from PIL import Image
 import cv2
 import numpy as np
-import PIL
+from numpy import typing as npt
 import torch
-from PIL import Image
-from torch.utils.data import Dataset, DataLoader, Sampler
+from torch.utils.data import DataLoader, Dataset, Sampler
 from torchvision.transforms import v2
 
 from utils.args import DefaultArguments
@@ -208,7 +209,7 @@ class VideoDataset(Dataset[Any]):
                     [
                         v2.ToPILImage(),
                         v2.Resize((resize_size, resize_size)),
-                        v2.CenterCrop(crop_size),
+                        # v2.CenterCrop(crop_size),
                         v2.ToImage(),
                         v2.ToDtype(torch.float32, scale=True),
                         v2.Normalize(

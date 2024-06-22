@@ -49,10 +49,10 @@ def evaluate_intent(
     bs = target.shape[0]
     # lbl_target = np.argmax(target, axis=-1) # bs x ts
     lbl_target = target  # bs
-    lbl_taeget_prob = target_prob
+    lbl_target_prob = target_prob
     lbl_pred = np.round(prediction)  # bs, use 0.5 as threshold
 
-    mse = np.mean(np.square(lbl_taeget_prob - prediction))
+    mse = np.mean(np.square(lbl_target_prob - prediction))
     # hard label evaluation - acc, f1
     acc: float = accuracy_score(lbl_target, lbl_pred)  # calculate acc for all samples
     f1 = f1_score(lbl_target, lbl_pred, average="macro")
@@ -92,10 +92,10 @@ def evaluate_traj(
     :param prediction: (n_samples x ts x 4), directly predict coordinates
     :type prediction: npt.NDArray[np.float32 | np.float64]
     :return: Dictionary of metrics measured at [0.5s, 1.0s, 1.5s] in the future.
-        `ADE`: Average Displacement Error
-        `FDE`: Final Displacement Error
-        `ARB`: Average RMSE of Bounding Boxes
-        `FRB`: Final RMSE of Bounding Boxes
+        `ADE`: Average Displacement Error (Based on the centre of the bounding box)
+        `FDE`: Final Displacement Error (Based on the centre of the bounding box)
+        `ARB`: Average RMSE of Bounding Box coordinates
+        `FRB`: Final RMSE of Bounding Box coordinates
     :rtype: dict[
         {
             "ADE": dict[{"0.5": float, "1.0": float, "1.5": float}],

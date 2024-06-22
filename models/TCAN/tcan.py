@@ -3,7 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.parametrizations import weight_norm
 
-from models.TCAN.custom_transformer import MultiheadAttention
+# from models.TCAN.custom_transformer import MultiheadAttention
 from models.TCN.tcn import Chomp1d
 from utils.cuda import *
 
@@ -16,32 +16,98 @@ class AttentionBlock(nn.Module):
         value_size: int,
         num_heads: int,
         seq_length: int,
+        dropout: float,
     ):
         super().__init__()
         self.seq_length = seq_length
-        self.attention = MultiheadAttention(
+        self.attention = nn.MultiheadAttention(
             embed_dim=in_channels,
             num_heads=num_heads,
             kdim=key_size,
             vdim=value_size,
             batch_first=True,
         )
-        # Causal attention mask.
+        # Generate the causal attention mask.
         # WARNING: This actually causes NaN values to show up due to the implementation of the
         # Softmax function. See: https://github.com/pytorch/pytorch/issues/41508
-        self.attn_mask = torch.triu(
-            torch.ones((self.seq_length, self.seq_length), dtype=torch.bool), diagonal=1
-        ).to(DEVICE)
+
+        # self.attn_mask = torch.triu(
+        #     torch.ones((self.seq_length, self.seq_length), dtype=torch.bool), diagonal=1
+        # ).to(DEVICE)
+        self.attn_mask = nn.Transformer.generate_square_subsequent_mask(
+            self.seq_length, device=DEVICE, dtype=torch.bool
+        )
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        attn_output, attn_output_weights = self.attention(
+        attn_output, _ = self.attention(
             x,
             x,
             x,
             attn_mask=self.attn_mask,
-            # is_causal=True,
+            is_causal=True,
         )
-        return attn_output, attn_output_weights
+        return attn_output
+
+
+class CausalSelfAttention(nn.Module):
+    def __init__(
+        self,
+        num_heads: int,
+        embed_dimension: int,
+        bias: bool = False,
+        is_causal: bool = True,
+        dropout: float = 0.0,
+    ) -> None:
+        super().__init__()
+        assert embed_dimension % num_heads == 0
+        # key, query, value projections for all heads, but in a batch.
+        self.c_attn = nn.Linear(embed_dimension, 3 * embed_dimension, bias=bias)
+        # output projection
+        self.c_proj = nn.Linear(embed_dimension, embed_dimension, bias=bias)
+        # regularisation
+        self.dropout = dropout
+        self.resid_dropout = nn.Dropout(dropout)
+        self.num_heads = num_heads
+        self.embed_dimension = embed_dimension
+        # Perform causal masking
+        self.is_causal = is_causal
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        query_projected: torch.Tensor = self.c_attn(x)
+
+        batch_size: int = query_projected.size(0)  # batch first
+        embed_dim: int = query_projected.size(2)
+        head_dim: int = embed_dim // (self.num_heads * 3)
+
+        query, key, value = query_projected.chunk(3, -1)
+        query: torch.Tensor = query.view(
+            batch_size, -1, self.num_heads, head_dim
+        ).transpose(1, 2)
+        key: torch.Tensor = key.view(
+            batch_size, -1, self.num_heads, head_dim
+        ).transpose(1, 2)
+        value: torch.Tensor = value.view(
+            batch_size, -1, self.num_heads, head_dim
+        ).transpose(1, 2)
+
+        if self.training:
+            dropout = self.dropout
+            is_causal = self.is_causal
+        else:
+            dropout = 0.0
+            is_causal = False
+
+        y = F.scaled_dot_product_attention(
+            query, key, value, attn_mask=None, dropout_p=dropout, is_causal=is_causal
+        )
+        y = (
+            y.transpose(1, 2)
+            .contiguous()
+            .view(batch_size, -1, self.num_heads * head_dim)
+        )
+
+        y: torch.Tensor = self.resid_dropout(self.c_proj(y))
+        return y
 
 
 class TemporalAttentionBlock(nn.Module):
@@ -72,15 +138,10 @@ class TemporalAttentionBlock(nn.Module):
         self.seq_length = seq_length
         if self.temp_attn:
             if self.num_heads > 1:
-                self.attentions = AttentionBlock(
-                    n_inputs, key_size, n_inputs, num_heads, seq_length
-                )
-                self.add_module("attention", self.attentions)
                 self.linear_cat = nn.Linear(n_inputs, n_inputs)
-            else:
-                self.attention = AttentionBlock(
-                    n_inputs, key_size, n_inputs, 1, seq_length
-                )
+            self.attentions = AttentionBlock(
+                n_inputs, key_size, n_inputs, num_heads, seq_length, dropout
+            )
         self.downsample = (
             nn.Conv1d(n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
         )
@@ -151,12 +212,12 @@ class TemporalAttentionBlock(nn.Module):
             en_res_x = None
             if self.num_heads > 1:
                 # num_heads x bs x ts x emb_size
-                x_out, attn_weight = self.attentions(x)
+                x_out = self.attentions(x)
                 # out = self.net(self.linear_cat(x_out.transpose(1, 2)).transpose(1, 2))
                 linear_out = self.linear_cat(x_out)
                 out = self.net(linear_out.transpose(1, 2)).transpose(1, 2)
             else:
-                out_attn, attn_weight = self.attention(x)
+                out_attn = self.attention(x)
                 if self.conv:
                     out = self.net(out_attn.transpose(1, 2)).transpose(1, 2)
                 else:
@@ -175,16 +236,18 @@ class TemporalAttentionBlock(nn.Module):
                 else self.downsample(x.transpose(1, 2)).transpose(1, 2)
             )
 
-            if self.visual:
-                attn_weight_cpu = attn_weight.detach().cpu()
-            else:
-                attn_weight_cpu = torch.zeros_like(attn_weight)
-            del attn_weight
+            # if self.visual:
+            #     attn_weight_cpu = attn_weight.detach().cpu()
+            # else:
+            #     attn_weight_cpu = torch.zeros_like(attn_weight)
+            # del attn_weight
 
             if self.en_res and en_res_x is not None:
-                return self.relu(out + res + en_res_x), attn_weight_cpu
+                # return self.relu(out + res + en_res_x), attn_weight_cpu
+                return self.relu(out + res + en_res_x)
             else:
-                return self.relu(out + res), attn_weight_cpu
+                # return self.relu(out + res), attn_weight_cpu
+                return self.relu(out + res)
         else:
             out: torch.Tensor = self.net(x)
             res = x if self.downsample is None else self.downsample(x)
@@ -236,15 +299,15 @@ class TemporalConvAttnNet(nn.Module):
             ]
         self.network = nn.Sequential(*layers)
 
-    def forward(
-        self, x: torch.Tensor
-    ) -> tuple[torch.Tensor, list[list[torch.Tensor]]] | torch.Tensor:
-        attn_weight_list: list[list[torch.Tensor]] = []
-        if self.temp_attn:
-            out = x
-            for i in range(len(self.network)):
-                out, attn_weight = self.network[i](out)
-                attn_weight_list.append([attn_weight[0], attn_weight[-1]])
-            return out, attn_weight_list
-        else:
-            return self.network(x)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # attn_weight_list: list[list[torch.Tensor]] = []
+        # if self.temp_attn:
+        #     # out = x
+        #     # for i in range(len(self.network)):
+        #     #     out, attn_weight = self.network[i](out)
+        #     #     attn_weight_list.append([attn_weight[0], attn_weight[-1]])
+        #     # return out, attn_weight_list
+        #     return self.network(x)
+        # else:
+        #     return self.network(x)
+        return self.network(x)

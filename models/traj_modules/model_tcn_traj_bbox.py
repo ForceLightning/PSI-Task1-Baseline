@@ -1,3 +1,4 @@
+from typing import Any
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -55,15 +56,21 @@ class TCNTrajBbox(nn.Module):
         self.reason_embedding = "rsn" in self.args.model_name
         self.speed_embedding = "speed" in self.args.model_name
 
-    def forward(self, data: torch.Tensor) -> torch.Tensor:
-        bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
-        assert bbox.shape[1] == self.args.observe_length
-        enc_input = bbox
+    def forward(self, data: dict[str, Any] | torch.Tensor) -> torch.Tensor:
+        if isinstance(data, dict):
+            bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
+            enc_input = bbox
+        else:
+            enc_input = data
 
-        tcn_output = self.tcn(enc_input.transpose(1, 2)).transpose(1, 2)
+        assert enc_input.shape[1] == self.args.observe_length
+
+        tcn_output: torch.Tensor = self.tcn(enc_input.transpose(1, 2)).transpose(1, 2)
         tcn_last_output = tcn_output[:, -1:, :]
 
-        output = self.fc(tcn_last_output)  # bs x output_dim * predict_length
+        output: torch.Tensor = self.fc(
+            tcn_last_output
+        )  # bs x output_dim * predict_length
         output = self.activation(output).reshape(
             -1, self.predict_length, self.output_dim
         )
@@ -72,7 +79,7 @@ class TCNTrajBbox(nn.Module):
     def build_optimizer(
         self, args: DefaultArguments
     ) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]:
-        param_group = []
+        param_group: list[dict[str, Any]] = []
         learning_rate = args.lr
         if self.backbone is not None:
             for _, param in self.backbone.named_parameters():
@@ -85,10 +92,12 @@ class TCNTrajBbox(nn.Module):
         for module in self.module_list:
             param_group += [{"params": module.parameters(), "lr": learning_rate}]
 
-        optimizer = torch.optim.Adam(param_group, lr=args.lr, eps=1e-7)
+        optimizer = torch.optim.Adam(
+            param_group, lr=args.lr, eps=1e-7, weight_decay=1e-4
+        )
 
-        for param_group in optimizer.param_groups:
-            param_group["lr0"] = param_group["lr"]
+        for opt_param_group in optimizer.param_groups:
+            opt_param_group["lr0"] = opt_param_group["lr"]
 
         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
         return optimizer, scheduler
@@ -118,19 +127,30 @@ class TCNTrajBboxInt(TCNTrajBbox):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def forward(self, data: torch.Tensor) -> torch.Tensor:
-        bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
-        intent = data["intention_prob"][:, : self.args.observe_length].type(FloatTensor)
-        intent = intent.unsqueeze(2)
-        assert bbox.shape[1] == self.args.observe_length
-        assert intent.shape[1] == self.args.observe_length
-        # enc_input = bbox
-        enc_input = torch.cat([bbox, intent], dim=2)
+    def forward(
+        self, data: dict[str, Any] | tuple[torch.Tensor, torch.Tensor]
+    ) -> torch.Tensor:
+        if isinstance(data, dict):
+            bbox: torch.Tensor = data["bboxes"][:, : self.args.observe_length, :].type(
+                FloatTensor
+            )
+            intent: torch.Tensor = data["intention_prob"][
+                :, : self.args.observe_length
+            ].type(FloatTensor)
+            intent = intent.unsqueeze(2)
+            assert bbox.shape[1] == self.args.observe_length
+            assert intent.shape[1] == self.args.observe_length
+            # enc_input = bbox
+            enc_input = torch.cat([bbox, intent], dim=2)
+        else:
+            enc_input = torch.cat(data, dim=2)
 
-        tcn_output = self.tcn(enc_input.transpose(1, 2)).transpose(1, 2)
+        tcn_output: torch.Tensor = self.tcn(enc_input.transpose(1, 2)).transpose(1, 2)
         tcn_last_output = tcn_output[:, -1:, :]
 
-        output = self.fc(tcn_last_output)  # bs x output_dim * predict_length
+        output: torch.Tensor = self.fc(
+            tcn_last_output
+        )  # bs x output_dim * predict_length
         output = self.activation(output).reshape(
             -1, self.predict_length, self.output_dim
         )

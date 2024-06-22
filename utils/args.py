@@ -160,6 +160,7 @@ class DefaultArguments:
     intent_positive_weight: float = 1.0
     traj_loss: list[str] = field(default_factory=lambda: ["mse"])
     steps_per_epoch: int = 0
+    comment: str = ""
 
     # Other parameters
     val_freq: int = 10

@@ -17,8 +17,8 @@ from utils.log import RecordResults
 from utils.resume_training import ResumeTrainingInfo
 from utils.cuda import *
 
-# scaler = GradScaler() if CUDA else None
-scaler = None
+scaler = GradScaler() if CUDA else None
+# scaler = None
 
 
 def train_intent(
@@ -45,7 +45,7 @@ def train_intent(
     }
     epoch_loss = {"loss_intent": [], "loss_traj": []}
     for epoch in range(1, args.epochs + 1):
-        niters = np.ceil(len(train_loader.dataset) / args.batch_size)
+        niters = int(np.ceil(len(train_loader.dataset) / args.batch_size))
         recorder.train_epoch_reset(epoch, niters)
         epoch_loss = train_intent_epoch(
             epoch,
@@ -63,13 +63,11 @@ def train_intent(
 
         if epoch % 1 == 0:
             print(
-                f"Train epoch {epoch}/{args.epochs} | epoch loss: "
-                f"loss_intent = {np.mean(epoch_loss['loss_intent']): .4f}"
+                f"Train epoch {epoch}/{args.epochs} | epoch loss: loss_intent = {np.mean(epoch_loss['loss_intent']): .4f}"
             )
 
         if (epoch + 1) % args.val_freq == 0:
             print(f"Validate at epoch {epoch}")
-            niters = np.ceil(len(val_loader.dataset) / args.batch_size)
             recorder.eval_epoch_reset(epoch, niters)
             validate_intent(epoch, model, val_loader, args, recorder, writer)
 
@@ -83,12 +81,27 @@ def train_intent(
 
 
 def train_intent_epoch(
-    epoch, model, optimizer, criterions, epoch_loss, dataloader, args, recorder, writer
+    epoch: int,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    criterions: nn.Module,
+    epoch_loss: dict[str, list[float]],
+    dataloader: DataLoader[Any],
+    args: DefaultArguments,
+    recorder: RecordResults,
+    writer: SummaryWriter,
 ):
     model.train()
-    batch_losses = collections.defaultdict(list)
+    batch_losses: dict[
+        {
+            "loss_intent_bce": list[float],
+            "loss_intent_mse": list[float],
+            "loss": list[float],
+            "loss_intent": list[float],
+        }
+    ] = collections.defaultdict(list)
 
-    niters = np.ceil(len(dataloader.dataset) / args.batch_size)
+    niters = int(np.ceil(len(dataloader.dataset) / args.batch_size))
     for itern, data in enumerate(dataloader):
         optimizer.zero_grad()
         intent_logit = model(data)
@@ -181,8 +194,8 @@ def train_traj(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler,
-    train_loader: DataLoader,
-    val_loader: DataLoader,
+    train_loader: DataLoader[Any],
+    val_loader: DataLoader[Any],
     args: DefaultArguments,
     recorder: RecordResults,
     writer: SummaryWriter,
@@ -227,8 +240,10 @@ def train_traj(
         "BCELoss": torch.nn.BCELoss().to(DEVICE),
         "CELoss": torch.nn.CrossEntropyLoss().to(DEVICE),
         "L1Loss": torch.nn.L1Loss().to(DEVICE),
-        "SmoothL1Loss": torch.nn.SmoothL1Loss().to(DEVICE),
-        "HuberLoss": torch.nn.HuberLoss().to(DEVICE),
+        "SmoothL1Loss": torch.nn.SmoothL1Loss(beta=0.5).to(
+            DEVICE
+        ),  # expose beta to opts?
+        "HuberLoss": torch.nn.HuberLoss(delta=0.5).to(DEVICE),  # expose delta to opts?
     }
     epoch_loss: dict[str, list[float | np.floating[Any]]] = {
         "loss_intent": [],
@@ -236,7 +251,8 @@ def train_traj(
     }
 
     for epoch in range(resume_info.current_epoch, args.epochs + 1):
-        niters = int(np.ceil(len(train_loader.dataset) / args.batch_size))
+        num_samples: int = len(train_loader.dataset)
+        niters: int = int(np.ceil(num_samples / args.batch_size))
         recorder.train_epoch_reset(epoch, niters)
         epoch_loss = train_traj_epoch(
             epoch,
@@ -262,8 +278,8 @@ def train_traj(
         if epoch % 1 == 0:
             print(
                 f"Train epoch {epoch}/{args.epochs} | epoch loss: "
-                f"loss_intent = {np.mean(epoch_loss['loss_intent']): .4f}, "
-                f"loss_traj = {np.mean(epoch_loss['loss_traj']): .4f}"
+                f"loss_intent = {np.mean(epoch_loss['loss_intent']):.4f}, "
+                f"loss_traj = {np.mean(epoch_loss['loss_traj']):.4f}"
             )
 
         if (epoch + 1) % args.val_freq == 0:
@@ -281,6 +297,9 @@ def train_traj(
             )
             if isinstance(scheduler, ReduceLROnPlateau):
                 scheduler.step(val_loss)
+
+        gc.collect()
+        torch.cuda.empty_cache()
 
         # Save training resumption info.
         torch.save(model.state_dict(), f"{args.checkpoint_path}/latest.pth")
@@ -329,29 +348,61 @@ def train_traj_epoch(
     """
     model.train()
     batch_losses = collections.defaultdict(list)
-
-    niters: int = int(np.ceil(len(dataloader.dataset) / args.batch_size))
+    num_samples = len(dataloader.dataset)
+    niters: int = int(np.ceil(num_samples / args.batch_size))
     for itern, data in enumerate(dataloader):
+        # curr_batch_size: int = data["bboxes"].shape[0]
         # with torch.autograd.set_detect_anomaly(True):
         if CUDA and scaler:
             # Automatic mixed precision
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 optimizer.zero_grad()
-                traj_pred = model(data)
+                traj_pred = (
+                    model(data) / args.image_shape[0]
+                )  # Rescales bounding box coordinates to [0.0..1.0]
                 traj_gt: torch.Tensor = (
                     data["bboxes"][:, args.observe_length :, :]
                     .type(FloatTensor)
                     .to(DEVICE)
-                )
+                ) / args.image_shape[0]
                 loss_traj = torch.tensor(0.0).type(torch.bfloat16).to(DEVICE)
                 if "bbox_l1" in args.traj_loss:
-                    loss_bbox_l1 = criterions["L1Loss"](traj_pred, traj_gt)
+                    loss_bbox_l1 = (
+                        criterions["L1Loss"](traj_pred, traj_gt)
+                        # / 4
+                        # / args.observe_length
+                    )
                     batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
                     loss_traj += loss_bbox_l1
+                if "bbox_smooth_l1" in args.traj_loss:
+                    loss_bbox_l1 = (
+                        criterions["SmoothL1Loss"](traj_pred, traj_gt)
+                        # / 4
+                        # / args.observe_length
+                    )
+                    batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
+                    loss_traj += loss_bbox_l1
+
+                if "bbox_huber" in args.traj_loss:
+                    loss_bbox_l1 = (
+                        criterions["HuberLoss"](traj_pred, traj_gt)
+                        # / 4
+                        # / args.observe_length
+                    )
+                    batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
+                    loss_traj += loss_bbox_l1
+
                 if "bbox_l2" in args.traj_loss:
-                    loss_bbox_l2 = criterions["MSELoss"](traj_pred, traj_gt)
+                    loss_bbox_l2 = (
+                        criterions["MSELoss"](traj_pred, traj_gt)
+                        # / 4
+                        # / args.observe_length
+                    )
                     batch_losses["loss_bbox_l2"].append(loss_bbox_l2.item())
                     loss_traj += loss_bbox_l2
+
+                if loss_traj.isnan().any():
+                    raise RuntimeError("NaN in loss detected!")
 
                 loss = args.loss_weights["loss_traj"] * loss_traj
                 # loss_traj = torch.mean(criterions["L1Loss"](traj_pred, traj_gt))
@@ -359,19 +410,30 @@ def train_traj_epoch(
                 # loss = loss_traj * args.loss_weights["loss_traj"]
 
             scaler.scale(loss).backward()
+
+            # Clip gradients
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
             scaler.step(optimizer)
             if isinstance(scheduler, OneCycleLR):
                 scheduler.step()
+
             scaler.update()
 
         else:
             optimizer.zero_grad()
-            traj_pred = model(data)
+            traj_pred = (
+                model(data) / args.image_shape[0]
+            )  # Rescales bounding box coordinates to [0.0..1.0]
+
             # intent_pred: sigmoid output, (0, 1), bs
             # traj_pred: logit, bs x ts x 4
 
-            traj_gt = data["bboxes"][:, args.observe_length :, :].type(FloatTensor)
-            bs, ts, _ = traj_gt.shape
+            traj_gt = (
+                data["bboxes"][:, args.observe_length :, :].type(FloatTensor)
+                / args.image_shape[0]
+            )
             # center: bs x ts x 2
             # traj_center_gt = torch.cat((((traj_gt[:, :, 0] + traj_gt[:, :, 2]) / 2).unsqueeze(-1),
             #                             ((traj_gt[:, :, 1] + traj_gt[:, :, 3]) / 2).unsqueeze(-1)), dim=-1)
@@ -380,16 +442,47 @@ def train_traj_epoch(
 
             loss_traj = torch.tensor(0.0).type(FloatTensor)
             if "bbox_l1" in args.traj_loss:
-                loss_bbox_l1 = torch.mean(criterions["L1Loss"](traj_pred, traj_gt))
+                loss_bbox_l1 = (
+                    criterions["L1Loss"](traj_pred, traj_gt)
+                    # / 4
+                    # / args.observe_length
+                )
+
                 batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
                 loss_traj += loss_bbox_l1
+            if "bbox_smooth_l1" in args.traj_loss:
+                loss_bbox_l1 = (
+                    criterions["SmoothL1Loss"](traj_pred, traj_gt)
+                    # / 4
+                    # / args.observe_length
+                )
+                batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
+                loss_traj += loss_bbox_l1
+
+            if "bbox_huber" in args.traj_loss:
+                loss_bbox_l1 = (
+                    criterions["HuberLoss"](traj_pred, traj_gt)
+                    # / 4
+                    # / args.observe_length
+                )
+                batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
+                loss_traj += loss_bbox_l1
+
             if "bbox_l2" in args.traj_loss:
-                loss_bbox_l2 = torch.mean(criterions["MSELoss"](traj_pred, traj_gt))
+                loss_bbox_l2 = (
+                    criterions["MSELoss"](traj_pred, traj_gt)
+                    # / 4
+                    # / args.observe_length
+                )
                 batch_losses["loss_bbox_l2"].append(loss_bbox_l2.item())
                 loss_traj += loss_bbox_l2
 
+            if loss_traj.isnan().any():
+                raise RuntimeError("NaN in loss detected!")
+
             loss = args.loss_weights["loss_traj"] * loss_traj
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             if isinstance(scheduler, OneCycleLR):
                 scheduler.step()
@@ -401,13 +494,13 @@ def train_traj_epoch(
         if itern % args.print_freq == 0:
             print(
                 f"Epoch {epoch}/{args.epochs} | Batch {itern}/{niters} - "
-                f"loss_traj = {np.mean(batch_losses['loss_traj']): .4f}, "
+                f"loss_traj = {loss_traj.item():.4f}, "
             )
         recorder.train_traj_batch_update(
             itern,
             data,
-            traj_gt.type(FloatTensor).detach().cpu().numpy(),
-            traj_pred.type(FloatTensor).detach().cpu().numpy(),
+            traj_gt.type(FloatTensor).detach().cpu().numpy() * args.image_shape[0],
+            traj_pred.type(FloatTensor).detach().cpu().numpy() * args.image_shape[0],
             loss.item(),
             loss_traj.item(),
         )
@@ -424,7 +517,14 @@ def train_traj_epoch(
 
 
 def train_driving(
-    model, optimizer, scheduler, train_loader, val_loader, args, recorder, writer
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    train_loader: DataLoader[Any],
+    val_loader: DataLoader[Any],
+    args: DefaultArguments,
+    recorder: RecordResults,
+    writer: SummaryWriter,
 ):
     pos_weight = torch.tensor(args.intent_positive_weight).to(
         DEVICE

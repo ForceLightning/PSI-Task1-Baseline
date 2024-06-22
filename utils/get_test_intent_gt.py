@@ -2,6 +2,9 @@ from datetime import datetime
 import json
 import os
 import pickle
+from typing import Any
+
+from torch.utils.data import DataLoader
 
 from test import test_intent, validate_intent
 import torch
@@ -13,6 +16,7 @@ from database.create_database import create_database
 from models.build_model import build_model
 from opts import get_opts
 from train import train_intent
+from utils.args import DefaultArguments
 from utils.log import RecordResults
 
 
@@ -31,7 +35,9 @@ def main(args):
     get_intent_gt(test_loader, "../test_gt/test_intent_gt.json", args)
 
 
-def get_intent_gt(dataloader, output_path, args):
+def get_intent_gt(
+    dataloader: DataLoader[Any], output_path: str, args: DefaultArguments
+) -> None:
     dt = {}
     for itern, data in enumerate(dataloader):
         # if args.intent_type == 'mean' and args.intent_num == 2:  # BCEWithLogitsLoss
@@ -69,7 +75,12 @@ def get_intent_gt(dataloader, output_path, args):
         json.dump(dt, f)
 
 
-def get_test_driving_gt(model, dataloader, args, dset="test"):
+def get_test_driving_gt(
+    model: nn.Module,
+    dataloader: DataLoader[Any],
+    args: DefaultArguments,
+    dset: str = "test",
+) -> None:
     dt = {}
     niters = len(dataloader)
     for itern, data in enumerate(dataloader):
