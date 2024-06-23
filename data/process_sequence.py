@@ -1,19 +1,107 @@
 import collections
+from typing import Any, Literal
 
 import numpy as np
 
+from utils.args import DefaultArguments
 
-def generate_data_sequence(set_name, database, args):
+T_intentDB = dict[
+    str,  # video name
+    dict[
+        str,  # pedestrian id
+        dict[
+            {
+                "frames": list[int],
+                "cv_annotations": dict[
+                    {
+                        "track_id": str,
+                        "bbox": list[list[float]],
+                    }
+                ],
+                "nlp_annotations": dict[
+                    str,  # annotator id
+                    dict[
+                        {
+                            "intent": list[Literal["not_sure", "cross", "not_cross"]],
+                            "description": list[str],
+                            "key_frame": list[int],
+                        }
+                    ],
+                ],
+            }
+        ],
+    ],
+]
+
+T_drivingDB = dict[
+    str,  # video name
+    dict[
+        {
+            "frames": list[int],
+            "speed": list[float],
+            "gps": list[tuple[str, str]],
+            "nlp_annotations": dict[
+                str,  # annotator id
+                dict[
+                    {
+                        "driving_speed": list[
+                            Literal["increaseSpeed", "decreaseSpeed", "maintainSpeed"]
+                        ],
+                        "driving_direction": list[
+                            Literal["goStraight", "turnLeft", "turnRight"]
+                        ],
+                        "description": list[str],
+                        "key_frame": list[int],
+                    }
+                ],
+            ],
+        }
+    ],
+]
+
+T_intentSeq = dict[
+    {
+        "frame": list[list[int]],
+        "bbox": list[list[list[float]]],
+        "intention_prob": list[list[float | np.float_]],
+        "intention_binary": list[list[int]],
+        "ped_id": list[list[str]],
+        "video_id": list[list[str]],
+        "disagree_score": list[list[float | np.float_]],
+        "description": list[list[list[str]]],
+    }
+]
+
+T_drivingSeq = dict[
+    {
+        "frame": list[list[int]],
+        "video_id": list[list[str]],
+        "speed": list[list[float]],
+        "gps": list[list[str]],
+        "driving_speed": list[list[int]],
+        "driving_speed_prob": list[list[float]],
+        "driving_direction": list[list[int]],
+        "driving_direction_prob": list[list[float]],
+        "description": list[list[list[str]]],
+    }
+]
+
+
+def generate_data_sequence(
+    set_name: str,
+    database: T_intentDB | T_drivingDB,
+    args: DefaultArguments,
+) -> T_intentSeq | T_drivingSeq:
+    frame_seq: list[list[int]] = []
+    video_seq: list[list[str]] = []
+    description_seq: list[list[list[str]]] = []
     if args.task_name == "driving_decision":
-        frame_seq = []
-        video_seq = []
-        speed_seq = []
-        gps_seq = []
-        description_seq = []
-        driving_speed_seq = []
-        driving_direction_seq = []
-        driving_speed_prob_seq = []
-        driving_direction_prob_seq = []
+        speed_seq: list[list[float]] = []
+        gps_seq: list[list[str]] = []
+        driving_speed_seq: list[list[int]] = []
+        driving_direction_seq: list[list[int]] = []
+        driving_speed_prob_seq: list[list[float]] = []
+        driving_direction_prob_seq: list[list[float]] = []
 
         video_ids = sorted(database.keys())
         for video in sorted(video_ids):  # video_name: e.g., 'video_0001'
@@ -44,14 +132,11 @@ def generate_data_sequence(set_name, database, args):
             "description": description_seq,
         }
 
-    intention_prob = []
-    intention_binary = []
-    frame_seq = []
-    pids_seq = []
-    video_seq = []
-    box_seq = []
-    description_seq = []
-    disagree_score_seq = []
+    intention_prob: list[list[float | np.float_]] = []
+    intention_binary: list[list[int]] = []
+    pids_seq: list[list[str]] = []
+    box_seq: list[list[list[float]]] = []
+    disagree_score_seq: list[list[float | np.float_]] = []
 
     video_ids = sorted(database.keys())
     for video in sorted(video_ids):  # video_name: e.g., 'video_0001'
@@ -80,11 +165,13 @@ def generate_data_sequence(set_name, database, args):
     }
 
 
-def get_intent(database, video_name, ped_id, args):
-    prob_seq = []
-    intent_seq = []
-    disagree_seq = []
-    description_seq = []
+def get_intent(
+    database: T_intentDB, video_name: str, ped_id: str, args: DefaultArguments
+):
+    prob_seq: list[float | np.float_] = []
+    intent_seq: list[int] = []
+    disagree_seq: list[float | np.float_] = []
+    description_seq: list[list[str]] = []
     n_frames = len(database[video_name][ped_id]["frames"])
 
     if args.intent_type in ("major", "soft_vote"):
@@ -166,14 +253,14 @@ def get_intent(database, video_name, ped_id, args):
     return intent_seq, prob_seq, disagree_seq, description_seq
 
 
-def get_driving(database, video, args):
+def get_driving(database: T_drivingDB, video: str, args: DefaultArguments):
     # driving_speed, driving_dir, dr_speed_dsagr, dr_dir_dsagr, description
     n = len(database[video]["frames"])
-    dr_speed = []
-    dr_dir = []
-    dr_speed_prob = []
-    dr_dir_prob = []
-    description = []
+    dr_speed: list[int] = []
+    dr_dir: list[int] = []
+    dr_speed_prob: list[float] = []
+    dr_dir_prob: list[float] = []
+    description: list[list[str]] = []
     nlp_vid_uid_pairs = list(database[video]["nlp_annotations"].keys())
     for i in range(n):
         speed_ann, speed_prob = get_driving_speed_to_category(database, video, i)
@@ -194,8 +281,10 @@ def get_driving(database, video, args):
     return dr_speed, dr_dir, dr_speed_prob, dr_dir_prob, description
 
 
-def get_driving_speed_to_category(database, video, i):
-    nlp_vid_uid_pairs = list(database[video]["nlp_annotations"].keys())
+def get_driving_speed_to_category(
+    database: dict[str, Any], video: str, i: int
+) -> tuple[int, float]:
+    nlp_vid_uid_pairs: list[str] = list(database[video]["nlp_annotations"].keys())
     speed_ann_list = [
         database[video]["nlp_annotations"][vu]["driving_speed"][i]
         for vu in nlp_vid_uid_pairs
@@ -207,19 +296,20 @@ def get_driving_speed_to_category(database, video, i):
     speed_prob = int(most_common[1]) / len(speed_ann_list)
     # speed_ann = max(set(speed_ann_list), key=speed_ann_list.count)
 
-    if speed_ann == "maintainSpeed":
-        speed_ann = 0
-    elif speed_ann == "decreaseSpeed":
-        speed_ann = 1
-    elif speed_ann == "increaseSpeed":
-        speed_ann = 2
-    else:
-        raise ValueError("Unknown driving speed annotation: " + str(most_common))
+    match speed_ann:
+        case "maintainSpeed":
+            speed_ann = 0
+        case "decreaseSpeed":
+            speed_ann = 1
+        case "increaseSpeed":
+            speed_ann = 2
+        case _:
+            raise ValueError("Unknown driving speed annotation: " + str(most_common))
     return speed_ann, speed_prob
 
 
-def get_driving_direction_to_category(database, video, i):
-    nlp_vid_uid_pairs = list(database[video]["nlp_annotations"].keys())
+def get_driving_direction_to_category(database: T_drivingDB, video: str, i: int):
+    nlp_vid_uid_pairs: list[str] = list(database[video]["nlp_annotations"].keys())
     direction_ann_list = [
         database[video]["nlp_annotations"][vu]["driving_direction"][i]
         for vu in nlp_vid_uid_pairs

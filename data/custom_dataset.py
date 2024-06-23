@@ -147,8 +147,6 @@ class VideoDataset(Dataset[Any]):
         video_name = video_ids[0]
         if "global" in self.args.model_name and self.args.freeze_backbone:
             for i, fid in enumerate(frame_list):
-                pid = ped_ids[i]
-
                 global_path = os.path.join(
                     self.args.dataset_root_path,
                     "features",
@@ -540,8 +538,37 @@ class PedestrianIntentDataset(VideoDataset):
         return torch.stack(images, dim=0)
 
 
+T_drivingSample = dict[
+    {
+        "video_id": list[str],
+        "frames": list[int],
+        "image": torch.Tensor | list[None],
+        "global_featmaps": torch.Tensor | list[None],
+        "local_featmaps": torch.Tensor | list[None],
+        "label_speed": int,
+        "label_direction": int,
+        "label_speed_prob": float,
+        "label_direction_prob": float,
+    }
+]
+
+T_drivingBatch = dict[
+    {
+        "video_id": list[list[str]],
+        "frames": torch.Tensor,
+        "image": torch.Tensor | list[None],
+        "global_featmaps": torch.Tensor | list[None],
+        "local_featmaps": torch.Tensor | list[None],
+        "label_speed": torch.Tensor,
+        "label_direction": torch.Tensor,
+        "label_speed_prob": torch.Tensor,
+        "label_direction_prob": torch.Tensor,
+    }
+]
+
+
 class DrivingDecisionDataset(VideoDataset):
-    def __getitem__(self, index: int) -> dict[str, Any]:
+    def __getitem__(self, index: int) -> T_drivingSample:
         """Gets the item with the given index
 
         :param index: Index of the item.
@@ -549,15 +576,26 @@ class DrivingDecisionDataset(VideoDataset):
         :returns: Data dictionary at index.
         :rtype: dict[str, Any]
         """
-        video_ids = self.data["video_id"][index]
-        frame_list = self.data["frame"][index][
+        video_ids: list[str] = self.data["video_id"][index]
+        frame_list: list[int] = self.data["frame"][index][
             : self.args.observe_length
         ]  # return first 15 frames as observed
-        data = {}
-        bboxes = self.data["bbox"][index]
+        data: T_drivingSample = {}
+        # bboxes = self.data["bbox"][index]
         data["video_id"] = [video_ids[0]]
         data["frames"] = frame_list  # 15 observed frames
-        data["image"] = self.load_images(video_ids[0], frame_list)  # load iamges
+        images, global_featmaps, local_featmaps = [], [], []
+
+        if self.args.load_image and not self.args.freeze_backbone:
+            images = self.load_images(video_ids[0], frame_list)  # load iamges
+        elif self.args.freeze_backbone:
+            global_featmaps, local_featmaps = self.load_features(
+                [video_ids[0]], [], frame_list
+            )
+
+        data["image"] = images
+        data["global_featmaps"] = global_featmaps
+        data["local_featmaps"] = local_featmaps
         data["label_speed"] = self.data["driving_speed"][index][
             self.args.observe_length
         ]  # only return 16-th label, 3-class one-hot
@@ -573,23 +611,6 @@ class DrivingDecisionDataset(VideoDataset):
         # data["description"] = self.data["description"][index][
         #     self.args.observe_length
         # ]  # only return 16-th label, 3-class one-hot
-        for frame in range(len(frame_list)):
-            bbox = bboxes[frame]
-            xtl, ytl, xrb, yrb = bbox  # xtl: x top left, xrb: x right bottom
-            bboxes[frame] = [xtl, ytl, xrb, yrb]
-
-        original_bboxes = bboxes
-
-        match (self.args.normalize_bbox):
-            case "L2":
-                raise NotImplementedError("L2 normalization not implemented yet")
-            case "subtract_first_frame":
-                bboxes = bboxes - bboxes[:1, :]
-            case _:
-                pass
-
-        data["bboxes"] = bboxes
-        data["original_bboxes"] = original_bboxes
 
         return data
 

@@ -7,7 +7,7 @@ from typing import Any
 from utils.args import DefaultArguments
 
 """
-Database organization
+Database organization (Intent/Trajectory)
 
 db = {
     'video_name': {
@@ -22,6 +22,24 @@ db = {
                 vid_uid_pair: {'intent': [], 'description': [], 'key_frame': []},
                 ...
             }
+        }
+    }
+}
+
+Database organisation (Driving Decision)
+db = {
+    - *video_name*: { # video name
+        - 'frames': [0, 1, 2, ...], # list of frames that the target pedestrian appear
+        - 'speed': [],
+        - 'gps': [],
+        - 'nlp_annotations': {
+            - *annotator_id*: { # annotator's id/name
+                - 'speed': [], # list of driving decision (speed) at speific frame, extended from key-frame annotations 
+                - 'direction': [], # list of driving decision (direction) at speific frame, extended from key-frame annotations 
+                - 'description': [], # list of explanation of the intent estimation for every frame from the current annotator_id
+                - 'key_frame': [] # if the specific frame is key-frame, directly annotated by the annotator. 0-NOT key-frame, 1-key-frame
+            },
+            ...
         }
     }
 }
