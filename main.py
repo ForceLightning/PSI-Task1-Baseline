@@ -1,7 +1,6 @@
 from datetime import datetime
 import json
 import os
-import traceback
 from typing import Any
 
 import numpy as np
@@ -14,16 +13,16 @@ from data.prepare_data import get_dataloader
 from database.create_database import create_database
 from models.build_model import build_model
 from opts import get_opts
-from test import get_test_traj_gt, predict_intent, predict_traj
+from test import get_test_traj_gt, predict_driving, predict_intent, predict_traj
 from train import train_driving, train_intent, train_traj
+from utils.args import DefaultArguments
 from utils.evaluate_results import evaluate_driving, evaluate_intent, evaluate_traj
 from utils.get_test_intent_gt import get_intent_gt, get_test_driving_gt
 from utils.log import RecordResults
-from utils.args import DefaultArguments
 
 
 def main(args: DefaultArguments) -> tuple[float | np.floating[Any], float]:
-    writer = SummaryWriter(args.checkpoint_path)
+    writer = SummaryWriter(args.checkpoint_path, comment=args.comment)
     recorder = RecordResults(args)
     """ 1. Load database """
     if not os.path.exists(os.path.join(args.database_path, args.database_file)):
@@ -115,6 +114,7 @@ def main(args: DefaultArguments) -> tuple[float | np.floating[Any], float]:
             val_gt_file = "./test_gt/val_driving_gt.json"
             if not os.path.exists(val_gt_file):
                 get_test_driving_gt(model, val_loader, args, dset="val")
+            predict_driving(model, val_loader, args, dset="val")
             val_score = evaluate_driving(
                 val_gt_file,
                 args.checkpoint_path + "/results/val_driving_pred.json",
@@ -172,16 +172,17 @@ if __name__ == "__main__":
             args.intent_model = False  # if (or not) use intent prediction module to support trajectory prediction
             args.traj_model = True
             args.traj_loss = ["bbox_l2"]
+            # args.traj_loss = ["bbox_huber"]
             # args.batch_size = [256]
             # args.batch_size = [64]
             args.batch_size = [256]
             args.predict_length = 45
-            # args.model_name = "tcn_traj_bbox"
+            args.model_name = "tcn_traj_bbox"
             # args.model_name = "tcn_traj_bbox_int"
             # args.model_name = "tcn_traj_global"
             # args.model_name = "tcan_traj_bbox"
             # args.model_name = "tcan_traj_bbox_int"
-            args.model_name = "tcan_traj_global"
+            # args.model_name = "tcan_traj_global"
             args.loss_weights = {
                 "loss_intent": 0.0,
                 "loss_traj": 1.0,
@@ -199,16 +200,22 @@ if __name__ == "__main__":
         case "driving_decision":
             args.database_file = "driving_database_train.pkl"
             args.driving_loss = ["cross_entropy"]
-            args.batch_size = [64]
-            args.model_name = "reslstm_driving_global"
+            # args.batch_size = [64]
+            args.batch_size = [256]
+            # args.model_name = "reslstm_driving_global"
+            args.model_name = "restcn_driving_global"
             args.loss_weights = {
                 "loss_intent": 0.0,
                 "loss_traj": 0.0,
                 "loss_driving": 1.0,
             }
-            args.load_image = True
-            args.seq_overlap_rate = 0.1  # overlap rate for train/val set
+            args.load_image = False
+            args.backbone = "resnet50"
+            args.freeze_backbone = True
+            # args.seq_overlap_rate = 0.1  # overlap rate for train/val set
+            args.seq_overlap_rate = 1
             args.test_seq_overlap_rate = 1  # overlap for test set. if == 1, means overlap is one frame, following PIE
+            args.predict_length = 1
 
     args.observe_length = 15
     args.max_track_size = args.observe_length + args.predict_length
@@ -232,8 +239,9 @@ if __name__ == "__main__":
     #     "n_layers-kernel_size": [(2, 8), (3, 3), (4, 2)],
     # }
     hyperparameter_list = {
-        "lr": [1e-2],
+        # "lr": [3e-2],
         # "lr": [3e-3],
+        "lr": [3e-3],
         "batch_size": args.batch_size,
         "epochs": [50],
         "n_layers-kernel_size": [(4, 2)],

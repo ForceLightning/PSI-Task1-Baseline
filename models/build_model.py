@@ -2,6 +2,7 @@ import torch
 from torch import nn
 
 from models.driving_modules.model_lstm_driving_global import ResLSTMDrivingGlobal
+from models.driving_modules.model_tcn_driving_global import ResTCNDrivingGlobal
 from models.intent_modules.model_tcn_int_bbox import TCNINTBbox
 from models.traj_modules.model_tcan_traj_bbox import TCANTrajBbox, TCANTrajBboxInt
 from models.traj_modules.model_tcn_traj_bbox import TCNTrajBbox, TCNTrajBboxInt
@@ -37,6 +38,8 @@ def build_model(
             model = get_tcan_traj_bbox_global(args).to(DEVICE)
         case "reslstm_driving_global":
             model = get_lstm_driving_global(args).to(DEVICE)
+        case "restcn_driving_global":
+            model = get_tcn_driving_global(args).to(DEVICE)
         case _:
             raise ValueError(f"Model {args.model_name} not implemented yet.")
 
@@ -113,7 +116,7 @@ def get_tcn_traj_bbox_int(args: DefaultArguments) -> TCNTrajBboxInt:
 def get_tcan_traj_bbox(args: DefaultArguments) -> TCANTrajBbox:
     model_configs = {}
     model_configs["traj_model_opts"] = {
-        "enc_in_dim": 4,
+        "enc_in_dim": 0,
         "enc_out_dim": 64,
         "dec_in_emb_dim": 0,
         "dec_out_dim": 64,
@@ -214,6 +217,28 @@ def get_lstm_driving_global(args: DefaultArguments):
     }
     args.model_configs = model_configs
     model = ResLSTMDrivingGlobal(args, model_configs["driving_model_opts"])
+    return model
+
+
+def get_tcn_driving_global(args: DefaultArguments):
+    model_configs = {}
+    model_configs["driving_model_opts"] = {
+        "enc_in_dim": 0,  # input bbox (normalized OR not) + img_context_feat_dim
+        "enc_out_dim": 64,
+        "dec_in_emb_dim": 0,  # intent(1), speed(1), rsn(? Bert feats dim)
+        "dec_out_dim": 64,
+        "output_dim": 3,  # 3 classes each.
+        "n_layers": args.n_layers,
+        "dropout": 0.125,
+        "kernel_size": args.kernel_size,
+        "observe_length": args.observe_length,
+        "predict_length": args.predict_length,
+        "return_sequence": True,
+        "output_activation": "None",
+        "opt_name": "AdamW",
+    }
+    args.model_configs = model_configs
+    model = ResTCNDrivingGlobal(args, model_configs["driving_model_opts"])
     return model
 
 

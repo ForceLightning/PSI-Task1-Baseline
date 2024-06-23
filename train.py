@@ -1,21 +1,22 @@
 import collections
+from collections.abc import Mapping
 import gc
-import os
 from typing import Any
 
 import numpy as np
 import torch
 from torch import nn
 from torch.cuda.amp.grad_scaler import GradScaler
-from torch.optim.lr_scheduler import OneCycleLR, ReduceLROnPlateau
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LRScheduler, OneCycleLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard.writer import SummaryWriter
 
 from test import validate_driving, validate_intent, validate_traj
 from utils.args import DefaultArguments
+from utils.cuda import *
 from utils.log import RecordResults
 from utils.resume_training import ResumeTrainingInfo
-from utils.cuda import *
 
 scaler = GradScaler() if CUDA else None
 # scaler = None
@@ -526,27 +527,45 @@ def train_driving(
     recorder: RecordResults,
     writer: SummaryWriter,
 ):
+    # Handle resumption of training
+    resume_info = ResumeTrainingInfo.load_resume_info(args.checkpoint_path)
+    if resume_info is None:
+        resume_info = ResumeTrainingInfo(args.epochs + 1, 1)
+        resume_info.dump_resume_info(args.checkpoint_path)
+    else:
+        model, optimizer, scheduler = resume_info.load_state_dicts(
+            args.checkpoint_path, model, optimizer, scheduler
+        )
+
     pos_weight = torch.tensor(args.intent_positive_weight).to(
         DEVICE
     )  # n_neg_class_samples(5118)/n_pos_class_samples(11285)
+    # TODO: Add more loss classes.
     criterions = {
-        "BCEWithLogitsLoss": torch.nn.BCEWithLogitsLoss(
-            reduction="none", pos_weight=pos_weight
-        ).to(DEVICE),
-        "MSELoss": torch.nn.MSELoss(reduction="none").to(DEVICE),
+        "BCEWithLogitsLoss": torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight).to(
+            DEVICE
+        ),
+        "MSELoss": torch.nn.MSELoss().to(DEVICE),
         "BCELoss": torch.nn.BCELoss().to(DEVICE),
         "CELoss": torch.nn.CrossEntropyLoss().to(DEVICE),
-        "L1Loss": torch.nn.L1Loss(reduction="mean").to(DEVICE),
+        "L1Loss": torch.nn.L1Loss().to(DEVICE),
     }
-    epoch_loss = {"loss_driving": [], "loss_driving_speed": [], "loss_driving_dir": []}
+    epoch_loss: dict[
+        {
+            "loss_driving": list[float],
+            "loss_driving_speed": list[float],
+            "loss_driving_dir": list[float],
+        }
+    ] = {"loss_driving": [], "loss_driving_speed": [], "loss_driving_dir": []}
 
     for epoch in range(1, args.epochs + 1):
-        niters = np.ceil(len(train_loader.dataset) / args.batch_size)
+        niters = int(np.ceil(len(train_loader.dataset) / args.batch_size))
         recorder.train_epoch_reset(epoch, niters)
         epoch_loss = train_driving_epoch(
             epoch,
             model,
             optimizer,
+            scheduler,
             criterions,
             epoch_loss,
             train_loader,
@@ -558,59 +577,138 @@ def train_driving(
 
         if epoch % 1 == 0:
             print(
-                f"Train epoch {epoch}/{args.epochs} | epoch loss: "
-                f"loss_driving_speed = {np.mean(epoch_loss['loss_driving_speed']): .4f}, "
-                f"loss_driving_dir = {np.mean(epoch_loss['loss_driving_dir']): .4f}"
+                f"Train epoch {epoch}/{args.epochs} | epoch loss:",
+                f"loss_driving_speed = {np.mean(epoch_loss['loss_driving_speed']): .4f},",
+                f"loss_driving_dir = {np.mean(epoch_loss['loss_driving_dir']): .4f}",
+                sep=" ",
             )
 
         if (epoch + 1) % args.val_freq == 0:
             print(f"Validate at epoch {epoch}")
-            niters = np.ceil(len(val_loader.dataset) / args.batch_size)
+            niters = int(np.ceil(len(val_loader.dataset) / args.batch_size))
             recorder.eval_epoch_reset(epoch, niters)
-            validate_driving(epoch, model, val_loader, args, recorder, writer)
+            val_loss = validate_driving(
+                epoch, model, val_loader, args, recorder, writer, criterions["CELoss"]
+            )
 
-        torch.save(model.state_dict(), args.checkpoint_path + f"/latest.pth")
+            if isinstance(scheduler, ReduceLROnPlateau):
+                scheduler.step(val_loss)
+
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        # Save training resumption info.
+        torch.save(model.state_dict(), f"{args.checkpoint_path}/latest.pth")
+        torch.save(optimizer.state_dict(), f"{args.checkpoint_path}/latest_optim.pth")
+        torch.save(scheduler.state_dict(), f"{args.checkpoint_path}/latest_sched.pth")
+        resume_info.current_epoch += 1
+        resume_info.dump_resume_info(args.checkpoint_path)
 
 
 def train_driving_epoch(
-    epoch, model, optimizer, criterions, epoch_loss, dataloader, args, recorder, writer
-):
+    epoch: int,
+    model: nn.Module,
+    optimizer: Optimizer,
+    scheduler: LRScheduler,
+    criterions: Mapping[str, nn.Module],
+    epoch_loss: dict[
+        {
+            "loss_driving": list[float],
+            "loss_driving_speed": list[float],
+            "loss_driving_dir": list[float],
+        }
+    ],
+    dataloader: DataLoader[Any],
+    args: DefaultArguments,
+    recorder: RecordResults,
+    writer: SummaryWriter,
+) -> dict[
+    {
+        "loss_driving": list[float],
+        "loss_driving_speed": list[float],
+        "loss_driving_dir": list[float],
+    }
+]:
     model.train()
     batch_losses = collections.defaultdict(list)
 
-    niters = np.ceil(len(dataloader.dataset) / args.batch_size)
+    niters = int(np.ceil(len(dataloader.dataset) / args.batch_size))
     for itern, data in enumerate(dataloader):
-        optimizer.zero_grad()
-        pred_speed_logit, pred_dir_logit = model(data)
-        lbl_speed = data["label_speed"].type(LongTensor)  # bs x 1
-        lbl_dir = data["label_direction"].type(LongTensor)  # bs x 1
-        # traj_pred = model(data)
-        # intent_pred: sigmoid output, (0, 1), bs
-        # traj_pred: logit, bs x ts x 4
+        if CUDA and scaler:
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                optimizer.zero_grad()
+                pred_speed_logit, pred_dir_logit = model(data)
+                lbl_speed: torch.Tensor = data["label_speed"].type(LongTensor)  # bs x 1
+                lbl_dir: torch.Tensor = data["label_direction"].type(
+                    LongTensor
+                )  # bs x 1
 
-        # traj_gt = data['bboxes'][:, args.observe_length:, :].type(FloatTensor)
-        # bs, ts, _ = traj_gt.shape
-        # center: bs x ts x 2
-        # traj_center_gt = torch.cat((((traj_gt[:, :, 0] + traj_gt[:, :, 2]) / 2).unsqueeze(-1),
-        #                             ((traj_gt[:, :, 1] + traj_gt[:, :, 3]) / 2).unsqueeze(-1)), dim=-1)
-        # traj_center_pred = torch.cat((((traj_pred[:, :, 0] + traj_pred[:, :, 2]) / 2).unsqueeze(-1),
-        #                               ((traj_pred[:, :, 1] + traj_pred[:, :, 3]) / 2).unsqueeze(-1)), dim=-1)
+                # Calculate losses
+                loss_driving: torch.Tensor = torch.tensor(0.0).type(FloatTensor)
+                if "cross_entropy" in args.driving_loss:
+                    loss_driving_speed: torch.Tensor = criterions["CELoss"](
+                        pred_speed_logit, lbl_speed
+                    )
+                    loss_driving_dir: torch.Tensor = criterions["CELoss"](
+                        pred_dir_logit, lbl_dir
+                    )
+                    batch_losses["loss_driving_speed"].append(loss_driving_speed.item())
+                    batch_losses["loss_driving_dir"].append(loss_driving_dir.item())
+                    loss_driving += loss_driving_speed
+                    loss_driving += loss_driving_dir
 
-        loss_driving = torch.tensor(0.0).type(FloatTensor)
-        if "cross_entropy" in args.driving_loss:
-            loss_driving_speed = torch.mean(
-                criterions["CELoss"](pred_speed_logit, lbl_speed)
-            )
-            loss_driving_dir = torch.mean(criterions["CELoss"](pred_dir_logit, lbl_dir))
-            # loss_bbox_l1 = torch.mean(criterions['L1Loss'](traj_pred, traj_gt))
-            batch_losses["loss_driving_speed"].append(loss_driving_speed.item())
-            batch_losses["loss_driving_dir"].append(loss_driving_dir.item())
-            loss_driving += loss_driving_speed
-            loss_driving += loss_driving_dir
+                loss = args.loss_weights["loss_driving"] * loss_driving
+            scaler.scale(loss).backward()
 
-        loss = args.loss_weights["loss_driving"] * loss_driving
-        loss.backward()
-        optimizer.step()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            scaler.step(optimizer)
+            scaler.update()
+
+            if isinstance(scheduler, OneCycleLR):
+                scheduler.step()
+
+        else:
+            optimizer.zero_grad()
+            pred_speed_logit, pred_dir_logit = model(data)
+            lbl_speed: torch.Tensor = data["label_speed"].type(LongTensor)  # bs x 1
+            lbl_dir: torch.Tensor = data["label_direction"].type(LongTensor)  # bs x 1
+            # traj_pred = model(data)
+            # intent_pred: sigmoid output, (0, 1), bs
+            # traj_pred: logit, bs x ts x 4
+
+            # traj_gt = data['bboxes'][:, args.observe_length:, :].type(FloatTensor)
+            # bs, ts, _ = traj_gt.shape
+            # center: bs x ts x 2
+            # traj_center_gt = torch.cat((((traj_gt[:, :, 0] + traj_gt[:, :, 2]) / 2).unsqueeze(-1),
+            #                             ((traj_gt[:, :, 1] + traj_gt[:, :, 3]) / 2).unsqueeze(-1)), dim=-1)
+            # traj_center_pred = torch.cat((((traj_pred[:, :, 0] + traj_pred[:, :, 2]) / 2).unsqueeze(-1),
+            #                               ((traj_pred[:, :, 1] + traj_pred[:, :, 3]) / 2).unsqueeze(-1)), dim=-1)
+
+            # TODO: Calculate losses
+            loss_driving: torch.Tensor = torch.tensor(0.0).type(FloatTensor)
+            if "cross_entropy" in args.driving_loss:
+                loss_driving_speed: torch.Tensor = criterions["CELoss"](
+                    pred_speed_logit, lbl_speed
+                )
+                loss_driving_dir: torch.Tensor = criterions["CELoss"](
+                    pred_dir_logit, lbl_dir
+                )
+                # loss_bbox_l1 = torch.mean(criterions['L1Loss'](traj_pred, traj_gt))
+                batch_losses["loss_driving_speed"].append(loss_driving_speed.item())
+                batch_losses["loss_driving_dir"].append(loss_driving_dir.item())
+                loss_driving += loss_driving_speed
+                loss_driving += loss_driving_dir
+
+            loss: torch.Tensor = args.loss_weights["loss_driving"] * loss_driving
+            loss.backward()
+            # Handle gradient clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+
+            # Handle scheduler steps
+            if isinstance(scheduler, OneCycleLR):
+                scheduler.step()
 
         # Record results
         batch_losses["loss"].append(loss.item())
@@ -618,17 +716,18 @@ def train_driving_epoch(
 
         if itern % args.print_freq == 0:
             print(
-                f"Epoch {epoch}/{args.epochs} | Batch {itern}/{niters} - "
-                f"loss_driving_speed = {np.mean(batch_losses['loss_driving_speed']): .4f}, "
-                f"loss_driving_dir = {np.mean(batch_losses['loss_driving_dir']): .4f}"
+                f"Epoch {epoch}/{args.epochs} | Batch {itern}/{niters} -",
+                f"loss_driving_speed = {np.mean(batch_losses['loss_driving_speed']): .4f},",
+                f"loss_driving_dir = {np.mean(batch_losses['loss_driving_dir']): .4f}",
+                sep=" ",
             )
         recorder.train_driving_batch_update(
             itern,
             data,
             lbl_speed.detach().cpu().numpy(),
             lbl_dir.detach().cpu().numpy(),
-            pred_speed_logit.detach().cpu().numpy(),
-            pred_dir_logit.detach().cpu().numpy(),
+            pred_speed_logit.type(FloatTensor).detach().cpu().numpy(),
+            pred_dir_logit.type(FloatTensor).detach().cpu().numpy(),
             loss.item(),
             loss_driving_speed.item(),
             loss_driving_dir.item(),

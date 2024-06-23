@@ -4,17 +4,16 @@ import os
 import pickle
 from typing import Any
 
-from torch.utils.data import DataLoader
-
-from test import test_intent, validate_intent
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from data.prepare_data import get_dataloader
 from database.create_database import create_database
 from models.build_model import build_model
 from opts import get_opts
+from test import test_intent, validate_intent
 from train import train_intent
 from utils.args import DefaultArguments
 from utils.log import RecordResults

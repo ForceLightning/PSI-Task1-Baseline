@@ -4,6 +4,7 @@ from typing import Any
 import numpy as np
 from torch import nn
 
+from data.custom_dataset import T_drivingBatch, T_drivingSample
 from data.prepare_data import get_dataloader
 from database.create_database import create_database
 from models.build_model import build_model
@@ -29,7 +30,7 @@ class TrainIterBbox(TrainDataLoaderIter):
         ]
 
 
-class TrainIterGlobal(TrainDataLoaderIter):
+class TrainIterGlobalIntent(TrainDataLoaderIter):
     def __init__(self, ag: DefaultArguments, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.args = ag
@@ -68,6 +69,27 @@ class TrainIterGlobal(TrainDataLoaderIter):
         return (images, bbox), out
 
 
+class TrainIterGlobalDecision(TrainDataLoaderIter):
+    def __init__(self, ag: DefaultArguments, *args, **kwargs):  # type: ignore[reportMissingParameterType]
+        super().__init__(*args, **kwargs)
+        self.args = ag
+
+    def inputs_labels_from_batch(
+        self, batch_data: T_drivingBatch
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        lbl_speed: torch.Tensor = batch_data["label_speed"].type(LongTensor)
+        lbl_dir: torch.Tensor = batch_data["label_direction"].type(LongTensor)
+        out = torch.cat([lbl_speed, lbl_dir], dim=0)
+        if self.args.freeze_backbone:
+            visual_embeddings: torch.Tensor = batch_data["global_featmaps"]
+            return visual_embeddings, out
+
+        images: torch.Tensor = batch_data["image"][
+            :, : self.args.observe_length, :, :, :
+        ].type(FloatTensor)
+        return images, out
+
+
 def main(args: DefaultArguments):
     amp_config = {"device_type": "cuda", "dtype": torch.bfloat16}
     grad_scaler = torch.cuda.amp.GradScaler()
@@ -77,16 +99,19 @@ def main(args: DefaultArguments):
         create_database(args)
     train_loader, _, _ = get_dataloader(args)
     args.steps_per_epoch = int(np.ceil(len(train_loader.dataset) / args.batch_size))
-    if "global" in args.model_name:
-        train_data_iter = TrainIterGlobal(args, train_loader)
-    else:
+    if "global" not in args.model_name:
         train_data_iter = TrainIterBbox(args, train_loader)
+    elif "driving_decision" != args.task_name:
+        train_data_iter = TrainIterGlobalIntent(args, train_loader)
+    else:
+        train_data_iter = TrainIterGlobalDecision(args, train_loader)
     # 2. Create model
     model, _, _ = build_model(args)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.1, weight_decay=1e-4)
     model = nn.DataParallel(model)
     # criterion = torch.nn.L1Loss().to(DEVICE)
-    criterion = torch.nn.MSELoss().to(DEVICE)
+    # criterion = torch.nn.MSELoss().to(DEVICE)
+    criterion = torch.nn.CrossEntropyLoss().to(DEVICE)
     # 3. Find LR.
     lr_finder = LRFinder(
         model,
@@ -167,16 +192,20 @@ if __name__ == "__main__":
         case "driving_decision":
             args.database_file = "driving_database_train.pkl"
             args.driving_loss = ["cross_entropy"]
-            args.batch_size = 64
-            args.model_name = "reslstm_driving_global"
+            args.batch_size = 256
+            args.model_name = "restcn_driving_global"
+            # args.model_name = "reslstm_driving_global"
             args.loss_weights = {
                 "loss_intent": 0.0,
                 "loss_traj": 0.0,
                 "loss_driving": 1.0,
             }
-            args.load_image = True
-            args.seq_overlap_rate = 0.1  # overlap rate for train/val set
+            # args.load_image = True
+            args.seq_overlap_rate = 1  # overlap rate for train/val set
             args.test_seq_overlap_rate = 1  # overlap for test set. if == 1, means overlap is one frame, following PIE
+            args.load_image = False
+            args.backbone = "resnet50"
+            args.freeze_backbone = True
 
     args.observe_length = 15
     args.max_track_size = args.observe_length + args.predict_length

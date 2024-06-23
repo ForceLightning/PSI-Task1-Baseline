@@ -14,7 +14,14 @@ from utils.cuda import *
 from utils.log import RecordResults
 
 
-def validate_intent(epoch, model, dataloader, args, recorder, writer):
+def validate_intent(
+    epoch: int,
+    model: nn.Module,
+    dataloader: DataLoader[Any],
+    args: DefaultArguments,
+    recorder: RecordResults,
+    writer: SummaryWriter,
+):
     model.eval()
     niters = len(dataloader)
     for itern, data in enumerate(dataloader):
@@ -49,7 +56,14 @@ def validate_intent(epoch, model, dataloader, args, recorder, writer):
     return recorder
 
 
-def test_intent(epoch, model, dataloader, args, recorder, writer):
+def test_intent(
+    epoch: int,
+    model: nn.Module,
+    dataloader: DataLoader[Any],
+    args: DefaultArguments,
+    recorder: RecordResults,
+    writer: SummaryWriter,
+) -> RecordResults:
     model.eval()
     niters = len(dataloader)
     recorder.eval_epoch_reset(epoch, niters)
@@ -61,12 +75,12 @@ def test_intent(epoch, model, dataloader, args, recorder, writer):
 
         # 1. intent loss
         if args.intent_type == "mean" and args.intent_num == 2:  # BCEWithLogitsLoss
-            gt_intent = data["intention_binary"][:, args.observe_length].type(
-                FloatTensor
-            )
-            gt_intent_prob = data["intention_prob"][:, args.observe_length].type(
-                FloatTensor
-            )
+            gt_intent: torch.Tensor = data["intention_binary"][
+                :, args.observe_length
+            ].type(FloatTensor)
+            gt_intent_prob: torch.Tensor = data["intention_prob"][
+                :, args.observe_length
+            ].type(FloatTensor)
 
         recorder.eval_intent_batch_update(
             itern,
@@ -246,14 +260,28 @@ def get_test_traj_gt(
 
 
 @torch.no_grad()
-def validate_driving(epoch, model, dataloader, args, recorder, writer):
+def validate_driving(
+    epoch: int,
+    model: nn.Module,
+    dataloader: DataLoader[Any],
+    args: DefaultArguments,
+    recorder: RecordResults,
+    writer: SummaryWriter,
+    criterion: nn.Module,
+):
     print(f"Validate ...")
     model.eval()
     niters = len(dataloader)
+    val_losses: list[float] = []
     for itern, data in enumerate(dataloader):
         pred_speed_logit, pred_dir_logit = model(data)
-        lbl_speed = data["label_speed"]  # bs x 1
-        lbl_dir = data["label_direction"]  # bs x 1
+        lbl_speed = data["label_speed"].type(LongTensor)  # bs x 1
+        lbl_dir = data["label_direction"].type(LongTensor)  # bs x 1
+        val_loss: float = (
+            criterion(pred_speed_logit, lbl_speed).item()
+            + criterion(pred_dir_logit, lbl_dir).item()
+        )
+        val_losses.append(val_loss)
         recorder.eval_driving_batch_update(
             itern,
             data,
@@ -264,15 +292,20 @@ def validate_driving(epoch, model, dataloader, args, recorder, writer):
         )
 
         if itern % args.print_freq == 0:
-            print(f"Epoch {epoch}/{args.epochs} | Batch {itern}/{niters}")
+            print(
+                f"Epoch {epoch}/{args.epochs} | Batch {itern}/{niters} | Val Loss: {val_loss:.4f}"
+            )
 
         del data
         del pred_speed_logit
         del pred_dir_logit
 
+    val_losses: float = np.mean(val_losses)
+    print(f"Epoch {epoch}/{args.epochs} | Val Loss: {val_losses:.4f}")
+    writer.add_scalar("Losses/val_loss", val_losses, epoch)
     recorder.eval_driving_epoch_calculate(writer)
 
-    return recorder
+    return val_losses
 
 
 @torch.no_grad()

@@ -1,10 +1,12 @@
+from typing import overload
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import lr_scheduler
 import torchvision.models as models
 
-from utils.args import DefaultArguments
+from data.custom_dataset import T_drivingBatch
+from utils.args import DefaultArguments, ModelOpts
 
 # import torchvision.transforms as transforms
 
@@ -15,7 +17,7 @@ LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
 
 
 class ResLSTMDrivingGlobal(nn.Module):
-    def __init__(self, args, model_opts):
+    def __init__(self, args: DefaultArguments, model_opts: ModelOpts):
         super(ResLSTMDrivingGlobal, self).__init__()
         #
         # self.enc_in_dim = model_opts['enc_in_dim']  # 4, input bbox+convlstm_output context vector
@@ -47,6 +49,7 @@ class ResLSTMDrivingGlobal(nn.Module):
             fc_hidden2=CNN_fc_hidden2,
             drop_p=dropout_p,
             CNN_embed_dim=CNN_embed_dim,
+            args=args,
         ).to(device)
         num_pred_class = 3
         self.rnn_decoder_speed = DecoderRNN(
@@ -82,12 +85,34 @@ class ResLSTMDrivingGlobal(nn.Module):
         # self.reason_embedding = 'rsn' in self.args.model_name
         # self.speed_embedding = 'speed' in self.args.model_name
 
-    def forward(self, data):
-        images = data["image"]  # bs x ts x c x h x w
+    @overload
+    def forward(self, data: torch.Tensor) -> torch.Tensor: ...
 
-        visual_feats = self.cnn_encoder(images)
-        pred_speed = self.rnn_decoder_speed(visual_feats)
-        pred_dir = self.rnn_decoder_dir(visual_feats)
+    @overload
+    def forward(self, data: T_drivingBatch) -> tuple[torch.Tensor, torch.Tensor]: ...
+
+    def forward(
+        self, data: T_drivingBatch | torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
+        visual_feats: torch.Tensor
+        match data:
+            case dict():
+                if self.args.freeze_backbone:
+                    visuals = data["global_featmaps"]
+                else:
+                    visuals = data["image"][
+                        :, : self.args.observe_length, :, :, :
+                    ].type(FloatTensor)
+
+                visual_feats = self.cnn_encoder(visuals)
+
+            case _:
+                visual_feats = self.cnn_encoder(data)
+        pred_speed: torch.Tensor = self.rnn_decoder_speed(visual_feats)
+        pred_dir: torch.Tensor = self.rnn_decoder_dir(visual_feats)
+
+        if isinstance(data, torch.Tensor):
+            return torch.cat([pred_speed, pred_dir], dim=0)
 
         return pred_speed, pred_dir
         #
@@ -176,14 +201,14 @@ class ResLSTMDrivingGlobal(nn.Module):
 class ResCNNEncoder(nn.Module):
     def __init__(
         self,
-        fc_hidden1=512,
-        fc_hidden2=512,
-        drop_p=0.3,
-        CNN_embed_dim=300,
+        fc_hidden1: int = 512,
+        fc_hidden2: int = 512,
+        drop_p: float = 0.3,
+        CNN_embed_dim: int = 300,
         args: DefaultArguments = DefaultArguments(),
     ):
         """Load the pretrained ResNet-50 and replace top fc layer."""
-        super(ResCNNEncoder, self).__init__()
+        super().__init__()
 
         self.fc_hidden1, self.fc_hidden2 = fc_hidden1, fc_hidden2
         self.drop_p = drop_p
