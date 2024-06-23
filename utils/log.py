@@ -1,15 +1,15 @@
 import json
 import os
-from typing import Any, Mapping
+from typing import Any
 
 import numpy as np
 from numpy import typing as npt
 import torch
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard.writer import SummaryWriter
 
+from utils.args import DefaultArguments
 from utils.metrics import evaluate_driving, evaluate_intent, evaluate_traj
 from utils.utils import AverageMeter
-from utils.args import DefaultArguments
 
 
 class RecordResults:
@@ -54,11 +54,11 @@ class RecordResults:
         self.log_loss_driving_dir: AverageMeter
 
         # (1.2) Intent
-        self.intention_gt: list[npt.NDArray[np.float32 | np.float64]]
-        self.intention_prob_gt: list[npt.NDArray[np.float32 | np.float64]]
-        self.intention_pred: list[npt.NDArray[np.float32 | np.float64]]
-        self.intention_rsn_gt: list[npt.NDArray[np.float32 | np.float64]]
-        self.intention_rsn_pred: list[npt.NDArray[np.float32 | np.float64]]
+        self.intention_gt: list[npt.NDArray[np.float_]]
+        self.intention_prob_gt: list[npt.NDArray[np.float_]]
+        self.intention_pred: list[npt.NDArray[np.float_]]
+        self.intention_rsn_gt: list[npt.NDArray[np.float_]]
+        self.intention_rsn_pred: list[npt.NDArray[np.float_]]
 
         # (1.2.1) Training data info
         self.frames_list: list[str]
@@ -66,15 +66,15 @@ class RecordResults:
         self.ped_list: list[str]
 
         # (1.3) Trajectory
-        self.traj_gt: list[npt.NDArray[np.float32 | np.float64]]
-        self.traj_ori_gt: list[npt.NDArray[np.float32 | np.float64]]
-        self.traj_pred: list[npt.NDArray[np.float32 | np.float64]]
+        self.traj_gt: list[npt.NDArray[np.float_]]
+        self.traj_ori_gt: list[npt.NDArray[np.float_]]
+        self.traj_pred: list[npt.NDArray[np.float_]]
 
         # (1.4) Driving
-        self.driving_speed_gt: list[npt.NDArray[np.float32 | np.float64]]
-        self.driving_speed_pred: list[npt.NDArray[np.float32 | np.float64]]
-        self.driving_dir_gt: list[npt.NDArray[np.float32 | np.float64]]
-        self.driving_dir_pred: list[npt.NDArray[np.float32 | np.float64]]
+        self.driving_speed_gt: list[npt.NDArray[np.float_]]
+        self.driving_speed_pred: list[npt.NDArray[np.float_]]
+        self.driving_dir_gt: list[npt.NDArray[np.float_]]
+        self.driving_dir_pred: list[npt.NDArray[np.float_]]
 
         # (1.5) Store all results
         self.train_epoch_results: dict[str, Any]
@@ -123,9 +123,9 @@ class RecordResults:
         self,
         itern: int,
         data: dict[str, torch.Tensor],
-        intent_gt: npt.NDArray[np.float32 | np.float64],
-        intent_prob_gt: npt.NDArray[np.float32 | np.float64],
-        intent_prob: npt.NDArray[np.float32 | np.float64],
+        intent_gt: npt.NDArray[np.float_],
+        intent_prob_gt: npt.NDArray[np.float_],
+        intent_prob: npt.NDArray[np.float_],
         loss: float,
         loss_intent: float,
     ):
@@ -231,11 +231,11 @@ class RecordResults:
         self,
         itern: int,
         data: dict[str, Any],
-        intent_gt: npt.NDArray[np.float32 | np.float64],
-        intent_prob: npt.NDArray[np.float32 | np.float64],
-        intent_prob_gt: npt.NDArray[np.float32 | np.float64],
-        intent_rsn_gt=None,
-        intent_rsn_pred=None,
+        intent_gt: npt.NDArray[np.float_],
+        intent_prob: npt.NDArray[np.float_],
+        intent_prob_gt: npt.NDArray[np.float_],
+        intent_rsn_gt: npt.NDArray[Any] | None = None,
+        intent_rsn_pred: npt.NDArray[Any] | None = None,
     ):
         # 3. Update training info
         # (3.1) loss log list
@@ -317,8 +317,8 @@ class RecordResults:
         self,
         itern: int,
         data: dict[str, torch.Tensor],
-        traj_gt: npt.NDArray[np.float32 | np.float64],
-        traj_pred: npt.NDArray[np.float32 | np.float64],
+        traj_gt: npt.NDArray[np.float_],
+        traj_pred: npt.NDArray[np.float_],
         loss: float,
         loss_traj: float,
     ):
@@ -377,8 +377,8 @@ class RecordResults:
         self,
         itern: int,
         data: dict[str, torch.Tensor | list[str | float | int]],
-        traj_gt: npt.NDArray[np.float32 | np.float64],
-        traj_pred: npt.NDArray[np.float32 | np.float64],
+        traj_gt: npt.NDArray[np.float_],
+        traj_pred: npt.NDArray[np.float_],
     ):
         # 3. Update training info
         self.frames_list.extend(
@@ -429,14 +429,14 @@ class RecordResults:
         self,
         itern: int,
         data: dict[str, torch.Tensor | list[str | int | float]],
-        speed_gt,
-        direction_gt,
-        speed_pred_logit,
-        dir_pred_logit,
-        loss,
-        loss_driving_speed,
-        loss_driving_dir,
-    ):
+        speed_gt: npt.NDArray[np.int_],
+        direction_gt: npt.NDArray[np.int_],
+        speed_pred_logit: npt.NDArray[np.float_],
+        dir_pred_logit: npt.NDArray[np.float_],
+        loss: float,
+        loss_driving_speed: float,
+        loss_driving_dir: float,
+    ) -> None:
         # 3. Update training info
         # (3.1) loss log list
         bs = speed_gt.shape[0]
@@ -452,7 +452,7 @@ class RecordResults:
 
         if (itern + 1) % self.args.print_freq == 0:
             with open(self.args.checkpoint_path + "/training_info.txt", "a") as f:
-                f.write(
+                _ = f.write(
                     "Epoch {}/{} Batch: {}/{} | Total Loss: {:.4f} |  driving speed Loss: {:.4f} |  driving dir Loss: {:.4f} \n".format(
                         self.epoch,
                         self.args.epochs,
@@ -464,7 +464,9 @@ class RecordResults:
                     )
                 )
 
-    def train_driving_epoch_calculate(self, writer: SummaryWriter | None = None):
+    def train_driving_epoch_calculate(
+        self, writer: SummaryWriter | None = None
+    ) -> None:
         print("----------- Training results: ------------------------------------ ")
         driving_results = None
         if self.driving:
@@ -501,16 +503,16 @@ class RecordResults:
         self,
         itern: int,
         data: dict[str, torch.Tensor | list[float | int | str]],
-        speed_gt: npt.NDArray[np.float32 | np.float64],
-        direction_gt: npt.NDArray[np.float32 | np.float64],
-        speed_pred_logit: npt.NDArray[np.float32 | np.float64],
-        dir_pred_logit: npt.NDArray[np.float32 | np.float64],
+        speed_gt: npt.NDArray[np.float_],
+        direction_gt: npt.NDArray[np.float_],
+        speed_pred_logit: npt.NDArray[np.float_],
+        dir_pred_logit: npt.NDArray[np.float_],
         reason_gt=None,
         reason_pred=None,
-    ):
+    ) -> None:
         # 3. Update training info
         # (3.1) loss log list
-        bs = speed_gt.shape[0]
+        # bs = speed_gt.shape[0]
         # self.frames_list.extend(data['frames'].detach().cpu().numpy())  # bs x sq_length(60)
         # assert len(self.frames_list[0]) == self.args.observe_length
         # self.video_list.extend(data['video_id'])  # bs
@@ -523,7 +525,7 @@ class RecordResults:
         if reason_pred is not None:
             pass  # store reason prediction
 
-    def eval_driving_epoch_calculate(self, writer: SummaryWriter | None = None):
+    def eval_driving_epoch_calculate(self, writer: SummaryWriter | None = None) -> None:
         print("----------- Evaluate results: ------------------------------------ ")
         driving_results = None
         if self.driving:
