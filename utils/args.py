@@ -104,10 +104,8 @@ class DefaultArguments:
     :type kernel_size: int
     """
 
-    dataset: Literal["PSI2.0"] | Literal["PSI1.0"] = "PSI2.0"
-    task_name: (
-        Literal["ped_intent"] | Literal["ped_traj"] | Literal["driving_decision"]
-    ) = "ped_intent"
+    dataset: Literal["PSI2.0", "PSI1.0"] = "PSI2.0"
+    task_name: Literal["ped_intent", "ped_traj", "driving_decision"] = "ped_intent"
     video_splits: os.PathLike[Any] | str = os.path.join(
         ROOT_DIR, "splits", "PSI2_split.json"
     )
@@ -118,13 +116,13 @@ class DefaultArguments:
     seq_overlap_rate: float = 0.9
     test_seq_overlap_rate: float = 1.0
     intent_num: Literal[2] | Literal[3] = 2
-    intent_type: (
-        Literal["major"] | Literal["mean"] | Literal["separate"] | Literal["soft_vote"]
-    ) = "mean"
+    intent_type: Literal["major", "mean", "separate", "soft_vote"] = "mean"
     observe_length: int = 15
     predict_length: int = 45
     max_track_size: int = 60
-    crop_mode: str = "enlarge"
+    crop_mode: Literal["same", "enlarge", "move", "random_enlarge", "random_move"] = (
+        "enlarge"
+    )
     balance_data: bool = False
     normalize_bbox: (
         Literal["L2"]

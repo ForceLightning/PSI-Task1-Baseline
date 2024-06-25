@@ -1,12 +1,16 @@
+from __future__ import annotations
+from typing_extensions import override
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from data.custom_dataset import T_intentBatch
+from utils.args import DefaultArguments, ModelOpts
 from utils.cuda import *
 
 
 class LSTMedTrajBbox(nn.Module):
-    def __init__(self, args, model_opts):
+    def __init__(self, args: DefaultArguments, model_opts: ModelOpts):
         super(LSTMedTrajBbox, self).__init__()
 
         self.enc_in_dim = model_opts[
@@ -69,8 +73,11 @@ class LSTMedTrajBbox(nn.Module):
         self.reason_embedding = "rsn" in self.args.model_name
         self.speed_embedding = "speed" in self.args.model_name
 
-    def forward(self, data):
-        bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
+    @override
+    def forward(self, data: T_intentBatch):
+        bbox: torch.Tensor = data["bboxes"][:, : self.args.observe_length, :].type(
+            FloatTensor
+        )
         # enc_input/dec_input_emb: bs x ts x enc_input_dim/dec_emb_input_dim
         enc_input = bbox
 

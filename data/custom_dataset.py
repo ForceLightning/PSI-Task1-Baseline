@@ -1,3 +1,4 @@
+from __future__ import annotations
 import abc
 from copy import deepcopy
 import os
@@ -12,12 +13,79 @@ import torch
 from torch.utils.data import DataLoader, Dataset, Sampler
 from torchvision.transforms import v2
 
+from data.process_sequence import T_drivingSeqNumpy, T_intentSeqNumpy
 from utils.args import DefaultArguments
+
+
+T_drivingSample = dict[
+    {
+        "video_id": list[str],
+        "frames": list[int],
+        "image": torch.Tensor | list[None],
+        "global_featmaps": torch.Tensor | list[None],
+        "local_featmaps": torch.Tensor | list[None],
+        "label_speed": int,
+        "label_direction": int,
+        "label_speed_prob": float,
+        "label_direction_prob": float,
+    }
+]
+
+T_drivingBatch = dict[
+    {
+        "video_id": list[list[str]],
+        "frames": torch.Tensor,
+        "image": torch.Tensor | list[None],
+        "global_featmaps": torch.Tensor | list[None],
+        "local_featmaps": torch.Tensor | list[None],
+        "label_speed": torch.Tensor,
+        "label_direction": torch.Tensor,
+        "label_speed_prob": torch.Tensor,
+        "label_direction_prob": torch.Tensor,
+    }
+]
+
+T_intentSample = dict[
+    {
+        "global_featmaps": torch.Tensor | list[None],
+        "local_featmaps": torch.Tensor | list[None],
+        "image": torch.Tensor | list[None],
+        "bboxes": npt.NDArray[np.float_],
+        "original_bboxes": npt.NDArray[np.float_],
+        "intention_binary": npt.NDArray[np.int_],
+        "intention_prob": npt.NDArray[np.float_],
+        "frames": npt.NDArray[np.int_],
+        "total_frames": npt.NDArray[np.int_],
+        "video_id": npt.NDArray[np.str_] | list[str],
+        "ped_id": npt.NDArray[np.str_] | list[str],
+        "disagree_score": npt.NDArray[np.float_],
+    }
+]
+
+T_intentBatch = dict[
+    {
+        "global_featmaps": torch.Tensor | list[None],
+        "local_featmaps": torch.Tensor | list[None],
+        "image": torch.Tensor | list[None],
+        "bboxes": torch.Tensor,
+        "original_bboxes": torch.Tensor,
+        "intention_binary": torch.Tensor,
+        "intention_prob": torch.Tensor,
+        "frames": torch.Tensor,
+        "total_frames": torch.Tensor,
+        "video_id": npt.NDArray[np.str_] | list[str],
+        "ped_id": npt.NDArray[np.str_] | list[str],
+        "disagree_score": torch.Tensor,
+    }
+]
 
 
 class VideoDataset(Dataset[Any]):
     def __init__(
-        self, data: dict[str, Any], args: DefaultArguments, stage: str = "train"
+        self,
+        data: T_intentSeqNumpy | T_drivingSeqNumpy,
+        args: DefaultArguments,
+        stage: str = "train",
     ) -> None:
         super().__init__()
         self.data = data
@@ -28,7 +96,7 @@ class VideoDataset(Dataset[Any]):
         self.images_path = os.path.join(args.dataset_root_path, "frames")
 
     @abc.abstractmethod
-    def __getitem__(self, index: int) -> dict[str, Any]:
+    def __getitem__(self, index: int) -> dict[str, Any]:  # type: ignore[reportImplicitOverride]
         raise NotImplementedError("Method not implemented")
 
     def __len__(self) -> int:
@@ -87,13 +155,12 @@ class VideoDataset(Dataset[Any]):
     def rgb_loader(self, img_path: os.PathLike[Any] | str) -> cv2.typing.MatLike:
         """Loads the image in RGB format using OpenCV
 
-        Args:
-            img_path (os.PathLike | str): Path to the image
-
-        Returns:
-            cv2.typing.MatLike: Image in RGB format
+        :param img_path: Path to the image.
+        :type img_path: os.PathLike[Any] | str
+        :returns: Image in RGB format.
+        :rtype: cv2.typing.MatLike
         """
-        img = cv2.imread(img_path)
+        img: cv2.typing.MatLike = cv2.imread(img_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         return img
 
@@ -130,7 +197,7 @@ class VideoDataset(Dataset[Any]):
 
     def load_features(
         self, video_ids: list[str], ped_ids: list[str], frame_list: list[int]
-    ) -> tuple[torch.Tensor | list[torch.Tensor], torch.Tensor | list[torch.Tensor]]:
+    ) -> tuple[torch.Tensor | list[None], torch.Tensor | list[None]]:
         """Loads the features from the local storage
 
         :param video_ids: List of video IDs.
@@ -138,12 +205,12 @@ class VideoDataset(Dataset[Any]):
         :param ped_ids: List of pedestrian IDs.
         :type ped_ids: list[str]
         :param frame_list: List of frame IDs.
-        :type frame_lsit: list[int]
+        :type frame_list: list[int]
         :returns: Tuple of global and local features.
         :rtype: tuple[torch.Tensor | list[torch.Tensor], torch.Tensor | list[torch.Tensor]]
         """
-        global_featmaps: list[torch.Tensor] | torch.Tensor = []
-        local_featmaps: list[torch.Tensor] | torch.Tensor = []
+        global_featmaps: list[None] | torch.Tensor = []
+        local_featmaps: list[None] | torch.Tensor = []
         video_name = video_ids[0]
         if "global" in self.args.model_name and self.args.freeze_backbone:
             for i, fid in enumerate(frame_list):
@@ -430,7 +497,7 @@ class VideoDataset(Dataset[Any]):
 
 
 class PedestrianIntentDataset(VideoDataset):
-    def __getitem__(self, index: int) -> dict[str, Any]:
+    def __getitem__(self, index: int) -> T_intentSample:
         """Gets the item with the given index
 
         Args:
@@ -442,14 +509,17 @@ class PedestrianIntentDataset(VideoDataset):
         Returns:
             dict: Data at the given index
         """
-        video_ids = self.data["video_id"][index]
-        ped_ids = self.data["ped_id"][index]
+        video_ids: npt.NDArray[np.str_] = self.data["video_id"][index]
+        ped_ids: npt.NDArray[np.str_] = self.data["ped_id"][index]
         assert all(video_ids[0] == vid for vid in video_ids)
         assert all(ped_ids[0] == pid for pid in ped_ids)
-        frame_list = self.data["frame"][index][: self.args.observe_length]
-        bboxes = self.data["bbox"][index]
-        intention_binary = self.data["intention_binary"][index]
-        intention_prob = self.data["intention_prob"][index]
+        frame_list: npt.NDArray[np.int_] = self.data["frame"][index][
+            : self.args.observe_length
+        ]
+        total_frame_list: npt.NDArray[np.int_] = self.data["frame"][index]
+        bboxes: npt.NDArray[np.float_] = self.data["bbox"][index]
+        intention_binary: npt.NDArray[np.int_] = self.data["intention_binary"][index]
+        intention_prob: npt.NDArray[np.float_] = self.data["intention_prob"][index]
         # Do not load images if global_featmaps are used.
         if self.args.freeze_backbone:
             images = []
@@ -488,7 +558,7 @@ class PedestrianIntentDataset(VideoDataset):
             case _:
                 pass
 
-        data = {
+        data: T_intentSample = {
             "global_featmaps": global_featmaps,
             "local_featmaps": local_featmaps,
             # "reason_features": reason_features,
@@ -498,6 +568,7 @@ class PedestrianIntentDataset(VideoDataset):
             "intention_binary": intention_binary,
             "intention_prob": intention_prob,
             "frames": np.array([int(frame) for frame in frame_list]),
+            "total_frames": np.array([int(frame) for frame in total_frame_list]),
             "video_id": video_ids[0],
             "ped_id": ped_ids[0],
             "disagree_score": disagree_score,
@@ -538,37 +609,8 @@ class PedestrianIntentDataset(VideoDataset):
         return torch.stack(images, dim=0)
 
 
-T_drivingSample = dict[
-    {
-        "video_id": list[str],
-        "frames": list[int],
-        "image": torch.Tensor | list[None],
-        "global_featmaps": torch.Tensor | list[None],
-        "local_featmaps": torch.Tensor | list[None],
-        "label_speed": int,
-        "label_direction": int,
-        "label_speed_prob": float,
-        "label_direction_prob": float,
-    }
-]
-
-T_drivingBatch = dict[
-    {
-        "video_id": list[list[str]],
-        "frames": torch.Tensor,
-        "image": torch.Tensor | list[None],
-        "global_featmaps": torch.Tensor | list[None],
-        "local_featmaps": torch.Tensor | list[None],
-        "label_speed": torch.Tensor,
-        "label_direction": torch.Tensor,
-        "label_speed_prob": torch.Tensor,
-        "label_direction_prob": torch.Tensor,
-    }
-]
-
-
 class DrivingDecisionDataset(VideoDataset):
-    def __getitem__(self, index: int) -> T_drivingSample:
+    def __getitem__(self, index: int) -> T_drivingSample:  # type: ignore[reportImplicitOverride]
         """Gets the item with the given index
 
         :param index: Index of the item.
@@ -614,7 +656,9 @@ class DrivingDecisionDataset(VideoDataset):
 
         return data
 
-    def load_images(self, video_name: str, frame_list: list[int]) -> torch.Tensor:
+    def load_images(  # type: ignore[reportImplicitOverride]
+        self, video_name: str, frame_list: list[int]
+    ) -> torch.Tensor:
         """Loads images given the video filename (without ext) and the frame list.
 
         :param video_name: Name of the video file (without file ext).
@@ -648,10 +692,13 @@ class DrivingDecisionDataset(VideoDataset):
 
 
 class MultiEpochsDataLoader(DataLoader[Any]):
-    """Custom DataLoader to support caching of the dataset over multiple epochs."""
+    """Custom DataLoader to support caching of the dataset over multiple epochs.
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    See: https://github.com/huggingface/pytorch-image-models/blob/main/timm/data/loader.py
+    """
+
+    def __init__(self, *args, **kwargs):  #  type: ignore[reportMissingParameterType]
+        super().__init__(*args, **kwargs)  # type: ignore[reportUnknownArgumentType]
         self._DataLoader__initialized = False
         if self.batch_sampler is None:
             self.sampler = _RepeatSampler(self.sampler)
@@ -669,7 +716,7 @@ class MultiEpochsDataLoader(DataLoader[Any]):
             else len(self.batch_sampler.sampler)
         )
 
-    def __iter__(self):
+    def __iter__(self):  # type: ignore[reportImplicitOverride] Need Python 3.12 for this
         for _ in range(self._items_to_consume - 1 - self._last_consume_item):
             next(self.iterator)
         self._items_to_consume = len(self)

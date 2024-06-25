@@ -1,8 +1,10 @@
+from copy import deepcopy
 import os
 import pickle
 from typing import Any
 
 import numpy as np
+from numpy import typing as npt
 import torch
 from torch.utils.data import DataLoader
 
@@ -11,7 +13,13 @@ from data.custom_dataset import (
     MultiEpochsDataLoader,
     PedestrianIntentDataset,
 )
-from data.process_sequence import generate_data_sequence
+from data.process_sequence import (
+    T_drivingSeq,
+    T_drivingSeqNumpy,
+    T_intentSeq,
+    T_intentSeqNumpy,
+    generate_data_sequence,
+)
 from utils.args import DefaultArguments
 
 
@@ -127,7 +135,9 @@ def get_dataloader(
     return train_loader, val_loader, test_loader
 
 
-def get_train_val_data(data, args, overlap=0.5):  # overlap==0.5, seq_len=15
+def get_train_val_data(
+    data: T_intentSeq | T_drivingSeq, args: DefaultArguments, overlap: float = 0.5
+):  # overlap==0.5, seq_len=15
     seq_len = args.max_track_size
     overlap = overlap
     tracks = get_tracks(data, seq_len, args.observe_length, overlap, args)
@@ -144,7 +154,13 @@ def get_test_data(data, args, overlap=1):  # overlap==0.5, seq_len=15
     return tracks
 
 
-def get_tracks(data, seq_len, observed_seq_len, overlap, args):
+def get_tracks(
+    data: T_intentSeq | T_drivingSeq,
+    seq_len: int,
+    observed_seq_len: int,
+    overlap: float,
+    args: DefaultArguments,
+) -> T_intentSeqNumpy | T_drivingSeqNumpy:
     overlap_stride = (
         observed_seq_len if overlap == 0 else int((1 - overlap) * observed_seq_len)
     )  # default: int(0.5*15) == 7
@@ -176,17 +192,13 @@ def get_tracks(data, seq_len, observed_seq_len, overlap, args):
             "disagree_score",
             "description",
         ]
-    d = {}
-
-    for k in d_types:
-        d[k] = data[k]
+    d = deepcopy(data)
 
     for k in d_types:
         # print(k, len(d[k]))
         # frame/bbox/intention_binary/reason_feats
-        tracks = []
-        for track_id in range(len(d[k])):
-            track = d[k][track_id]
+        tracks: list[int | float | np.float_ | str] = []
+        for track_id, track in enumerate(d[k]):
             # There are some sequences not adjacent
             frame_list = data["frame"][track_id]
             if len(frame_list) < args.max_track_size:  # 60:
@@ -196,7 +208,7 @@ def get_tracks(data, seq_len, observed_seq_len, overlap, args):
                     d["ped_id"][track_id][0],
                 )
                 continue
-            splits = []
+            splits: list[list[int]] = []
             start = -1
             for fid in range(len(frame_list) - 1):
                 if start == -1:
@@ -214,7 +226,7 @@ def get_tracks(data, seq_len, observed_seq_len, overlap, args):
                 raise NotImplementedError
             else:  # len(splits) == 1, No missing frames from the database.
                 pass
-            sub_tracks = []
+            sub_tracks: list[int | float | np.float_ | str] = []
             for spl in splits:
                 # explain the boundary:  end_idx - (15-1=14 gap) + cover last idx
                 for i in range(spl[0], spl[1] - (seq_len - 1) + 1, overlap_stride):
@@ -225,4 +237,5 @@ def get_tracks(data, seq_len, observed_seq_len, overlap, args):
             d[k] = np.array(tracks)
         except:
             d[k] = np.array(tracks, dtype=object)
+
     return d

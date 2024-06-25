@@ -2,6 +2,7 @@ import collections
 from typing import Any, Literal
 
 import numpy as np
+from numpy import typing as npt
 
 from utils.args import DefaultArguments
 
@@ -72,6 +73,18 @@ T_intentSeq = dict[
     }
 ]
 
+T_intentSeqNumpy = dict[
+    {
+        "frame": npt.NDArray[np.int_],
+        "bbox": npt.NDArray[np.float_],
+        "intention_prob": npt.NDArray[np.float_],
+        "ped_id": npt.NDArray[np.str_],
+        "video_id": npt.NDArray[np.str_],
+        "disagree_score": npt.NDArray[np.float_],
+        "description": npt.NDArray[Any],
+    }
+]
+
 T_drivingSeq = dict[
     {
         "frame": list[list[int]],
@@ -83,6 +96,20 @@ T_drivingSeq = dict[
         "driving_direction": list[list[int]],
         "driving_direction_prob": list[list[float]],
         "description": list[list[list[str]]],
+    }
+]
+
+T_drivingSeqNumpy = dict[
+    {
+        "frame": npt.NDArray[np.int_],
+        "video_id": npt.NDArray[np.str_],
+        "speed": npt.NDArray[np.float_],
+        "gps": npt.NDArray[np.str_],
+        "driving_speed": npt.NDArray[np.int_],
+        "driving_speed_prob": npt.NDArray[np.float_],
+        "driving_direction": npt.NDArray[np.int_],
+        "driving_direction_prob": npt.NDArray[np.float_],
+        "description": npt.NDArray[Any],
     }
 ]
 
