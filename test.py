@@ -8,7 +8,10 @@ import torch
 from torch import nn
 from torch.utils.tensorboard.writer import SummaryWriter
 from torch.utils.data import DataLoader
+from transformers import TimeSeriesTransformerModel
+from transformers.modeling_outputs import SampleTSPredictionOutput
 
+from models.traj_modules.model_transformer_traj_bbox import TransformerTrajBbox
 from utils.args import DefaultArguments
 from utils.cuda import *
 from utils.log import RecordResults
@@ -148,18 +151,24 @@ def validate_traj(
     num_samples: int = len(dataloader.dataset)
     val_losses: list[float] = []
     for itern, data in enumerate(dataloader):
-        curr_batch_size: int = data["bboxes"].shape[0]
-        traj_pred: torch.Tensor = model(data)
+        traj_pred: torch.Tensor
         traj_gt: torch.Tensor = data["bboxes"][:, args.observe_length :, :].type(
             FloatTensor
         )
-        val_loss: float = (
-            criterion(
-                traj_pred / args.image_shape[0], traj_gt / args.image_shape[0]
-            ).item()
-            # / 4
-            # / args.observe_length
-        )
+        val_loss: float
+        inner_model = getattr(model, "module", model)
+        if isinstance(inner_model, TransformerTrajBbox):
+            traj_pred = inner_model.generate(data)
+            val_loss = criterion(traj_pred, traj_gt)
+        else:
+            traj_pred = model(data) / args.image_shape[0]
+            val_loss = (
+                criterion(
+                    traj_pred / args.image_shape[0], traj_gt / args.image_shape[0]
+                ).item()
+                # / 4
+                # / args.observe_length
+            )
         val_losses.append(val_loss)
         # bs, ts, _ = traj_gt.shape
         # if args.normalize_bbox == 'subtract_first_frame':

@@ -24,6 +24,9 @@ from utils.log import RecordResults
 def main(args: DefaultArguments) -> tuple[float | np.floating[Any], float]:
     writer = SummaryWriter(args.checkpoint_path, comment=args.comment)
     recorder = RecordResults(args)
+    if "transformer" in args.model_name:  # handles "lag" in the sequence
+        args.observe_length += 1
+        args.max_track_size += 1
     """ 1. Load database """
     if not os.path.exists(os.path.join(args.database_path, args.database_file)):
         create_database(args)
@@ -171,18 +174,19 @@ if __name__ == "__main__":
             args.database_file = "traj_database_train.pkl"
             args.intent_model = False  # if (or not) use intent prediction module to support trajectory prediction
             args.traj_model = True
-            args.traj_loss = ["bbox_l2"]
+            args.traj_loss = ["nll"]
             # args.traj_loss = ["bbox_huber"]
             # args.batch_size = [256]
             # args.batch_size = [64]
             args.batch_size = [256]
             args.predict_length = 45
-            args.model_name = "tcn_traj_bbox"
+            # args.model_name = "tcn_traj_bbox"
             # args.model_name = "tcn_traj_bbox_int"
             # args.model_name = "tcn_traj_global"
             # args.model_name = "tcan_traj_bbox"
             # args.model_name = "tcan_traj_bbox_int"
             # args.model_name = "tcan_traj_global"
+            args.model_name = "transformer_traj_bbox"
             args.loss_weights = {
                 "loss_intent": 0.0,
                 "loss_traj": 1.0,

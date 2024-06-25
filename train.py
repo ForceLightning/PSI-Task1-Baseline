@@ -11,6 +11,7 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler, OneCycleLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard.writer import SummaryWriter
+from transformers.modeling_outputs import Seq2SeqTSPredictionOutput
 
 from test import validate_driving, validate_intent, validate_traj
 from utils.args import DefaultArguments
@@ -245,6 +246,7 @@ def train_traj(
             DEVICE
         ),  # expose beta to opts?
         "HuberLoss": torch.nn.HuberLoss(delta=0.5).to(DEVICE),  # expose delta to opts?
+        "NLLLoss": torch.nn.NLLLoss().to(DEVICE),
     }
     epoch_loss: dict[str, list[float | np.floating[Any]]] = {
         "loss_intent": [],
@@ -348,7 +350,7 @@ def train_traj_epoch(
     :rtype: dict[str, np.floating | float]
     """
     model.train()
-    batch_losses = collections.defaultdict(list)
+    batch_losses: dict[str, list[float]] = collections.defaultdict(list)
     num_samples = len(dataloader.dataset)
     niters: int = int(np.ceil(num_samples / args.batch_size))
     for itern, data in enumerate(dataloader):
@@ -358,21 +360,129 @@ def train_traj_epoch(
             # Automatic mixed precision
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 optimizer.zero_grad()
-                traj_pred = (
-                    model(data) / args.image_shape[0]
-                )  # Rescales bounding box coordinates to [0.0..1.0]
-                traj_gt: torch.Tensor = (
+                out: torch.Tensor | Seq2SeqTSPredictionOutput = model(data)
+                loss_traj = torch.tensor(0.0).type(torch.bfloat16).to(DEVICE)
+                traj_pred: torch.Tensor
+                traj_gt: torch.Tensor
+                if isinstance(out, Seq2SeqTSPredictionOutput):
+                    batch_losses["loss_bbox_nll"].append(out.loss.item())
+                    loss_traj += out.loss
+                    traj_gt = (
+                        data["bboxes"][:, args.observe_length :, :]
+                        .type(FloatTensor)
+                        .to(DEVICE)
+                    )
+                    traj_pred = torch.zeros_like(traj_gt).type(FloatTensor)
+                else:
+                    traj_pred = (
+                        out / args.image_shape[0]
+                    )  # Rescales bounding box coordinates to [0.0..1.0]
+                    traj_gt = (
+                        data["bboxes"][:, args.observe_length :, :]
+                        .type(FloatTensor)
+                        .to(DEVICE)
+                    ) / args.image_shape[0]
+                    if "bbox_l1" in args.traj_loss:
+                        loss_bbox_l1 = (
+                            criterions["L1Loss"](traj_pred, traj_gt)
+                            # / 4
+                            # / args.observe_length
+                        )
+                        batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
+                        loss_traj += loss_bbox_l1
+                    if "bbox_smooth_l1" in args.traj_loss:
+                        loss_bbox_l1 = (
+                            criterions["SmoothL1Loss"](traj_pred, traj_gt)
+                            # / 4
+                            # / args.observe_length
+                        )
+                        batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
+                        loss_traj += loss_bbox_l1
+
+                    if "bbox_huber" in args.traj_loss:
+                        loss_bbox_l1 = (
+                            criterions["HuberLoss"](traj_pred, traj_gt)
+                            # / 4
+                            # / args.observe_length
+                        )
+                        batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
+                        loss_traj += loss_bbox_l1
+
+                    if "bbox_l2" in args.traj_loss:
+                        loss_bbox_l2 = (
+                            criterions["MSELoss"](traj_pred, traj_gt)
+                            # / 4
+                            # / args.observe_length
+                        )
+                        batch_losses["loss_bbox_l2"].append(loss_bbox_l2.item())
+                        loss_traj += loss_bbox_l2
+
+                    if "nll" in args.traj_loss:
+                        loss_bbox_nll = criterions["NLLLoss"](traj_pred, traj_gt)
+                        batch_losses["loss_bbox_nll"].append(loss_bbox_nll.item())
+                        loss_traj += loss_bbox_nll
+
+                    if loss_traj.isnan().any():
+                        raise RuntimeError("NaN in loss detected!")
+
+                loss = args.loss_weights["loss_traj"] * loss_traj
+                # loss_traj = torch.mean(criterions["L1Loss"](traj_pred, traj_gt))
+                # batch_losses["loss_bbox_l1"].append(loss_traj.item())
+                # loss = loss_traj * args.loss_weights["loss_traj"]
+
+            scaler.scale(loss).backward()
+
+            # Clip gradients
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
+            scaler.step(optimizer)
+            if isinstance(scheduler, OneCycleLR):
+                scheduler.step()
+
+            scaler.update()
+
+        else:
+            optimizer.zero_grad()
+            out = model(data)
+            loss_traj = torch.tensor(0.0).type(torch.bfloat16).to(DEVICE)
+            traj_gt: torch.Tensor
+            traj_pred: torch.Tensor
+
+            if isinstance(out, Seq2SeqTSPredictionOutput):
+                batch_losses["loss_bbox_nll"].append(out.loss.item())
+                loss_traj += out.loss
+                traj_gt = (
                     data["bboxes"][:, args.observe_length :, :]
                     .type(FloatTensor)
                     .to(DEVICE)
-                ) / args.image_shape[0]
-                loss_traj = torch.tensor(0.0).type(torch.bfloat16).to(DEVICE)
+                )
+                traj_pred = torch.zeros_like(traj_gt).type(FloatTensor)
+            else:
+                traj_pred = (
+                    out / args.image_shape[0]
+                )  # Rescales bounding box coordinates to [0.0..1.0]
+
+                # intent_pred: sigmoid output, (0, 1), bs
+                # traj_pred: logit, bs x ts x 4
+
+                traj_gt = (
+                    data["bboxes"][:, args.observe_length :, :].type(FloatTensor)
+                    / args.image_shape[0]
+                )
+                # center: bs x ts x 2
+                # traj_center_gt = torch.cat((((traj_gt[:, :, 0] + traj_gt[:, :, 2]) / 2).unsqueeze(-1),
+                #                             ((traj_gt[:, :, 1] + traj_gt[:, :, 3]) / 2).unsqueeze(-1)), dim=-1)
+                # traj_center_pred = torch.cat((((traj_pred[:, :, 0] + traj_pred[:, :, 2]) / 2).unsqueeze(-1),
+                #                               ((traj_pred[:, :, 1] + traj_pred[:, :, 3]) / 2).unsqueeze(-1)), dim=-1)
+
                 if "bbox_l1" in args.traj_loss:
                     loss_bbox_l1 = (
                         criterions["L1Loss"](traj_pred, traj_gt)
                         # / 4
                         # / args.observe_length
                     )
+
                     batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
                     loss_traj += loss_bbox_l1
                 if "bbox_smooth_l1" in args.traj_loss:
@@ -404,82 +514,6 @@ def train_traj_epoch(
 
                 if loss_traj.isnan().any():
                     raise RuntimeError("NaN in loss detected!")
-
-                loss = args.loss_weights["loss_traj"] * loss_traj
-                # loss_traj = torch.mean(criterions["L1Loss"](traj_pred, traj_gt))
-                # batch_losses["loss_bbox_l1"].append(loss_traj.item())
-                # loss = loss_traj * args.loss_weights["loss_traj"]
-
-            scaler.scale(loss).backward()
-
-            # Clip gradients
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-
-            scaler.step(optimizer)
-            if isinstance(scheduler, OneCycleLR):
-                scheduler.step()
-
-            scaler.update()
-
-        else:
-            optimizer.zero_grad()
-            traj_pred = (
-                model(data) / args.image_shape[0]
-            )  # Rescales bounding box coordinates to [0.0..1.0]
-
-            # intent_pred: sigmoid output, (0, 1), bs
-            # traj_pred: logit, bs x ts x 4
-
-            traj_gt = (
-                data["bboxes"][:, args.observe_length :, :].type(FloatTensor)
-                / args.image_shape[0]
-            )
-            # center: bs x ts x 2
-            # traj_center_gt = torch.cat((((traj_gt[:, :, 0] + traj_gt[:, :, 2]) / 2).unsqueeze(-1),
-            #                             ((traj_gt[:, :, 1] + traj_gt[:, :, 3]) / 2).unsqueeze(-1)), dim=-1)
-            # traj_center_pred = torch.cat((((traj_pred[:, :, 0] + traj_pred[:, :, 2]) / 2).unsqueeze(-1),
-            #                               ((traj_pred[:, :, 1] + traj_pred[:, :, 3]) / 2).unsqueeze(-1)), dim=-1)
-
-            loss_traj = torch.tensor(0.0).type(FloatTensor)
-            if "bbox_l1" in args.traj_loss:
-                loss_bbox_l1 = (
-                    criterions["L1Loss"](traj_pred, traj_gt)
-                    # / 4
-                    # / args.observe_length
-                )
-
-                batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
-                loss_traj += loss_bbox_l1
-            if "bbox_smooth_l1" in args.traj_loss:
-                loss_bbox_l1 = (
-                    criterions["SmoothL1Loss"](traj_pred, traj_gt)
-                    # / 4
-                    # / args.observe_length
-                )
-                batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
-                loss_traj += loss_bbox_l1
-
-            if "bbox_huber" in args.traj_loss:
-                loss_bbox_l1 = (
-                    criterions["HuberLoss"](traj_pred, traj_gt)
-                    # / 4
-                    # / args.observe_length
-                )
-                batch_losses["loss_bbox_l1"].append(loss_bbox_l1.item())
-                loss_traj += loss_bbox_l1
-
-            if "bbox_l2" in args.traj_loss:
-                loss_bbox_l2 = (
-                    criterions["MSELoss"](traj_pred, traj_gt)
-                    # / 4
-                    # / args.observe_length
-                )
-                batch_losses["loss_bbox_l2"].append(loss_bbox_l2.item())
-                loss_traj += loss_bbox_l2
-
-            if loss_traj.isnan().any():
-                raise RuntimeError("NaN in loss detected!")
 
             loss = args.loss_weights["loss_traj"] * loss_traj
             loss.backward()

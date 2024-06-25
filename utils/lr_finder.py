@@ -8,6 +8,9 @@ import torch
 from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader
 from tqdm.autonotebook import tqdm
+from transformers.models.time_series_transformer.modeling_time_series_transformer import (
+    Seq2SeqTSPredictionOutput,
+)
 
 PYTORCH_VERSION = version.parse(torch.__version__)
 
@@ -407,10 +410,16 @@ class LRFinder(object):
             if self.amp_backend == "torch":
                 with torch.amp.autocast(**self.amp_config):
                     outputs = self.model(inputs)
-                    loss = self.criterion(outputs, labels)
+                    if isinstance(outputs, Seq2SeqTSPredictionOutput):
+                        loss = outputs.loss
+                    else:
+                        loss = self.criterion(outputs, labels)
             else:
                 outputs = self.model(inputs)
-                loss = self.criterion(outputs, labels)
+                if isinstance(outputs, Seq2SeqTSPredictionOutput):
+                    loss = outputs.loss
+                else:
+                    loss = self.criterion(outputs, labels)
 
             # Loss should be averaged in each step
             loss /= accumulation_steps

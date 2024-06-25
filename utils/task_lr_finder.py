@@ -4,7 +4,7 @@ from typing import Any
 import numpy as np
 from torch import nn
 
-from data.custom_dataset import T_drivingBatch, T_drivingSample
+from data.custom_dataset import T_drivingBatch, T_drivingSample, T_intentBatch
 from data.prepare_data import get_dataloader
 from database.create_database import create_database
 from models.build_model import build_model
@@ -90,6 +90,24 @@ class TrainIterGlobalDecision(TrainDataLoaderIter):
         return images, out
 
 
+class TrainIterTransformerTraj(TrainDataLoaderIter):
+    def __init__(self, ag: DefaultArguments, *args, **kwargs):  # type: ignore[reportMissingParameterType]
+        super().__init__(*args, **kwargs)
+        self.args = ag
+
+    def inputs_labels_from_batch(
+        self, batch_data: T_intentBatch
+    ) -> tuple[tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
+        past_future_values: torch.Tensor = batch_data["bboxes"]
+        past_future_feats: torch.Tensor = batch_data["total_frames"]
+
+        inputs = (past_future_values, past_future_feats)
+        targets: torch.Tensor = batch_data["bboxes"][
+            :, self.args.observe_length :, :
+        ].type(FloatTensor)
+        return inputs, targets
+
+
 def main(args: DefaultArguments):
     amp_config = {"device_type": "cuda", "dtype": torch.bfloat16}
     grad_scaler = torch.cuda.amp.GradScaler()
@@ -99,19 +117,24 @@ def main(args: DefaultArguments):
         create_database(args)
     train_loader, _, _ = get_dataloader(args)
     args.steps_per_epoch = int(np.ceil(len(train_loader.dataset) / args.batch_size))
+    criterion: nn.Module
     if "global" not in args.model_name:
-        train_data_iter = TrainIterBbox(args, train_loader)
+        if "transformer" not in args.model_name:
+            train_data_iter = TrainIterBbox(args, train_loader)
+            criterion = torch.nn.L1Loss().to(DEVICE)
+        else:
+            train_data_iter = TrainIterTransformerTraj(args, train_loader)
+            criterion = nn.NLLLoss().to(DEVICE)
     elif "driving_decision" != args.task_name:
         train_data_iter = TrainIterGlobalIntent(args, train_loader)
+        criterion = nn.MSELoss().to(DEVICE)
     else:
         train_data_iter = TrainIterGlobalDecision(args, train_loader)
+        criterion = nn.CrossEntropyLoss().to(DEVICE)
     # 2. Create model
     model, _, _ = build_model(args)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.1, weight_decay=1e-4)
     model = nn.DataParallel(model)
-    # criterion = torch.nn.L1Loss().to(DEVICE)
-    # criterion = torch.nn.MSELoss().to(DEVICE)
-    criterion = torch.nn.CrossEntropyLoss().to(DEVICE)
     # 3. Find LR.
     lr_finder = LRFinder(
         model,
@@ -167,12 +190,13 @@ if __name__ == "__main__":
             # args.batch_size = 64
             args.batch_size = 256
             args.predict_length = 45
-            args.model_name = "tcn_traj_bbox"
+            # args.model_name = "tcn_traj_bbox"
             # args.model_name = "tcn_traj_bbox_int"
             # args.model_name = "tcn_traj_global"
             # args.model_name = "tcan_traj_bbox"
             # args.model_name = "tcan_traj_bbox_int"
             # args.model_name = "tcan_traj_global"
+            args.model_name = "transformer_traj_bbox"
             args.loss_weights = {
                 "loss_intent": 0.0,
                 "loss_traj": 1.0,
