@@ -1,12 +1,12 @@
 import collections
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 
 import numpy as np
 from numpy import typing as npt
 
 from utils.args import DefaultArguments
 
-T_intentDB = dict[
+T_intentDB: TypeAlias = dict[
     str,  # video name
     dict[
         str,  # pedestrian id
@@ -34,7 +34,7 @@ T_intentDB = dict[
     ],
 ]
 
-T_drivingDB = dict[
+T_drivingDB: TypeAlias = dict[
     str,  # video name
     dict[
         {
@@ -60,7 +60,7 @@ T_drivingDB = dict[
     ],
 ]
 
-T_intentSeq = dict[
+T_intentSeq: TypeAlias = dict[
     {
         "frame": list[list[int]],
         "bbox": list[list[list[float]]],
@@ -73,7 +73,7 @@ T_intentSeq = dict[
     }
 ]
 
-T_intentSeqNumpy = dict[
+T_intentSeqNumpy: TypeAlias = dict[
     {
         "frame": npt.NDArray[np.int_],
         "bbox": npt.NDArray[np.float_],
@@ -85,7 +85,7 @@ T_intentSeqNumpy = dict[
     }
 ]
 
-T_drivingSeq = dict[
+T_drivingSeq: TypeAlias = dict[
     {
         "frame": list[list[int]],
         "video_id": list[list[str]],
@@ -99,7 +99,7 @@ T_drivingSeq = dict[
     }
 ]
 
-T_drivingSeqNumpy = dict[
+T_drivingSeqNumpy: TypeAlias = dict[
     {
         "frame": npt.NDArray[np.int_],
         "video_id": npt.NDArray[np.str_],

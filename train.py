@@ -531,6 +531,8 @@ def train_traj_epoch(
                 f"Epoch {epoch}/{args.epochs} | Batch {itern}/{niters} - "
                 f"loss_traj = {loss_traj.item():.4f}, "
             )
+        # NOTE: We may not want to run this for transformer-based models because the
+        # generated output is a distribution and thus not comparable with the targets.
         recorder.train_traj_batch_update(
             itern,
             data,

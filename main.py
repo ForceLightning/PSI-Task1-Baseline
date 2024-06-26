@@ -21,7 +21,7 @@ from utils.get_test_intent_gt import get_intent_gt, get_test_driving_gt
 from utils.log import RecordResults
 
 
-def main(args: DefaultArguments) -> tuple[float | np.floating[Any], float]:
+def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
     writer = SummaryWriter(args.checkpoint_path, comment=args.comment)
     recorder = RecordResults(args)
     if "transformer" in args.model_name:  # handles "lag" in the sequence

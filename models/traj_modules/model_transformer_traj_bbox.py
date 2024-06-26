@@ -1,146 +1,46 @@
 from __future__ import annotations
 from typing import Any, overload
-from torch.nn.modules import Transformer
-from torch.optim import SGD, Adam, AdamW, Optimizer
+
+import torch
+from torch import nn
+from torch.optim import Adam, AdamW, Optimizer, SGD
 from torch.optim.lr_scheduler import (
     ExponentialLR,
     LRScheduler,
     OneCycleLR,
     ReduceLROnPlateau,
 )
-from transformers.modeling_outputs import SampleTSPredictionOutput
-from transformers.models.time_series_transformer.modeling_time_series_transformer import (
+from transformers import TimeSeriesTransformerConfig, TimeSeriesTransformerForPrediction
+from transformers.modeling_outputs import (
+    SampleTSPredictionOutput,
     Seq2SeqTSPredictionOutput,
 )
 from typing_extensions import override
 
-import numpy as np
-import torch
-import torch.nn.functional as F
-from torch import nn
-from transformers import TimeSeriesTransformerForPrediction, TimeSeriesTransformerConfig
-
 from data.custom_dataset import T_intentBatch
+from models.base_model import IConstructOptimizer
 from utils.args import DefaultArguments, ModelOpts
 from utils.cuda import *
 
 
-# class TransformerTrajBbox(nn.Module):
-#     def __init__(self, args: DefaultArguments, model_opts: ModelOpts) -> None:
-#         super().__init__()
-#
-#         self.args = args
-#         self.observe_length = args.observe_length
-#         self.predict_length = args.predict_length
-#         self.output_dim = model_opts["output_dim"]
-#         self.dropout = model_opts["dropout"]
-#         self.num_layers = model_opts["n_layers"]
-#         self.num_heads = model_opts.get("num_heads", 4)
-#
-#         # Transformer encoder architecture
-#         self.trans_enc_in_dim = model_opts["enc_in_dim"]
-#         self.trans_enc_out_dim = model_opts["enc_out_dim"]
-#
-#         # Transformer decoder architecture
-#         self.trans_dec_in_dim = model_opts.get("dec_in_emb_dim", self.trans_enc_out_dim)
-#         self.trans_dec_out_dim = model_opts["dec_out_dim"]
-#         self.output_dim = model_opts["output_dim"]
-#
-#         self.src_mask = None
-#
-#         # Build encoder
-#         encoder_layer = nn.TransformerEncoderLayer(
-#             self.trans_enc_in_dim,
-#             self.num_heads,
-#             dim_feedforward=self.trans_enc_out_dim,
-#             dropout=self.dropout,
-#             activation=F.mish,
-#             batch_first=True,
-#         )
-#         self.encoder = nn.TransformerEncoder(encoder_layer, self.num_layers)
-#
-#         # Build decoder
-#         decoder_layer = nn.TransformerDecoderLayer(
-#             self.trans_dec_in_dim,
-#             self.num_heads,
-#             dim_feedforward=self.trans_dec_out_dim,
-#             dropout=self.dropout,
-#             activation=F.mish,
-#             batch_first=True,
-#         )
-#         self.decoder = nn.TransformerDecoder(decoder_layer, self.num_layers)
-#
-#         # self.transformer = nn.Transformer(
-#         #     d_model=self.trans_enc_in_dim,
-#         #     nhead=self.num_heads,
-#         #     num_encoder_layers=self.num_layers,
-#         #     num_decoder_layers=self.num_layers,
-#         #     dim_feedforward=self.trans_dec_in_dim,
-#         #     dropout=self.dropout,
-#         #     activation=F.mish,
-#         #     batch_first=True,  # bs x ts x feature
-#         # )
-#
-#     @overload
-#     def forward(self, data: tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor: ...
-#
-#     @overload
-#     def forward(self, data: T_intentBatch) -> torch.Tensor: ...
-#
-#     @override
-#     def forward(
-#         self, data: T_intentBatch | tuple[torch.Tensor, torch.Tensor]
-#     ) -> torch.Tensor:
-#         # raise NotImplementedError
-#         # TODO: (chris) Finish writing up this method.
-#
-#         enc_input: torch.Tensor
-#         tgt_input: torch.Tensor
-#         match data:
-#             case dict():
-#                 enc_input = data["bboxes"][:, : self.args.observe_length, :].type(
-#                     FloatTensor
-#                 )
-#                 tgt_input = data["bboxes"][:, 1 : self.args.observe_length + 1, :].type(
-#                     FloatTensor
-#                 )
-#             case _:
-#                 enc_input = data[0]
-#                 tgt_input = data[1]
-#
-#         ts: int
-#         if enc_input.dim() == 3:
-#             _, ts, _ = enc_input.shape
-#         else:
-#             ts, _ = enc_input.shape
-#
-#         mask_input: torch.Tensor = Transformer.generate_square_subsequent_mask(
-#             ts, DEVICE, FloatTensor
-#         )
-#         mask_target: torch.Tensor = Transformer.generate_square_subsequent_mask(
-#             ts, DEVICE, FloatTensor
-#         )
-#
-#         memory: torch.Tensor = self.encoder(enc_input, mask=mask_input, is_causal=True)
-#
-#         output: torch.Tensor = self.decoder(
-#             tgt_input, memory=memory, tgt_mask=mask_target, tgt_is_causal=True
-#         )
-#         if has_mask:
-#             device = src.device
-#             if self.src_mask is None or self.src_mask.size(0) != len(src):
-#                 mask = self._generate_square_subsequent_mask(len(src)).to(device)
-#                 self.src_mask = mask
-#         else:
-#             self.src_mask = None
-#
-#         # y = self.transformer(
-#         #     src=src,
-#         # )
+class TransformerTrajBbox(nn.Module, IConstructOptimizer):
+    """A transformer-based architecture to predict the trajectory of pedestrians
+    from their past bounding boxes.
 
+    :ivar DefaultArguments args: Training arguments.
+    :ivar ModelOpts model_opts: Model configuration options.
+    :ivar TimeSeriesTransformerConfig config: Config for the transformer model.
+    :ivar TimeSeriesTransformerForPrediction transformer: The transformer model.
+    """
 
-class TransformerTrajBbox(nn.Module):
-    def __init__(self, args: DefaultArguments, config: TimeSeriesTransformerConfig):
+    def __init__(
+        self, args: DefaultArguments, config: TimeSeriesTransformerConfig
+    ) -> None:
+        """Initialises the model.
+
+        :param DefaultArguments args: Training arguments.
+        :param TimeSeriesTransformerConfig config: Config for the transformer model.
+        """
         super().__init__()
         self.args = args
         self.model_opts: ModelOpts = args.model_configs
@@ -161,6 +61,15 @@ class TransformerTrajBbox(nn.Module):
     def forward(
         self, x: T_intentBatch | tuple[torch.Tensor, torch.Tensor]
     ) -> Seq2SeqTSPredictionOutput | tuple[torch.Tensor, ...]:
+        """Forward pass for training the model. See :py:meth:`generate` to generate
+            inferences.
+
+        :param x: Input data, dictionary if using custom dataset, or tuple if using
+            :py:mod:`lr_finder`.
+        :type x: T_intentBatch or tuple[torch.Tensor, torch.Tensor]
+        :returns: Transformer prediction output.
+        :rtype: Seq2SeqTSPredictionOutput or tuple[torch.Tensor, ...]
+        """
         # Inputs to the transformer
         past_values: torch.Tensor
         past_time_features: torch.Tensor
@@ -267,6 +176,7 @@ class TransformerTrajBbox(nn.Module):
         preds = outputs.sequences.mean(dim=1)
         return preds
 
+    @override
     def build_optimizer(self, args: DefaultArguments) -> tuple[Optimizer, LRScheduler]:
         learning_rate = args.lr
 

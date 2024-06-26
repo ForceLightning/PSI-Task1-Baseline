@@ -1,26 +1,20 @@
-from typing import Any
-from sklearn.metrics import (
-    mean_squared_error,
-    confusion_matrix,
-    classification_report,
-    accuracy_score,
-    f1_score,
-)
+from __future__ import annotations
+from typing import Any, TypeAlias
+
 import numpy as np
 from numpy import typing as npt
-from scipy.special import softmax
-from scipy.special import expit as sigmoid
-import torch.nn.functional as F
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    f1_score,
+    mean_squared_error,
+)
 
 from utils.args import DefaultArguments
+from utils.evaluate_results import T_drivingEval, T_trajEval
 
-
-def evaluate_intent(
-    target: npt.NDArray[np.float32 | np.float64],
-    target_prob: npt.NDArray[np.float32 | np.float64],
-    prediction: npt.NDArray[np.float32 | np.float64],
-    args: DefaultArguments,
-) -> dict[
+T_intentEvalM: TypeAlias = dict[
     {
         "MSE": float | np.floating[Any],
         "Acc": float | np.floating[Any],
@@ -28,25 +22,26 @@ def evaluate_intent(
         "mAcc": float,
         "ConfusionMatrix": npt.NDArray[np.float64 | Any],
     }
-]:
+]
+
+
+def evaluate_intent(
+    target: npt.NDArray[np.float32 | np.float64],
+    target_prob: npt.NDArray[np.float32 | np.float64],
+    prediction: npt.NDArray[np.float32 | np.float64],
+    args: DefaultArguments,
+) -> T_intentEvalM:
     """
     Here we only predict one 'intention' for one track (15 frame observation). (not a sequence as before)
+
     :param target: (bs x 1), hard label; target_prob: soft probability, 0-1, agreement mean([0, 0.5, 1]).
     :param prediction: (bs), sigmoid probability, 1-dim, should use 0.5 as threshold
-    :return:
+    :return: MSE, Accuracy, F1 Score, mAccuracy, and a confusion matrix in a dictionary.
+    :rtype: T_intentEvalM
     """
     print("Evaluating Intent ...")
-    results: dict[
-        {
-            "MSE": float | np.floating[Any],
-            "Acc": float | np.floating[Any],
-            "F1": float,
-            "mAcc": float,
-            "ConfusionMatrix": npt.NDArray[np.float64 | Any],
-        }
-    ] = {}
+    results: T_intentEvalM = {}
 
-    bs = target.shape[0]
     # lbl_target = np.argmax(target, axis=-1) # bs x ts
     lbl_target = target  # bs
     lbl_target_prob = target_prob
@@ -55,7 +50,7 @@ def evaluate_intent(
     mse = np.mean(np.square(lbl_target_prob - prediction))
     # hard label evaluation - acc, f1
     acc: float = accuracy_score(lbl_target, lbl_pred)  # calculate acc for all samples
-    f1 = f1_score(lbl_target, lbl_pred, average="macro")
+    f1: float = f1_score(lbl_target, lbl_pred, average="macro")
 
     intent_matrix = confusion_matrix(lbl_target, lbl_pred)  # [2 x 2]
     intent_cls_acc = np.array(
@@ -76,14 +71,7 @@ def evaluate_traj(
     target: npt.NDArray[np.float32 | np.float64],
     prediction: npt.NDArray[np.float32 | np.float64],
     args: DefaultArguments,
-) -> dict[
-    {
-        "ADE": dict[{"0.5": float, "1.0": float, "1.5": float}],
-        "FDE": dict[{"0.5": float, "1.0": float, "1.5": float}],
-        "ARB": dict[{"0.5": float, "1.0": float, "1.5": float}],
-        "FRB": dict[{"0.5": float, "1.0": float, "1.5": float}],
-    }
-]:
+) -> T_trajEval:
     """
     Evaluates the predicted trajectory of a pedestrian.
 
@@ -96,14 +84,7 @@ def evaluate_traj(
         `FDE`: Final Displacement Error (Based on the centre of the bounding box)
         `ARB`: Average RMSE of Bounding Box coordinates
         `FRB`: Final RMSE of Bounding Box coordinates
-    :rtype: dict[
-        {
-            "ADE": dict[{"0.5": float, "1.0": float, "1.5": float}],
-            "FDE": dict[{"0.5": float, "1.0": float, "1.5": float}],
-            "ARB": dict[{"0.5": float, "1.0": float, "1.5": float}],
-            "FRB": dict[{"0.5": float, "1.0": float, "1.5": float}],
-        }
-    ]
+    :rtype: T_trajEval
     """
 
     print("Evaluating Trajectory ...")
@@ -113,14 +94,7 @@ def evaluate_traj(
     assert target.shape[2] == 4  # bbox
     assert prediction.shape[1] == args.predict_length
     assert prediction.shape[2] == 4
-    results: dict[
-        {
-            "ADE": dict[{"0.5": float, "1.0": float, "1.5": float}],
-            "FDE": dict[{"0.5": float, "1.0": float, "1.5": float}],
-            "ARB": dict[{"0.5": float, "1.0": float, "1.5": float}],
-            "FRB": dict[{"0.5": float, "1.0": float, "1.5": float}],
-        }
-    ] = {
+    results: T_trajEval = {
         # 'Bbox_MSE': {'0.5': 0, '1.0': 0, '1.5': 0},
         # 'Bbox_FMSE': {'0.5': 0, '1.0': 0, '1.5': 0},
         # 'Center_MSE': {'0.5': 0, '1.0': 0, '1.5': 0},
@@ -177,34 +151,35 @@ def evaluate_traj(
 
 
 def evaluate_driving(
-    target_speed: npt.NDArray[np.float32 | np.float64],
-    target_dir: npt.NDArray[np.float32 | np.float64],
-    pred_speed: npt.NDArray[np.float32 | np.float64],
-    pred_dir: npt.NDArray[np.float32 | np.float64],
+    target_speed: npt.NDArray[np.float_],
+    target_dir: npt.NDArray[np.float_],
+    pred_speed: npt.NDArray[np.float_],
+    pred_dir: npt.NDArray[np.float_],
     args: DefaultArguments,
-) -> dict[
-    {
-        "speed_Acc": float,
-        "speed_mAcc": float,
-        "speed_confusion_matrix": npt.NDArray[np.float64 | Any],
-        "direction_Acc": float,
-        "direction_mAcc": float,
-        "dir_confusion_matrix": npt.NDArray[np.float64 | Any],
+) -> T_drivingEval:
+    """Evaluates driving predictions from ground truth and prediction values.
+
+    :param npt.NDArray[np.float_] target_speed: Ground truth speed decision targets.
+    :param npt.NDArray[np.float_] target_dir: Ground truth direction decision targets.
+    :param npt.NDArray[np.float_] pred_speed: Speed decision predictions.
+    :param npt.NDArray[np.float_] pred_dir: Direction decision predictions.
+    :param DefaultArguments args: Training arguments.
+
+    :returns: Dictionary containing acc, mAcc, and confusion matrices for speed and
+        direction predictions.
+    :rtype: T_drivingEval
+    """
+    results: T_drivingEval = {  # type: ignore[reportAssignmentType]
+        "speed_Acc": 0.0,
+        "speed_mAcc": 0.0,
+        "speed_confusion_matrix": None,
+        "direction_Acc": 0.0,
+        "direction_mAcc": 0.0,
+        "dir_confusion_matrix": None,
     }
-]:
-    results: dict[
-        {
-            "speed_Acc": float,
-            "speed_mAcc": float,
-            "speed_confusion_matrix": npt.NDArray[np.float64 | Any],
-            "direction_Acc": float,
-            "direction_mAcc": float,
-            "dir_confusion_matrix": npt.NDArray[np.float64 | Any],
-        }
-    ] = {}
+
     print("Evaluating Driving Decision Prediction ...")
 
-    bs = target_speed.shape[0]
     speed_acc: float = accuracy_score(target_speed, pred_speed)
     direction_acc: float = accuracy_score(target_dir, pred_dir)
     results["speed_Acc"] = speed_acc
@@ -229,6 +204,12 @@ def evaluate_driving(
     return results
 
 
-def shannon(data):
+def shannon(data: npt.NDArray[np.float_]) -> np.float_:
+    """Calculates the Shannon Entropy.
+
+    :param npt.NDArray[np.float_] data: Data to calculate for.
+    :returns: Shannon Entropy
+    :rtype: np.float_
+    """
     shannon = -np.sum(data * np.log2(data))
     return shannon

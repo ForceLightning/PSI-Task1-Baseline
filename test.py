@@ -104,7 +104,7 @@ def predict_intent(
     args: DefaultArguments,
     dset: str = "test",
 ) -> None:
-    model.eval()
+    _ = model.eval()
     dt = {}
     for itern, data in enumerate(dataloader):
         intent_logit = model.forward(data)
@@ -156,10 +156,18 @@ def validate_traj(
             FloatTensor
         )
         val_loss: float
+
+        # Extract the inner model from the DataParallel module so that we may run
+        # the generate() method on a Transformer.
         inner_model = getattr(model, "module", model)
         if isinstance(inner_model, TransformerTrajBbox):
+            # WARNING: Without setting the num_parallel samples to 1, memory usage
+            # explodes.
+            old_num_parallel_samples = inner_model.config.num_parallel_samples
+            inner_model.config.num_parallel_samples = 1
             traj_pred = inner_model.generate(data)
-            val_loss = criterion(traj_pred, traj_gt)
+            val_loss = criterion(traj_pred, traj_gt).item()
+            inner_model.config.num_parallel_samples = old_num_parallel_samples
         else:
             traj_pred = model(data) / args.image_shape[0]
             val_loss = (
@@ -202,6 +210,9 @@ def predict_traj(
     _ = model.eval()
     dt = {}
     for itern, data in enumerate(dataloader):
+        # TODO: (chris) Allow for evaluation of transformer outputs, see
+        # `test.py:validate_traj` for info. Otherwise the following line will just
+        # return a tuple and we have no error handling :)
         traj_pred: torch.Tensor = model(data)
         # traj_gt = data['original_bboxes'][:, args.observe_length:, :].type(FloatTensor)
         traj_gt: torch.Tensor = data["bboxes"][:, args.observe_length :, :].type(

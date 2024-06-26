@@ -1,7 +1,19 @@
 import argparse
 
 
-def get_opts():
+def get_opts() -> argparse.Namespace:
+    """
+    Gets the command line arguments and returns the parsed arguments.
+
+    See `utils.args.DefaultArguments` for more information.
+
+    Returns:
+        argparse.Namespace
+
+    Example:
+        >>> # get arguments
+        >>> args = get_opts()
+    """
     parser = argparse.ArgumentParser(description="PyTorch implementation of the PSI2.0")
     # about data
     parser.add_argument(

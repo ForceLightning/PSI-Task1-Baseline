@@ -2,7 +2,7 @@ from __future__ import annotations
 import abc
 from copy import deepcopy
 import os
-from typing import Any, Generator, Literal
+from typing import Any, Generator, Literal, TypeAlias
 
 import PIL
 from PIL import Image
@@ -17,7 +17,7 @@ from data.process_sequence import T_drivingSeqNumpy, T_intentSeqNumpy
 from utils.args import DefaultArguments
 
 
-T_drivingSample = dict[
+T_drivingSample: TypeAlias = dict[
     {
         "video_id": list[str],
         "frames": list[int],
@@ -31,7 +31,7 @@ T_drivingSample = dict[
     }
 ]
 
-T_drivingBatch = dict[
+T_drivingBatch: TypeAlias = dict[
     {
         "video_id": list[list[str]],
         "frames": torch.Tensor,
@@ -45,7 +45,7 @@ T_drivingBatch = dict[
     }
 ]
 
-T_intentSample = dict[
+T_intentSample: TypeAlias = dict[
     {
         "global_featmaps": torch.Tensor | list[None],
         "local_featmaps": torch.Tensor | list[None],
@@ -62,7 +62,7 @@ T_intentSample = dict[
     }
 ]
 
-T_intentBatch = dict[
+T_intentBatch: TypeAlias = dict[
     {
         "global_featmaps": torch.Tensor | list[None],
         "local_featmaps": torch.Tensor | list[None],
@@ -416,15 +416,15 @@ class VideoDataset(Dataset[Any]):
             list: Modified bounding box coordinates
         """
 
-        img_heigth, img_width, _ = img.shape
+        img_height, img_width, _ = img.shape
         if bbox[0] < 0:
             bbox[0] = 0.0
         if bbox[1] < 0:
             bbox[1] = 0.0
         if bbox[2] >= img_width:
             bbox[2] = img_width - 1
-        if bbox[3] >= img_heigth:
-            bbox[3] = img_heigth - 1
+        if bbox[3] >= img_height:
+            bbox[3] = img_height - 1
         return bbox
 
     def img_pad(

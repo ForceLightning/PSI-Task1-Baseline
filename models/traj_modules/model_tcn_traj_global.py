@@ -1,4 +1,6 @@
+from __future__ import annotations
 from typing import Any, overload
+from typing_extensions import override
 import warnings
 
 import numpy as np
@@ -7,14 +9,37 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.parametrizations import weight_norm
 
+from data.custom_dataset import T_intentBatch
 from models.TCAN.tcan import TemporalConvAttnNet
 from models.TCN.tcn import TemporalConvNet
+from models.base_model import IConstructOptimizer
 from models.driving_modules.model_lstm_driving_global import ResCNNEncoder
 from utils.args import DefaultArguments, ModelOpts
 from utils.cuda import *
 
 
-class TCNTrajGlobal(nn.Module):
+class TCNTrajGlobal(nn.Module, IConstructOptimizer):
+    """
+    A TCN-based model for the Pedestrian Trajectory task with image features.
+
+    :ivar int observe_length: Number of observed frames in the past.
+    :ivar int predict_length: Number of frames to predict in the future.
+    :ivar DefaultArguments args: Training command-line arguments.
+    :ivar int output_dim: Output dimensionality for each timestep.
+
+    :ivar int TCN_enc_in_dim: TCN encoder input dimensionality.
+    :ivar int TCN_dec_out_dim: TCN decoder output dimensionality.
+    :ivar int TCN_hidden_layers: Number of TCN hidden layers.
+    :ivar float TCN_dropout: Dropout probability for the TCN.
+    :ivar int TCN_kernel_size: Kernel size for the TCN conv layers.
+    :ivar bool TCN_skip_connections: Whether to use skip connections for the model.
+
+    :ivar ResCNNEncoder cnn_encoder: CNN backbone for image features.
+    :ivar TemporalConvNet tcn: TCN model.
+    :ivar nn.Sequential fc: Fully connected layers.
+    :ivar nn.Module activation: Activation function of the final layer.
+    """
+
     def __init__(self, args: DefaultArguments, model_opts: ModelOpts) -> None:
         super().__init__()
 
@@ -81,27 +106,13 @@ class TCNTrajGlobal(nn.Module):
     @overload
     def forward(
         self,
-        data: dict[
-            {
-                "global_featmaps": list[Any] | torch.Tensor,
-                "image": list[Any] | torch.Tensor,
-                "bboxes": torch.Tensor,
-            }
-        ],
+        data: T_intentBatch,
     ) -> torch.Tensor: ...
 
+    @override
     def forward(
         self,
-        data: (
-            dict[
-                {
-                    "global_featmaps": list[Any] | torch.Tensor,
-                    "image": list[Any] | torch.Tensor,
-                    "bboxes": torch.Tensor,
-                }
-            ]
-            | tuple[torch.Tensor, torch.Tensor]
-        ),
+        data: T_intentBatch | tuple[torch.Tensor, torch.Tensor],
     ) -> torch.Tensor:
         visual_feats: torch.Tensor
         match data:
@@ -146,6 +157,7 @@ class TCNTrajGlobal(nn.Module):
         )
         return output
 
+    @override
     def build_optimizer(
         self, args: DefaultArguments
     ) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]:
@@ -265,41 +277,29 @@ class TCANTrajGlobal(TCNTrajGlobal):
         self.module_list = [self.cnn_encoder, self.tcn, self.fc]
 
     @overload
-    def forward(
-        self,
-        data: dict[
-            {
-                "global_featmaps": list[Any] | torch.Tensor,
-                "image": list[Any] | torch.Tensor,
-                "bboxes": torch.Tensor,
-            }
-        ],
-    ) -> torch.Tensor: ...
-
-    @overload
     def forward(self, data: tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor: ...
 
+    @overload
     def forward(
         self,
-        data: (
-            dict[
-                {
-                    "global_featmaps": list[Any] | torch.Tensor,
-                    "image": list[Any] | torch.Tensor,
-                    "bboxes": torch.Tensor,
-                }
-            ]
-            | tuple[torch.Tensor, torch.Tensor]
-        ),
+        data: T_intentBatch,
+    ) -> torch.Tensor: ...
+
+    @override
+    def forward(
+        self,
+        data: T_intentBatch | tuple[torch.Tensor, torch.Tensor],
     ) -> torch.Tensor:
-        visual_feats: torch.Tensor
+        visuals: torch.Tensor
+        bbox: torch.Tensor
         match data:
-            case (visuals, bbox):
+            case tuple():
+                visuals = data[0]
+                bbox = data[1]
                 assert (
                     visuals.shape[1] == self.args.observe_length
                 ), f"Temporal dimension of visual embeddings or images {visuals.shape[1]} does not match `observe_length` {self.args.observe_length}"
-                visual_feats = self.cnn_encoder(visuals)
-            case dict():  # The TypedDict becomes a plain dict at runtime.
+            case _:  # The TypedDict becomes a plain dict at runtime.
                 # Handle loading embeddings from file (already loaded into the dataset instance)
                 if self.args.freeze_backbone:
                     visuals = data["global_featmaps"]
@@ -316,8 +316,6 @@ class TCANTrajGlobal(TCNTrajGlobal):
                 assert (
                     visuals.shape[1] == self.args.observe_length
                 ), f"Temporal dimension of visual embeddings or images {visuals.shape[1]} does not match `observe_length` {self.args.observe_length}"
-
-                visual_feats = self.cnn_encoder(visuals)
 
         assert (
             bbox.shape[1] == self.args.observe_length
