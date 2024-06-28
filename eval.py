@@ -275,7 +275,9 @@ def get_test_traj_gt(
                 gt[vid][pid][fid] = {}
             gt[vid][pid][fid]["traj"] = traj_gt[i].detach().cpu().numpy().tolist()
             # print(len(traj_pred[i].detach().cpu().numpy().tolist()))
-    with open(os.path.join(f"./test_gt/{dset}_traj_gt.json"), "w") as f:
+    with open(
+        os.path.join(args.dataset_root_path, "test_gt", f"{dset}_traj_gt.json"), "w"
+    ) as f:
         json.dump(gt, f)
 
 

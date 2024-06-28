@@ -8,7 +8,10 @@ from models.intent_modules.model_tcn_int_bbox import TCNINTBbox
 from models.traj_modules.model_tcan_traj_bbox import TCANTrajBbox, TCANTrajBboxInt
 from models.traj_modules.model_tcn_traj_bbox import TCNTrajBbox, TCNTrajBboxInt
 from models.traj_modules.model_tcn_traj_global import TCANTrajGlobal, TCNTrajGlobal
-from models.traj_modules.model_transformer_traj_bbox import TransformerTrajBbox
+from models.traj_modules.model_transformer_traj_bbox import (
+    TransformerTrajBbox,
+    TransformerTrajBboxPose,
+)
 from utils.args import DefaultArguments
 from utils.cuda import *
 
@@ -36,6 +39,8 @@ def build_model(
             model = get_tcan_traj_bbox(args).to(DEVICE)
         case "transformer_traj_bbox":
             model = get_transformer_traj_bbox(args).to(DEVICE)
+        case "transformer_traj_bbox_pose":
+            model = get_transformer_traj_bbox_pose(args).to(DEVICE)
         case "tcan_traj_global":
             model = get_tcan_traj_bbox_global(args).to(DEVICE)
         case "reslstm_driving_global":
@@ -168,8 +173,24 @@ def get_transformer_traj_bbox(args: DefaultArguments) -> TransformerTrajBbox:
         "lags_sequence": [1],  # defaults to 0..7
     }
     args.model_configs = model_configs
-    config = TimeSeriesTransformerConfig(**model_configs)
+    config = TimeSeriesTransformerConfig(**model_configs)  # type: ignore[reportArgumentType]
     model = TransformerTrajBbox(args, config)
+    return model
+
+
+def get_transformer_traj_bbox_pose(args: DefaultArguments) -> TransformerTrajBboxPose:
+    model_configs = {
+        "prediction_length": args.predict_length,
+        "context_length": args.observe_length - 1,
+        "input_size": 4,  # number of bbox coords per frame
+        "num_time_features": 35,  # number of additional features
+        "dropout": 0.125,
+        "attention_dropout": 0.125,
+        "lags_sequence": [1],  # defaults to 0..7
+    }
+    args.model_configs = model_configs
+    config = TimeSeriesTransformerConfig(**model_configs)  # type: ignore[reportArgumentType]
+    model = TransformerTrajBboxPose(args, config)
     return model
 
 

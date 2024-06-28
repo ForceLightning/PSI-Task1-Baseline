@@ -108,6 +108,25 @@ class TrainIterTransformerTraj(TrainDataLoaderIter):
         return inputs, targets
 
 
+class TrainIterTransformerTrajPose(TrainDataLoaderIter):
+    def __init__(self, ag: DefaultArguments, *args, **kwargs):  # type: ignore[reportMissingParameterType]
+        super().__init__(*args, **kwargs)
+        self.args = ag
+
+    def inputs_labels_from_batch(
+        self, batch_data: T_intentBatch
+    ) -> tuple[tuple[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor]:
+        past_future_values: torch.Tensor = batch_data["bboxes"]
+        past_future_feats: torch.Tensor = batch_data["total_frames"]
+        past_future_pose: torch.Tensor = batch_data["pose"]
+
+        inputs = (past_future_values, past_future_feats, past_future_pose)
+        targets: torch.Tensor = batch_data["bboxes"][
+            :, self.args.observe_length :, :
+        ].type(FloatTensor)
+        return inputs, targets
+
+
 def main(args: DefaultArguments):
     amp_config = {"device_type": "cuda", "dtype": torch.bfloat16}
     grad_scaler = torch.cuda.amp.GradScaler()
@@ -123,8 +142,12 @@ def main(args: DefaultArguments):
             train_data_iter = TrainIterBbox(args, train_loader)
             criterion = torch.nn.L1Loss().to(DEVICE)
         else:
-            train_data_iter = TrainIterTransformerTraj(args, train_loader)
-            criterion = nn.NLLLoss().to(DEVICE)
+            if "pose" in args.model_name:
+                train_data_iter = TrainIterTransformerTrajPose(args, train_loader)
+                criterion = nn.NLLLoss().to(DEVICE)
+            else:
+                train_data_iter = TrainIterTransformerTraj(args, train_loader)
+                criterion = nn.NLLLoss().to(DEVICE)
     elif "driving_decision" != args.task_name:
         train_data_iter = TrainIterGlobalIntent(args, train_loader)
         criterion = nn.MSELoss().to(DEVICE)
@@ -196,7 +219,7 @@ if __name__ == "__main__":
             # args.model_name = "tcan_traj_bbox"
             # args.model_name = "tcan_traj_bbox_int"
             # args.model_name = "tcan_traj_global"
-            args.model_name = "transformer_traj_bbox"
+            args.model_name = "transformer_traj_bbox_pose"
             args.loss_weights = {
                 "loss_intent": 0.0,
                 "loss_traj": 1.0,

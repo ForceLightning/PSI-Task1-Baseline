@@ -244,3 +244,164 @@ class TransformerTrajBbox(nn.Module, IConstructOptimizer):
                 scheduler = ExponentialLR(optimizer, gamma=sched_gamma)
 
         return optimizer, scheduler
+
+
+class TransformerTrajBboxPose(TransformerTrajBbox):
+    @overload
+    def forward(
+        self, x: T_intentBatch
+    ) -> Seq2SeqTSPredictionOutput | tuple[torch.Tensor, ...]: ...
+
+    @overload
+    def forward(
+        self, x: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+    ) -> Seq2SeqTSPredictionOutput | tuple[torch.Tensor, ...]: ...
+
+    @override
+    def forward(
+        self,
+        x: T_intentBatch | tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    ) -> Seq2SeqTSPredictionOutput | tuple[torch.Tensor, ...]:
+        """Forward pass for training the model. See :py:meth:`generate` to generate
+            inferences.
+
+        :param x: Input data, dictionary if using custom dataset, or tuple if using
+            :py:mod:`PSI_Intent_Prediction.utils.lr_finder`.
+        :type x: T_intentBatch or tuple[torch.Tensor, torch.Tensor]
+        :returns: Transformer prediction output.
+        :rtype: Seq2SeqTSPredictionOutput or tuple[torch.Tensor, ...]
+        """
+        # Inputs to the transformer
+        past_values: torch.Tensor
+        past_frames: torch.Tensor
+        past_poses: torch.Tensor
+        future_values: torch.Tensor
+        future_frames: torch.Tensor
+        future_poses: torch.Tensor
+        match x:
+            case dict():  # type: ignore[reportUnnecessaryCondition]
+                past_values = x["bboxes"][:, : self.args.observe_length, :].type(
+                    FloatTensor
+                )
+                future_values = x["bboxes"][:, self.args.observe_length :, :].type(
+                    FloatTensor
+                )
+                past_frames = x["total_frames"][:, : self.args.observe_length].type(
+                    FloatTensor
+                )
+                future_frames = x["total_frames"][:, self.args.observe_length :].type(
+                    FloatTensor
+                )
+                past_poses = x["pose"][:, : self.args.observe_length, :, :].type(
+                    FloatTensor
+                )
+                future_poses = x["pose"][:, self.args.observe_length :, :, :].type(
+                    FloatTensor
+                )
+
+            case tuple():
+                past_values = x[0][:, : self.args.observe_length, :].type(FloatTensor)
+                future_values = x[0][:, self.args.observe_length :, :].type(FloatTensor)
+                past_frames = x[1][:, : self.args.observe_length].type(FloatTensor)
+                future_frames = x[1][:, self.args.observe_length :].type(FloatTensor)
+                past_poses = x[2][:, : self.args.observe_length, :].type(FloatTensor)
+                future_poses = x[2][:, self.args.observe_length :, :].type(FloatTensor)
+
+        past_frames = past_frames.unsqueeze(2)
+        future_frames = future_frames.unsqueeze(2)
+
+        past_poses = past_poses.reshape(-1, self.args.observe_length, 34)
+        future_poses = future_poses.reshape(-1, self.args.predict_length, 34)
+
+        past_time_features: torch.Tensor = torch.cat((past_frames, past_poses), dim=2)
+        future_time_features: torch.Tensor = torch.cat(
+            (future_frames, future_poses), dim=2
+        )
+
+        past_observed_mask: torch.Tensor = torch.ones_like(
+            past_values, dtype=torch.bool
+        )
+        outputs: Seq2SeqTSPredictionOutput = self.transformer(
+            past_values=past_values,
+            past_time_features=past_time_features,
+            past_observed_mask=past_observed_mask,
+            future_values=future_values,
+            future_time_features=future_time_features,
+        )
+
+        return outputs
+
+    @overload
+    def generate(self, x: T_intentBatch) -> torch.Tensor: ...
+
+    @overload
+    def generate(
+        self, x: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+    ) -> torch.Tensor: ...
+
+    @override
+    def generate(
+        self, x: T_intentBatch | tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+    ) -> torch.Tensor:
+        past_values: torch.Tensor
+        past_frames: torch.Tensor
+        past_poses: torch.Tensor
+        future_values: torch.Tensor
+        future_frames: torch.Tensor
+        future_poses: torch.Tensor
+        match x:
+            case dict():  # type: ignore[reportUnnecessaryCondition]
+                past_values = x["bboxes"][:, : self.args.observe_length, :].type(
+                    FloatTensor
+                )
+                future_values = x["bboxes"][:, self.args.observe_length :, :].type(
+                    FloatTensor
+                )
+                past_frames = x["total_frames"][:, : self.args.observe_length].type(
+                    FloatTensor
+                )
+                future_frames = x["total_frames"][:, self.args.observe_length :].type(
+                    FloatTensor
+                )
+                past_poses = x["pose"][:, : self.args.observe_length, :, :].type(
+                    FloatTensor
+                )
+                future_poses = x["pose"][:, self.args.observe_length :, :, :].type(
+                    FloatTensor
+                )
+
+            case tuple():
+                past_values = x[0][:, : self.args.observe_length, :].type(FloatTensor)
+                future_values = x[0][:, self.args.observe_length :, :].type(FloatTensor)
+
+                past_frames = x[1][:, : self.args.observe_length].type(FloatTensor)
+                future_frames = x[1][:, self.args.observe_length :].type(FloatTensor)
+
+                past_poses = x[2][:, : self.args.observe_length, :, :].type(FloatTensor)
+                future_poses = x[2][:, self.args.observe_length :, :, :].type(
+                    FloatTensor
+                )
+
+        past_frames = past_frames.unsqueeze(2)
+        future_frames = future_frames.unsqueeze(2)
+
+        past_poses = past_poses.reshape(-1, self.args.observe_length, 34)
+        future_poses = future_poses.reshape(-1, self.args.predict_length, 34)
+
+        past_time_features: torch.Tensor = torch.cat((past_frames, past_poses), dim=2)
+        future_time_features: torch.Tensor = torch.cat(
+            (future_frames, future_poses), dim=2
+        )
+
+        past_observed_mask: torch.Tensor = torch.ones_like(
+            past_values, dtype=torch.bool
+        )
+        outputs: SampleTSPredictionOutput = self.transformer.generate(
+            past_values=past_values,
+            past_time_features=past_time_features,
+            past_observed_mask=past_observed_mask,
+            future_time_features=future_time_features,
+        )
+
+        preds = outputs.sequences.mean(dim=1)
+        return preds

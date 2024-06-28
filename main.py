@@ -186,7 +186,8 @@ if __name__ == "__main__":
             # args.model_name = "tcan_traj_bbox"
             # args.model_name = "tcan_traj_bbox_int"
             # args.model_name = "tcan_traj_global"
-            args.model_name = "transformer_traj_bbox"
+            # args.model_name = "transformer_traj_bbox"
+            args.model_name = "transformer_traj_bbox_pose"
             args.loss_weights = {
                 "loss_intent": 0.0,
                 "loss_traj": 1.0,
@@ -264,7 +265,7 @@ if __name__ == "__main__":
     best_val_accuracy = 0.0
     best_hyperparameters = None
 
-    checkpoint_path = args.checkpoint_path
+    checkpoint_path = os.path.join(args.dataset_root_path, args.checkpoint_path)
 
     for params in parameter_samples:
         args.lr = params["lr"]
@@ -278,7 +279,10 @@ if __name__ == "__main__":
             time_folder = now.strftime("%Y%m%d%H%M%S")
         else:
             time_folder = args.comment
-        if args.checkpoint_path == "./ckpts" and args.resume == "":
+        if (
+            args.checkpoint_path == os.path.join(args.dataset_root_path, "ckpts")
+            or args.checkpoint_path == "./ckpts"
+        ) and args.resume == "":
             args.checkpoint_path = os.path.join(
                 checkpoint_path,
                 args.task_name,
@@ -286,9 +290,16 @@ if __name__ == "__main__":
                 args.model_name,
                 time_folder,
             )
-        elif args.checkpoint_path == "./ckpts":
+        elif (
+            args.checkpoint_path == os.path.join(args.dataset_root_path, "ckpts")
+            or args.checkpoint_path == "./ckpts"
+        ):
             args.checkpoint_path = os.path.dirname(args.resume)
-        elif args.checkpoint_path != "./ckpts" and args.resume != "":
+        elif (
+            args.checkpoint_path != os.path.join(args.dataset_root_path, "ckpts")
+            and args.checkpoint_path != "./ckpts"
+            and args.resume != ""
+        ):
             assert os.path.abspath(args.checkpoint_path) == os.path.abspath(
                 os.path.dirname(args.resume)
             ), f"checkpoint path and resume path directories do not match, {os.path.abspath(args.checkpoint_path)}, {os.path.abspath(os.path.dirname(args.resume))}"
