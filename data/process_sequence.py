@@ -1,4 +1,5 @@
 import collections
+from collections.abc import Sequence
 from typing import Any, Literal, TypeAlias
 
 import numpy as np
@@ -17,13 +18,17 @@ T_intentDB: TypeAlias = dict[
                     {
                         "track_id": str,
                         "bbox": list[list[float]],
+                        "skeleton": list[list[tuple[float, float]]],
+                        "observed_skeleton": list[list[bool]],
                     }
                 ],
                 "nlp_annotations": dict[
                     str,  # annotator id
                     dict[
                         {
-                            "intent": list[Literal["not_sure", "cross", "not_cross"]],
+                            "intent": Sequence[
+                                Literal["not_sure", "cross", "not_cross"]
+                            ],
                             "description": list[str],
                             "key_frame": list[int],
                         }

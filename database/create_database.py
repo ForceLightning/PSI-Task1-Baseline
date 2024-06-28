@@ -1,10 +1,13 @@
+from __future__ import annotations
 import json
 import os
 import time
 import pickle
 from typing import Any
 
+from data.process_sequence import T_drivingDB, T_intentDB
 from utils.args import DefaultArguments
+from .. import psi_scripts
 
 """
 Database organization (Intent/Trajectory)
@@ -195,9 +198,9 @@ def add_case(
 
 def init_db(
     video_list: list[str], db_log: str, args: DefaultArguments
-) -> dict[str, Any]:
-    db = {}
-    #     data_split = 'train' # 'train', 'val', 'test'
+) -> T_intentDB | T_drivingDB:
+    db: T_intentDB | T_drivingDB = {}
+    # data_split = 'train' # 'train', 'val', 'test'
     dataroot = args.dataset_root_path
     # key_frame_folder = 'cognitive_annotation_key_frame'
     if args.dataset == "PSI2.0":
@@ -234,7 +237,9 @@ def init_db(
                     os.path.join(dataroot, cv_folder, video_name, "cv_annotation.json"),
                     "r",
                 ) as f:
-                    cv_annotation = json.load(f)
+                    cv_annotation: (
+                        psi_scripts.cv_annotation_schema.T_PSICVAnnDatabase
+                    ) = json.load(f)
             except:
                 with open(db_log, "a") as f:
                     _ = f.write(f"Error loading {video_name} cv annotation json \n")
@@ -244,7 +249,7 @@ def init_db(
 
             add_case(db, video_name, cog_annotation, cv_annotation, db_log)
 
-        else:
+        else:  # intent and trajectory
             try:
                 with open(
                     os.path.join(
@@ -252,10 +257,12 @@ def init_db(
                     ),
                     "r",
                 ) as f:
-                    annotation = json.load(f)
+                    annotation: (
+                        psi_scripts.cv_annotation_schema.T_ExtendedIntentAnnoSchema
+                    ) = json.load(f)
             except:
                 with open(db_log, "a") as f:
-                    f.write(
+                    _ = f.write(
                         f"Error loading {video_name} pedestrian intent annotation json \n"
                     )
                 continue
@@ -267,20 +274,40 @@ def init_db(
     return db
 
 
-def split_frame_lists(frame_list, bbox_list, threshold=60):
-    # For a sequence of an observed pedestrian, split into slices based on missingframes
-    frame_res = []
-    bbox_res = []
-    inds_res = []
+def split_frame_lists(
+    frame_list: list[int],
+    bbox_list: list[list[float]],
+    pose_list: list[list[tuple[float, float]]],
+    pose_mask: list[list[bool]],
+    threshold: int = 60,
+) -> tuple[
+    list[list[int]],
+    list[list[list[float]]],
+    list[list[int]],
+    list[list[list[tuple[float, float]]]],
+    list[list[list[bool]]],
+]:
+    # For a sequence of an observed pedestrian, split into slices based on missing
+    # frames
+    frame_res: list[list[int]] = []
+    bbox_res: list[list[list[float]]] = []
+    inds_res: list[list[int]] = []
+    pose_res: list[list[list[tuple[float, float]]]] = []
+    pose_mask_res: list[list[list[bool]]] = []
 
-    inds_split = [0]
-    frame_split = [frame_list[0]]  # frame list
-    bbox_split = [bbox_list[0]]  # bbox list
+    frame_split: list[int] = [frame_list[0]]  # frame list
+    bbox_split: list[list[float]] = [bbox_list[0]]  # bbox list
+    inds_split: list[int] = [0]
+    pose_split: list[list[tuple[float, float]]] = [pose_list[0]]
+    pose_mask_split: list[list[bool]] = [pose_mask[0]]
+
     for i in range(1, len(frame_list)):
         if frame_list[i] - frame_list[i - 1] == 1:  # consistent
             inds_split.append(i)
             frame_split.append(frame_list[i])
             bbox_split.append(bbox_list[i])
+            pose_split.append(pose_list[i])
+            pose_mask_split.append(pose_mask[i])
         else:  # # next position frame is missing observed
             if (
                 len(frame_split) > threshold
@@ -288,23 +315,37 @@ def split_frame_lists(frame_list, bbox_list, threshold=60):
                 inds_res.append(inds_split)
                 frame_res.append(frame_split)
                 bbox_res.append(bbox_split)
+                pose_res.append(pose_split)
+                pose_mask_res.append(pose_mask_split)
                 inds_split = []
                 frame_split = []
                 bbox_split = []
+                pose_split = []
+                pose_mask_split = []
             else:  # ignore splits that are too short
                 inds_split = []
                 frame_split = []
                 bbox_split = []
+                pose_split = []
+                pose_mask_split = []
     # break loop when i reaches the end of list
     if len(frame_split) > threshold:  # reach the end
         inds_res.append(inds_split)
         frame_res.append(frame_split)
         bbox_res.append(bbox_split)
+        pose_res.append(pose_split)
+        pose_mask_res.append(pose_mask_split)
 
-    return frame_res, bbox_res, inds_res
+    return frame_res, bbox_res, inds_res, pose_res, pose_mask_res
 
 
-def get_intent_des(db, vname, pid, split_inds, cog_annt):
+def get_intent_des(
+    db: T_intentDB,
+    vname: str,
+    pid: str,
+    split_inds: list[int],
+    cog_annt: dict[str, psi_scripts.cv_annotation_schema.T_CognitiveAnnotation],
+):
     # split_inds: the list of indices of the intent_annotations for the current split of pid in vname
     for vid_uid in cog_annt.keys():
         intent_list = cog_annt[vid_uid]["intent"]
@@ -323,7 +364,11 @@ def get_intent_des(db, vname, pid, split_inds, cog_annt):
         ]
 
 
-def update_db_annotations(db, db_log, args):
+def update_db_annotations(
+    db: T_intentDB,
+    db_log: str,
+    args: DefaultArguments,
+):
     dataroot = args.dataset_root_path
     # key_frame_folder = 'cognitive_annotation_key_frame'
     if args.dataset == "PSI2.0":
@@ -335,8 +380,8 @@ def update_db_annotations(db, db_log, args):
 
     video_list = sorted(db.keys())
     for video_name in video_list:
-        ped_list = list(db[video_name].keys())
-        tracks = list(db[video_name].keys())
+        ped_list: list[str] = list(db[video_name].keys())
+        tracks: list[str] = list(db[video_name].keys())
         try:
             with open(
                 os.path.join(
@@ -344,20 +389,23 @@ def update_db_annotations(db, db_log, args):
                 ),
                 "r",
             ) as f:
-                annotation = json.load(f)
+                annotation: (
+                    psi_scripts.cv_annotation_schema.T_ExtendedIntentAnnoSchema
+                ) = json.load(f)
         except:
             with open(db_log, "a") as f:
-                f.write(
+                _ = f.write(
                     f"Error loading {video_name} pedestrian intent annotation json \n"
                 )
             continue
 
-        for pedId in ped_list:
-            observed_frames = annotation["pedestrians"][pedId]["observed_frames"]
-            observed_bboxes = annotation["pedestrians"][pedId]["cv_annotations"][
-                "bboxes"
-            ]
-            cog_annotation = annotation["pedestrians"][pedId]["cognitive_annotations"]
+        for ped_id in ped_list:
+            ped_track = annotation["pedestrians"][ped_id]
+            observed_frames = ped_track["observed_frames"]
+            observed_bboxes = ped_track["cv_annotations"]["bboxes"]
+            observed_poses = ped_track["cv_annotations"]["skeleton"]
+            observed_pose_masks = ped_track["cv_annotations"]["observed_skeleton"]
+            cog_annotation = ped_track["cognitive_annotations"]
             if (
                 len(observed_frames) == observed_frames[-1] - observed_frames[0] + 1
             ):  # no missing frames
@@ -367,58 +415,86 @@ def update_db_annotations(db, db_log, args):
                 if len(observed_frames) > threshold:
                     cv_frame_list = observed_frames
                     cv_frame_box = observed_bboxes
-                    db[video_name][pedId]["frames"] = cv_frame_list
-                    db[video_name][pedId]["cv_annotations"]["bbox"] = cv_frame_box
+                    db_track = db[video_name][ped_id]
+                    db_track["frames"] = cv_frame_list
+                    db_track["cv_annotations"]["bbox"] = cv_frame_box
+                    db_track["cv_annotations"]["skeleton"] = observed_poses
+                    db_track["cv_annotations"][
+                        "observed_skeleton"
+                    ] = observed_pose_masks
                     get_intent_des(
                         db,
                         video_name,
-                        pedId,
+                        ped_id,
                         [*range(len(observed_frames))],
                         cog_annotation,
                     )
                 else:  # too few frames observed
                     # print("Single ped occurs too short.", video_name, pedId, len(observed_frames))
                     with open(db_log, "a") as f:
-                        f.write(
-                            f"Single ped occurs too short. {video_name}, {pedId}, {len(observed_frames)} \n"
+                        _ = f.write(
+                            f"Single ped occurs too short. {video_name}, {ped_id}, {len(observed_frames)} \n"
                         )
-                    del db[video_name][pedId]
+                    del db[video_name][ped_id]
             else:  # missing frames exist
                 with open(db_log, "a") as f:
-                    f.write(
-                        f"missing frames bbox noticed! , {video_name}, {pedId}, {len(observed_frames)}, frames observed from , {observed_frames[-1] - observed_frames[0] + 1} \n"
+                    _ = f.write(
+                        f"missing frames bbox noticed! , {video_name}, {ped_id}, {len(observed_frames)}, frames observed from , {observed_frames[-1] - observed_frames[0] + 1} \n"
                     )
                 threshold = args.max_track_size  # 60
-                cv_frame_list, cv_frame_box, cv_split_inds = split_frame_lists(
-                    observed_frames, observed_bboxes, threshold
+                (
+                    cv_frame_list,
+                    cv_frame_box,
+                    cv_split_inds,
+                    cv_frame_pose,
+                    cv_frame_pose_mask,
+                ) = split_frame_lists(
+                    observed_frames,
+                    observed_bboxes,
+                    observed_poses,
+                    observed_pose_masks,
+                    threshold,
                 )
                 if len(cv_split_inds) == 0:
                     with open(db_log, "a") as f:
-                        f.write(
-                            f"{video_name}, {pedId}, After removing missing frames, no split left! \n"
+                        _ = f.write(
+                            f"{video_name}, {ped_id}, After removing missing frames, no split left! \n"
                         )
 
-                    del db[video_name][pedId]
+                    del db[video_name][ped_id]
                 elif len(cv_split_inds) == 1:
-                    db[video_name][pedId]["frames"] = cv_frame_list[0]
-                    db[video_name][pedId]["cv_annotations"]["bbox"] = cv_frame_box[0]
+                    db[video_name][ped_id]["frames"] = cv_frame_list[0]
+                    db[video_name][ped_id]["cv_annotations"]["bbox"] = cv_frame_box[0]
+                    db[video_name][ped_id]["cv_annotations"]["skeleton"] = (
+                        cv_frame_pose[0]
+                    )
+                    db[video_name][ped_id]["cv_annotations"]["observed_skeleton"] = (
+                        cv_frame_pose_mask[0]
+                    )
+
                     get_intent_des(
-                        db, video_name, pedId, cv_split_inds[0], cog_annotation
+                        db, video_name, ped_id, cv_split_inds[0], cog_annotation
                     )
                 else:
                     # multiple splits left after removing missing box frames
                     with open(db_log, "a") as f:
-                        f.write(
+                        _ = f.write(
                             f"{len(cv_frame_list)} splits: , {[len(s) for s in cv_frame_list]} \n"
                         )
-                    nlp_vid_uid_pairs = db[video_name][pedId]["nlp_annotations"].keys()
+                    nlp_vid_uid_pairs = db[video_name][ped_id]["nlp_annotations"].keys()
                     for i in range(len(cv_frame_list)):
-                        ped_splitId = pedId + "-" + str(i)
+                        ped_splitId = ped_id + "-" + str(i)
                         add_ped_case(db, video_name, ped_splitId, nlp_vid_uid_pairs)
                         db[video_name][ped_splitId]["frames"] = cv_frame_list[i]
                         db[video_name][ped_splitId]["cv_annotations"]["bbox"] = (
                             cv_frame_box[i]
                         )
+                        db[video_name][ped_splitId]["cv_annotations"]["skeleton"] = (
+                            cv_frame_pose[i]
+                        )
+                        db[video_name][ped_splitId]["cv_annotations"][
+                            "observed_skeleton"
+                        ] = cv_frame_pose_mask[i]
                         get_intent_des(
                             db,
                             video_name,
@@ -440,20 +516,22 @@ def update_db_annotations(db, db_log, args):
                         ):
                             raise Exception("ERROR!")
                     del db[video_name][
-                        pedId
+                        ped_id
                     ]  # no pedestrian list left, remove this video
-            tracks.remove(pedId)
+            tracks.remove(ped_id)
         if (
             len(db[video_name].keys()) < 1
         ):  # has no valid ped sequence! Remove this video!")
             with open(db_log, "a") as f:
-                f.write(
+                _ = f.write(
                     f"!!!!! Video, {video_name}, has no valid ped sequence! Remove this video! \n"
                 )
             del db[video_name]
         if len(tracks) > 0:
             with open(db_log, "a") as f:
-                f.write(f"{video_name} missing pedestrians annotations: {tracks}  \n")
+                _ = f.write(
+                    f"{video_name} missing pedestrians annotations: {tracks}  \n"
+                )
 
 
 # def cut_sequence(db, db_log, args):
