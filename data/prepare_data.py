@@ -29,17 +29,26 @@ def get_dataloader(
     task = args.task_name.split("_")[1]
 
     with open(
-        os.path.join(args.database_path, f"{task}_database_train.pkl"), "rb"
+        os.path.join(
+            args.dataset_root_path, args.database_path, f"{task}_database_train.pkl"
+        ),
+        "rb",
     ) as fid:
         imdb_train = pickle.load(fid)
     train_seq = generate_data_sequence("train", imdb_train, args)
     with open(
-        os.path.join(args.database_path, f"{task}_database_val.pkl"), "rb"
+        os.path.join(
+            args.dataset_root_path, args.database_path, f"{task}_database_val.pkl"
+        ),
+        "rb",
     ) as fid:
         imdb_val = pickle.load(fid)
     val_seq = generate_data_sequence("val", imdb_val, args)
     with open(
-        os.path.join(args.database_path, f"{task}_database_test.pkl"), "rb"
+        os.path.join(
+            args.dataset_root_path, args.database_path, f"{task}_database_test.pkl"
+        ),
+        "rb",
     ) as fid:
         imdb_test = pickle.load(fid)
     test_seq = generate_data_sequence("test", imdb_test, args)
@@ -202,6 +211,10 @@ def get_tracks(
             # There are some sequences not adjacent
             frame_list = data["frame"][track_id]
             if len(frame_list) < args.max_track_size:  # 60:
+                # print(
+                #     f"key: {k}, track_id: {track_id}, len(d['video_id']): {len(d['video_id'])}"
+                # )
+                # print(d["video_id"][track_id])
                 print(
                     "too few frames: ",
                     d["video_id"][track_id][0],

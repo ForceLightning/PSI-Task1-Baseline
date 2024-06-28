@@ -64,7 +64,9 @@ def create_database(args: DefaultArguments):
     for split_name in ["train", "val", "test"]:
         with open(args.video_splits) as f:
             datasplits = json.load(f)
-        db_log = os.path.join(args.database_path, split_name + "_db_log.txt")
+        db_log = os.path.join(
+            args.dataset_root_path, args.database_path, split_name + "_db_log.txt"
+        )
         with open(db_log, "w") as f:
             _ = f.write(f"Initialize {split_name} database \n")
             _ = f.write(time.strftime("%d%b%Y-%Hh%Mm%Ss") + "\n")
@@ -78,7 +80,10 @@ def create_database(args: DefaultArguments):
 
         task = args.task_name.split("_")[1]
         database_name = f"{task}_database_" + split_name + ".pkl"
-        with open(os.path.join(args.database_path, database_name), "wb") as fid:
+        with open(
+            os.path.join(args.dataset_root_path, args.database_path, database_name),
+            "wb",
+        ) as fid:
             pickle.dump(db, fid)
 
     print("Finished collecting database!")
@@ -464,9 +469,13 @@ def update_db_annotations(
             ped_track = annotation["pedestrians"][ped_id]
             observed_frames = ped_track["observed_frames"]
             observed_bboxes = ped_track["cv_annotations"]["bboxes"]
-            observed_poses = ped_track["cv_annotations"]["skeleton"]
-            observed_pose_masks = ped_track["cv_annotations"]["observed_skeleton"]
             cog_annotation = ped_track["cognitive_annotations"]
+            try:
+                observed_poses = ped_track["cv_annotations"]["skeleton"]
+                observed_pose_masks = ped_track["cv_annotations"]["observed_skeleton"]
+            except:
+                observed_poses = [(0.0, 0.0) * 17] * len(observed_bboxes)
+                observed_pose_masks = [[False] * 17] * len(observed_bboxes)
             if (
                 len(observed_frames) == observed_frames[-1] - observed_frames[0] + 1
             ):  # no missing frames
