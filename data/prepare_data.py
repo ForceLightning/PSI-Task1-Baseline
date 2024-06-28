@@ -5,7 +5,6 @@ from typing import Any
 
 import numpy as np
 from numpy import typing as npt
-import torch
 from torch.utils.data import DataLoader
 
 from data.custom_dataset import (
@@ -200,13 +199,15 @@ def get_tracks(
             "intention_prob",
             "disagree_score",
             "description",
+            "skeleton",
+            "observed_skeleton",
         ]
     d = deepcopy(data)
 
     for k in d_types:
         # print(k, len(d[k]))
         # frame/bbox/intention_binary/reason_feats
-        tracks: list[int | float | np.float_ | str] = []
+        tracks: list[list[int | float | np.float_ | str | np.bool_]] = []
         for track_id, track in enumerate(d[k]):
             # There are some sequences not adjacent
             frame_list = data["frame"][track_id]
@@ -243,7 +244,8 @@ def get_tracks(
             for spl in splits:
                 # explain the boundary:  end_idx - (15-1=14 gap) + cover last idx
                 for i in range(spl[0], spl[1] - (seq_len - 1) + 1, overlap_stride):
-                    sub_tracks.append(track[i : i + seq_len])
+                    sub_track = track[i : i + seq_len]
+                    sub_tracks.append(sub_track)
             tracks.extend(sub_tracks)
 
         try:

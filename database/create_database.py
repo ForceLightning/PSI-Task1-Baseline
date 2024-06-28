@@ -248,7 +248,9 @@ def init_db(
     else:
         raise NotImplementedError("Dataset not supported")
 
-    for video_name in tqdm(sorted(video_list), desc="Videos", position=0, leave=True):
+    for video_name in tqdm(
+        sorted(video_list), desc="Loading annotations", position=0, leave=False
+    ):
         if args.task_name == "driving_decision":
             try:
                 with open(
@@ -447,7 +449,9 @@ def update_db_annotations(
         raise NotImplementedError("Database not supported")
 
     video_list = sorted(db.keys())
-    for video_name in tqdm(video_list, desc="Videos", position=0, leave=True):
+    for video_name in tqdm(
+        video_list, desc="Preprocessing Video Annotations", position=0, leave=False
+    ):
         ped_list: list[str] = list(db[video_name].keys())
         tracks: list[str] = list(db[video_name].keys())
         try:
@@ -474,7 +478,7 @@ def update_db_annotations(
                 observed_poses = ped_track["cv_annotations"]["skeleton"]
                 observed_pose_masks = ped_track["cv_annotations"]["observed_skeleton"]
             except:
-                observed_poses = [(0.0, 0.0) * 17] * len(observed_bboxes)
+                observed_poses = [[(0.0, 0.0)] * 17] * len(observed_bboxes)
                 observed_pose_masks = [[False] * 17] * len(observed_bboxes)
             if (
                 len(observed_frames) == observed_frames[-1] - observed_frames[0] + 1

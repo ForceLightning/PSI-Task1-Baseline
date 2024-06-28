@@ -75,6 +75,8 @@ T_intentSeq: TypeAlias = dict[
         "video_id": list[list[str]],
         "disagree_score": list[list[float | np.float_]],
         "description": list[list[list[str]]],
+        "skeleton": list[list[list[tuple[float, float]]]],
+        "observed_skeleton": list[list[list[bool]]],
     }
 ]
 
@@ -87,6 +89,8 @@ T_intentSeqNumpy: TypeAlias = dict[
         "video_id": npt.NDArray[np.str_],
         "disagree_score": npt.NDArray[np.float_],
         "description": npt.NDArray[Any],
+        "skeleton": npt.NDArray[np.float_],
+        "observed_skeleton": npt.NDArray[np.bool_],
     }
 ]
 
@@ -168,6 +172,8 @@ def generate_data_sequence(
     intention_binary: list[list[int]] = []
     pids_seq: list[list[str]] = []
     box_seq: list[list[list[float]]] = []
+    skeleton_seq: list[list[list[tuple[float, float]]]] = []
+    observed_skeleton_seq: list[list[list[bool]]] = []
     disagree_score_seq: list[list[float | np.float_]] = []
 
     video_ids = sorted(database.keys())
@@ -175,6 +181,13 @@ def generate_data_sequence(
         for ped in sorted(database[video].keys()):  # ped_id: e.g., 'track_1'
             frame_seq.append(database[video][ped]["frames"])
             box_seq.append(database[video][ped]["cv_annotations"]["bbox"])
+            skeleton = database[video][ped]["cv_annotations"]["skeleton"]
+            observed_skeleton = database[video][ped]["cv_annotations"][
+                "observed_skeleton"
+            ]
+
+            skeleton_seq.append(skeleton)
+            observed_skeleton_seq.append(observed_skeleton)
 
             n = len(database[video][ped]["frames"])
             pids_seq.append([ped] * n)
@@ -194,6 +207,8 @@ def generate_data_sequence(
         "video_id": video_seq,
         "disagree_score": disagree_score_seq,
         "description": description_seq,
+        "skeleton": skeleton_seq,
+        "observed_skeleton": observed_skeleton_seq,
     }
 
 

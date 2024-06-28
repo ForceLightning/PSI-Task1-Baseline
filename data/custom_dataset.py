@@ -59,6 +59,8 @@ T_intentSample: TypeAlias = dict[
         "video_id": npt.NDArray[np.str_] | list[str],
         "ped_id": npt.NDArray[np.str_] | list[str],
         "disagree_score": npt.NDArray[np.float_],
+        "pose": npt.NDArray[np.float_],
+        "pose_masks": npt.NDArray[np.bool_],
     }
 ]
 
@@ -76,6 +78,8 @@ T_intentBatch: TypeAlias = dict[
         "video_id": npt.NDArray[np.str_] | list[str],
         "ped_id": npt.NDArray[np.str_] | list[str],
         "disagree_score": torch.Tensor,
+        "pose": torch.Tensor,
+        "pose_masks": torch.Tensor,
     }
 ]
 
@@ -520,6 +524,8 @@ class PedestrianIntentDataset(VideoDataset):
         bboxes: npt.NDArray[np.float_] = self.data["bbox"][index]
         intention_binary: npt.NDArray[np.int_] = self.data["intention_binary"][index]
         intention_prob: npt.NDArray[np.float_] = self.data["intention_prob"][index]
+        poses: npt.NDArray[np.float_] = self.data["skeleton"][index]
+        pose_masks: npt.NDArray[np.bool_] = self.data["observed_skeleton"][index]
         # Do not load images if global_featmaps are used.
         if self.args.freeze_backbone:
             images = []
@@ -530,6 +536,7 @@ class PedestrianIntentDataset(VideoDataset):
 
         disagree_score = self.data["disagree_score"][index]
 
+        assert len(poses) == len(pose_masks) == self.args.max_track_size
         assert len(bboxes) == self.args.max_track_size
         assert len(frame_list) == self.args.observe_length
 
@@ -572,6 +579,8 @@ class PedestrianIntentDataset(VideoDataset):
             "video_id": video_ids[0],
             "ped_id": ped_ids[0],
             "disagree_score": disagree_score,
+            "pose": poses,
+            "pose_masks": pose_masks,
         }
 
         return data
