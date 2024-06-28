@@ -13,7 +13,7 @@ from data.prepare_data import get_dataloader
 from database.create_database import create_database
 from models.build_model import build_model
 from opts import get_opts
-from test import get_test_traj_gt, predict_driving, predict_intent, predict_traj
+from eval import get_test_traj_gt, predict_driving, predict_intent, predict_traj
 from train import train_driving, train_intent, train_traj
 from utils.args import DefaultArguments
 from utils.evaluate_results import evaluate_driving, evaluate_intent, evaluate_traj

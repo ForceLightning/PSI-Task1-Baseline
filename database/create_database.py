@@ -1,13 +1,22 @@
 from __future__ import annotations
+from collections.abc import Sequence
 import json
 import os
-import time
 import pickle
-from typing import Any
+import time
+from typing import Any, NamedTuple
+
+from tqdm.auto import tqdm
 
 from data.process_sequence import T_drivingDB, T_intentDB
+from opts import get_opts
+from psi_scripts.cv_annotation_schema import (
+    T_CognitiveAnnotation,
+    T_ExtendedCognitiveDrivingSchema,
+    T_ExtendedIntentAnnoSchema,
+    T_PSICVAnnDatabase,
+)
 from utils.args import DefaultArguments
-from .. import psi_scripts
 
 """
 Database organization (Intent/Trajectory)
@@ -19,7 +28,9 @@ db = {
             'frames': [0, 1, 2, ...], # target pedestrian appeared frames
             'cv_annotations': {
                 'track_id': track_id, 
-                'bbox': [xtl, ytl, xbr, ybr], 
+                'bbox': [[xtl, ytl, xbr, ybr], ...], 
+                'skeleton': [[(x, y), (x, y), (x, y),...], ...],
+                'skeleton_observed': [[bool, bool, bool, ...], ...]
             },
             'nlp_annotations': {
                 vid_uid_pair: {'intent': [], 'description': [], 'key_frame': []},
@@ -73,21 +84,30 @@ def create_database(args: DefaultArguments):
     print("Finished collecting database!")
 
 
-def add_ped_case(db, video_name, ped_name, nlp_vid_uid_pairs):
+def add_ped_case(
+    db: T_intentDB,
+    video_name: str,
+    ped_name: str,
+    nlp_vid_uid_pairs: Sequence[str],
+):
     if video_name not in db:
         db[video_name] = {}
 
     db[video_name][ped_name] = {  # ped_name is 'track_id' in cv-annotation
-        "frames": None,  # [] list of frame_idx of the target pedestrian appear
+        "frames": [],  # [] list of frame_idx of the target pedestrian appear
         "cv_annotations": {
             "track_id": ped_name,
             "bbox": [],  # [] list of bboxes, each bbox is [xtl, ytl, xbr, ybr]
+            "skeleton": [],
+            "observed_skeleton": [],
         },
         "nlp_annotations": {
             # [vid_uid_pair: {'intent': [], 'description': [], 'key_frame': []}]
         },
     }
-    for vid_uid in nlp_vid_uid_pairs:
+    for vid_uid in tqdm(
+        nlp_vid_uid_pairs, desc="Annotator pairs", position=3, leave=False
+    ):
         db[video_name][ped_name]["nlp_annotations"][vid_uid] = {
             "intent": [],
             "description": [],
@@ -98,7 +118,11 @@ def add_ped_case(db, video_name, ped_name, nlp_vid_uid_pairs):
 
 
 def add_case(
-    db: dict[str, Any], video_name: str, cog_annotation, cv_annotation, db_log
+    db: T_drivingDB,
+    video_name: str,
+    cog_annotation: T_ExtendedCognitiveDrivingSchema,
+    cv_annotation: T_PSICVAnnDatabase,
+    db_log: str,
 ):
     if video_name not in db:
         db[video_name] = {}
@@ -120,7 +144,9 @@ def add_case(
     nlp_vid_uid_pairs = list(
         cog_annotation["frames"]["frame_0"]["cognitive_annotation"].keys()
     )
-    for vid_uid in nlp_vid_uid_pairs:
+    for vid_uid in tqdm(
+        nlp_vid_uid_pairs, desc="Cognitive Annotations", position=1, leave=False
+    ):
         db[video_name]["nlp_annotations"][vid_uid] = {
             "driving_speed": [],
             "driving_direction": [],
@@ -132,9 +158,12 @@ def add_case(
 
     first_ann_idx = len(frame_list) - 1
     last_ann_idx = -1
-    for i in range(len(frame_list)):
-        fname = frame_list[i]
-        for vid_uid in nlp_vid_uid_pairs:
+    for i, fname in tqdm(
+        enumerate(frame_list), description="Frames", position=1, leave=False
+    ):
+        for vid_uid in tqdm(
+            nlp_vid_uid_pairs, description="Annotator", position=2, leave=False
+        ):
             db[video_name]["nlp_annotations"][vid_uid]["driving_speed"].append(
                 cog_annotation["frames"][fname]["cognitive_annotation"][vid_uid][
                     "driving_decision_speed"
@@ -171,7 +200,9 @@ def add_case(
             db[video_name]["gps"].append(cv_annotation["frames"][fname]["gps"])
         except:
             with open(db_log, "a") as f:
-                f.write(f"NO speed and gps information:  {video_name} frame {fname} \n")
+                _ = f.write(
+                    f"NO speed and gps information:  {video_name} frame {fname} \n"
+                )
 
     # Cut sequences, only keep frames containing both driving decision & explanations
     db[video_name]["frames"] = db[video_name]["frames"][
@@ -179,7 +210,9 @@ def add_case(
     ]
     db[video_name]["speed"] = db[video_name]["speed"][first_ann_idx : last_ann_idx + 1]
     db[video_name]["gps"] = db[video_name]["gps"][first_ann_idx : last_ann_idx + 1]
-    for vid_uid in nlp_vid_uid_pairs:
+    for vid_uid in tqdm(
+        nlp_vid_uid_pairs, desc="Annotator pairs", position=1, leave=False
+    ):
         db[video_name]["nlp_annotations"][vid_uid]["driving_speed"] = db[video_name][
             "nlp_annotations"
         ][vid_uid]["driving_speed"][first_ann_idx : last_ann_idx + 1]
@@ -210,7 +243,7 @@ def init_db(
     else:
         raise NotImplementedError("Dataset not supported")
 
-    for video_name in sorted(video_list):
+    for video_name in tqdm(sorted(video_list), desc="Videos", position=0, leave=True):
         if args.task_name == "driving_decision":
             try:
                 with open(
@@ -219,7 +252,7 @@ def init_db(
                     ),
                     "r",
                 ) as f:
-                    cog_annotation = json.load(f)
+                    cog_annotation: T_ExtendedCognitiveDrivingSchema = json.load(f)
             except:
                 with open(db_log, "a") as f:
                     _ = f.write(
@@ -227,6 +260,7 @@ def init_db(
                     )
                 continue
 
+            cv_folder: str = ""
             if args.dataset == "PSI2.0":
                 cv_folder = "PSI2.0_TrainVal/annotations/cv_annotation"
             elif args.dataset == "PSI1.0":
@@ -237,9 +271,7 @@ def init_db(
                     os.path.join(dataroot, cv_folder, video_name, "cv_annotation.json"),
                     "r",
                 ) as f:
-                    cv_annotation: (
-                        psi_scripts.cv_annotation_schema.T_PSICVAnnDatabase
-                    ) = json.load(f)
+                    cv_annotation: T_PSICVAnnDatabase = json.load(f)
             except:
                 with open(db_log, "a") as f:
                     _ = f.write(f"Error loading {video_name} cv annotation json \n")
@@ -257,9 +289,7 @@ def init_db(
                     ),
                     "r",
                 ) as f:
-                    annotation: (
-                        psi_scripts.cv_annotation_schema.T_ExtendedIntentAnnoSchema
-                    ) = json.load(f)
+                    annotation: T_ExtendedIntentAnnoSchema = json.load(f)
             except:
                 with open(db_log, "a") as f:
                     _ = f.write(
@@ -267,11 +297,36 @@ def init_db(
                     )
                 continue
             db[video_name] = {}
-            for ped in annotation["pedestrians"].keys():
-                cog_annotation = annotation["pedestrians"][ped]["cognitive_annotations"]
-                nlp_vid_uid_pairs = cog_annotation.keys()
+            for ped in tqdm(
+                annotation["pedestrians"].keys(),
+                desc="Pedestrians",
+                position=1,
+                leave=False,
+            ):
+                cog_ann = annotation["pedestrians"][ped]["cognitive_annotations"]
+                nlp_vid_uid_pairs = cog_ann.keys()
                 add_ped_case(db, video_name, ped, nlp_vid_uid_pairs)
     return db
+
+
+class SplitFrameLists(NamedTuple):
+    """Named tuple of lists with frames split into slices. Returned from
+        :py:func:`split_frame_lists`.
+
+    :var list[list[int]] frames: Split observed frames.
+    :var list[list[list[float]]] bboxes: Split list of bboxes.
+    :var list[list[int]] indices: Split list of indices of observed frames (not the
+        frame index itself)
+    :var poses: Split list of pose data.
+    :vartype poses: list[list[tuple[float, float]]]
+    :var list[list[list[bool]]] pose_masks: Split list of observed pose data as masks.
+    """
+
+    frames: list[list[int]]
+    bboxes: list[list[list[float]]]
+    indices: list[list[int]]
+    poses: list[list[list[tuple[float, float]]]]
+    pose_masks: list[list[list[bool]]]
 
 
 def split_frame_lists(
@@ -280,13 +335,21 @@ def split_frame_lists(
     pose_list: list[list[tuple[float, float]]],
     pose_mask: list[list[bool]],
     threshold: int = 60,
-) -> tuple[
-    list[list[int]],
-    list[list[list[float]]],
-    list[list[int]],
-    list[list[list[tuple[float, float]]]],
-    list[list[list[bool]]],
-]:
+) -> SplitFrameLists:
+    """For a sequence of an observed pedestrian, split into slices based on missing
+    frames.
+
+    :param list[int] frame_list: List of observed frames.
+    :param list[list[float]] bbox_list: List of bounding boxes over observed frames.
+    :param pose_list: List of pose data over observed frames.
+    :type pose_list: list[list[tuple[float, float]]]
+    :param list[list[bool]] pose_mask: List of observed pose keypoint masks.
+    :param int threshold: Only process slices that are longer than the threshold,
+        defaults to 60.
+
+    :returns: Tuple of lists with frames split into slices.
+    :rtype: SplitFrameLists
+    """
     # For a sequence of an observed pedestrian, split into slices based on missing
     # frames
     frame_res: list[list[int]] = []
@@ -336,7 +399,7 @@ def split_frame_lists(
         pose_res.append(pose_split)
         pose_mask_res.append(pose_mask_split)
 
-    return frame_res, bbox_res, inds_res, pose_res, pose_mask_res
+    return SplitFrameLists(frame_res, bbox_res, inds_res, pose_res, pose_mask_res)
 
 
 def get_intent_des(
@@ -344,7 +407,7 @@ def get_intent_des(
     vname: str,
     pid: str,
     split_inds: list[int],
-    cog_annt: dict[str, psi_scripts.cv_annotation_schema.T_CognitiveAnnotation],
+    cog_annt: dict[str, T_CognitiveAnnotation],
 ):
     # split_inds: the list of indices of the intent_annotations for the current split of pid in vname
     for vid_uid in cog_annt.keys():
@@ -379,7 +442,7 @@ def update_db_annotations(
         raise NotImplementedError("Database not supported")
 
     video_list = sorted(db.keys())
-    for video_name in video_list:
+    for video_name in tqdm(video_list, desc="Videos", position=0, leave=True):
         ped_list: list[str] = list(db[video_name].keys())
         tracks: list[str] = list(db[video_name].keys())
         try:
@@ -389,9 +452,7 @@ def update_db_annotations(
                 ),
                 "r",
             ) as f:
-                annotation: (
-                    psi_scripts.cv_annotation_schema.T_ExtendedIntentAnnoSchema
-                ) = json.load(f)
+                annotation: T_ExtendedIntentAnnoSchema = json.load(f)
         except:
             with open(db_log, "a") as f:
                 _ = f.write(
@@ -399,7 +460,7 @@ def update_db_annotations(
                 )
             continue
 
-        for ped_id in ped_list:
+        for ped_id in tqdm(ped_list, desc="Pedestrians", position=1, leave=False):
             ped_track = annotation["pedestrians"][ped_id]
             observed_frames = ped_track["observed_frames"]
             observed_bboxes = ped_track["cv_annotations"]["bboxes"]
@@ -482,7 +543,12 @@ def update_db_annotations(
                             f"{len(cv_frame_list)} splits: , {[len(s) for s in cv_frame_list]} \n"
                         )
                     nlp_vid_uid_pairs = db[video_name][ped_id]["nlp_annotations"].keys()
-                    for i in range(len(cv_frame_list)):
+                    for i in tqdm(
+                        range(len(cv_frame_list)),
+                        desc="CV Ann frame list",
+                        position=2,
+                        leave=False,
+                    ):
                         ped_splitId = ped_id + "-" + str(i)
                         add_ped_case(db, video_name, ped_splitId, nlp_vid_uid_pairs)
                         db[video_name][ped_splitId]["frames"] = cv_frame_list[i]
@@ -574,3 +640,13 @@ def update_db_annotations(
 #         if len(db[vname].keys()) < 1:
 #             print(vname, "After cutting sequence edges, not enough frames left! Delete!")
 #             del db[vname]
+
+
+def main(args: DefaultArguments):
+    create_database(args)
+
+
+if __name__ == "__main__":
+    args = get_opts()
+
+    main(args)

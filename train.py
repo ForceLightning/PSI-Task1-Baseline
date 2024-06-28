@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard.writer import SummaryWriter
 from transformers.modeling_outputs import Seq2SeqTSPredictionOutput
 
-from test import validate_driving, validate_intent, validate_traj
+from eval import validate_driving, validate_intent, validate_traj
 from utils.args import DefaultArguments
 from utils.cuda import *
 from utils.log import RecordResults
