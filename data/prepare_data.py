@@ -23,8 +23,22 @@ from utils.args import DefaultArguments
 
 
 def get_dataloader(
-    args: DefaultArguments, shuffle_train: bool = True, drop_last_train: bool = True
-) -> tuple[DataLoader[Any], DataLoader[Any], DataLoader[Any]]:
+    args: DefaultArguments,
+    shuffle_train: bool = True,
+    drop_last_train: bool = True,
+    load_test: bool = False,
+) -> tuple[DataLoader[Any], DataLoader[Any], DataLoader[Any] | None]:
+    """Instantiatees dataloaders based on the prediction task.
+
+    :param DefaultArguments args: Training arguments
+    :param bool shuffle_train: Whether to shuffle the training dataloader, defaults to
+        True.
+    :param bool drop_last_train: Whether to drop the last training batch, defaults to
+        True.
+    :param bool load_test: Whether to load the test dataloader, defaults to False.
+    :returns: Training, Validation, and Testing dataloaders.
+    :rtype: tuple[DataLoader[Any], DataLoader[Any], DataLoader[Any]]
+    """
     task = args.task_name.split("_")[1]
 
     with open(
@@ -96,7 +110,7 @@ def get_dataloader(
             num_workers=8,
         )
         test_loader = None
-        if len(test_dataset) > 0:
+        if len(test_dataset) > 0 and load_test:
             test_loader = DataLoader(
                 test_dataset,
                 batch_size=args.batch_size,
@@ -128,7 +142,7 @@ def get_dataloader(
             persistent_workers=True,
         )
         test_loader = None
-        if len(test_dataset) > 0:
+        if len(test_dataset) > 0 and load_test:
             test_loader = MultiEpochsDataLoader(
                 test_dataset,
                 batch_size=args.batch_size,
@@ -145,7 +159,16 @@ def get_dataloader(
 
 def get_train_val_data(
     data: T_intentSeq | T_drivingSeq, args: DefaultArguments, overlap: float = 0.5
-):  # overlap==0.5, seq_len=15
+) -> T_intentSeqNumpy | T_drivingSeqNumpy:  # overlap==0.5, seq_len=15
+    """Given the data sequences, return preprocessed dicts of numpy data.
+
+    :param data: Data sequences to be processed.
+    :type data: T_intentSeq | T_drivingSeq
+    :param DefaultArguments args: Training arguments.
+    :param float overlap: Amount of overlap between sequences. Defaults to 0.5.
+    :returns: Processed data.
+    :rtype: T_intentSeqNumpy | T_drivingSeqNumpy
+    """
     seq_len = args.max_track_size
     overlap = overlap
     tracks = get_tracks(data, seq_len, args.observe_length, overlap, args)
@@ -169,6 +192,15 @@ def get_tracks(
     overlap: float,
     args: DefaultArguments,
 ) -> T_intentSeqNumpy | T_drivingSeqNumpy:
+    """Processes data sequences into tracks of overlapping data.
+
+    :param data: Data sequences to be processed.
+    :type data: T_intentSeq | T_drivingSeq
+    :param int seq_length: Max sequence length.
+    :param int observed_seq_length: Contextual sequence length.
+    :param float overlap: How much tracks should overlap with each other.
+    :param DefaultArguments args: Training arguments.
+    """
     overlap_stride = (
         observed_seq_len if overlap == 0 else int((1 - overlap) * observed_seq_len)
     )  # default: int(0.5*15) == 7

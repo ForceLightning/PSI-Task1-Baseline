@@ -2,89 +2,186 @@ from __future__ import annotations
 import abc
 from copy import deepcopy
 import os
-from typing import Any, Generator, Literal, TypeAlias
+from typing import Any, Literal, TypedDict
 
 import PIL
 from PIL import Image
 import cv2
+from cv2 import typing as cvt
 import numpy as np
 from numpy import typing as npt
 import torch
 from torch.utils.data import DataLoader, Dataset, Sampler
 from torchvision.transforms import v2
+from typing_extensions import override
 
 from data.process_sequence import T_drivingSeqNumpy, T_intentSeqNumpy
 from utils.args import DefaultArguments
 
 
-T_drivingSample: TypeAlias = dict[
-    {
-        "video_id": list[str],
-        "frames": list[int],
-        "image": torch.Tensor | list[None],
-        "global_featmaps": torch.Tensor | list[None],
-        "local_featmaps": torch.Tensor | list[None],
-        "label_speed": int,
-        "label_direction": int,
-        "label_speed_prob": float,
-        "label_direction_prob": float,
-    }
-]
+class T_drivingSample(TypedDict):
+    """A sample from the :py:class:`DrivingDecisionDataset` dataset.
 
-T_drivingBatch: TypeAlias = dict[
-    {
-        "video_id": list[list[str]],
-        "frames": torch.Tensor,
-        "image": torch.Tensor | list[None],
-        "global_featmaps": torch.Tensor | list[None],
-        "local_featmaps": torch.Tensor | list[None],
-        "label_speed": torch.Tensor,
-        "label_direction": torch.Tensor,
-        "label_speed_prob": torch.Tensor,
-        "label_direction_prob": torch.Tensor,
-    }
-]
+    :ivar list[str] video_id: The Video ID of the sample.
+    :ivar list[int] frames: The frame indexes of the sample.
+    :ivar image: The image data / frames of the sample.
+    :vartype image: torch.Tensor | list[None]
+    :ivar global_featmaps: The image feature embeddings of the sample.
+    :vartype global_featmaps: torch.Tensor | list[None]
+    :ivar local_featmaps: The image feature embeddings near the pedestrians of the
+        sample.
+    :vartype local_featmaps: torch.Tensor | list[None]
+    :ivar int label_speed: The label encoded speed target.
+    :ivar int label_direction: The label encoded direction target.
+    :ivar float label_speed_prob: The probability of the speed target being accurate.
+    :ivar float label_direction_prob: The probability of the direction target being
+        accurate.
+    """
 
-T_intentSample: TypeAlias = dict[
-    {
-        "global_featmaps": torch.Tensor | list[None],
-        "local_featmaps": torch.Tensor | list[None],
-        "image": torch.Tensor | list[None],
-        "bboxes": npt.NDArray[np.float_],
-        "original_bboxes": npt.NDArray[np.float_],
-        "intention_binary": npt.NDArray[np.int_],
-        "intention_prob": npt.NDArray[np.float_],
-        "frames": npt.NDArray[np.int_],
-        "total_frames": npt.NDArray[np.int_],
-        "video_id": npt.NDArray[np.str_] | list[str],
-        "ped_id": npt.NDArray[np.str_] | list[str],
-        "disagree_score": npt.NDArray[np.float_],
-        "pose": npt.NDArray[np.float_],
-        "pose_masks": npt.NDArray[np.bool_],
-    }
-]
+    video_id: list[str]
+    frames: list[int]
+    image: torch.Tensor | list[None]
+    global_featmaps: torch.Tensor | list[None]
+    local_featmaps: torch.Tensor | list[None]
+    label_speed: int
+    label_direction: int
+    label_speed_prob: float
+    label_direction_prob: float
 
-T_intentBatch: TypeAlias = dict[
-    {
-        "global_featmaps": torch.Tensor | list[None],
-        "local_featmaps": torch.Tensor | list[None],
-        "image": torch.Tensor | list[None],
-        "bboxes": torch.Tensor,
-        "original_bboxes": torch.Tensor,
-        "intention_binary": torch.Tensor,
-        "intention_prob": torch.Tensor,
-        "frames": torch.Tensor,
-        "total_frames": torch.Tensor,
-        "video_id": npt.NDArray[np.str_] | list[str],
-        "ped_id": npt.NDArray[np.str_] | list[str],
-        "disagree_score": torch.Tensor,
-        "pose": torch.Tensor,
-        "pose_masks": torch.Tensor,
-    }
-]
+
+class T_drivingBatch(TypedDict):
+    """A batch from the :py:class:`DrivingDecisionDataset` dataset.
+
+    :ivar list[list[str]] video_id: The Video IDs of the batch.
+    :ivar torch.Tensor frames: The frame indices of the batch.
+    :ivar image: The image data / frames of the batch.
+    :vartype image: torch.Tensor | list[None]
+    :ivar global_featmaps: The image feature embeddings of the batch.
+    :vartype global_featmaps: torch.Tensor | list[None]
+    :ivar local_featmaps: The image feature embeddings near the pedestrians of the
+        batch.
+    :vartype local_featmaps: torch.Tensor | list[None]
+    :ivar torch.Tensor label_speed: The label encoded speed target.
+    :ivar torch.Tensor label_direction: The label encoded direction target.
+    :ivar torch.Tensor label_speed_prob: The probability of the speed target being accurate.
+    :ivar torch.Tensor label_direction_prob: The probability of the direction target being
+        accurate.
+    """
+
+    video_id: list[list[str]]
+    frames: torch.Tensor
+    image: torch.Tensor | list[None]
+    global_featmaps: torch.Tensor | list[None]
+    local_featmaps: torch.Tensor | list[None]
+    label_speed: torch.Tensor
+    label_direction: torch.Tensor
+    label_speed_prob: torch.Tensor
+    label_direction_prob: torch.Tensor
+
+
+class T_intentSample(TypedDict):
+    """A sample from the :py:class:`PedestrianIntentDataset` dataset.
+
+    :ivar image: The image data / frames of the sample.
+    :vartype image: torch.Tensor | list[None]
+    :ivar global_featmaps: The image feature embeddings of the sample.
+    :vartype global_featmaps: torch.Tensor | list[None]
+    :ivar local_featmaps: The image feature embeddings near the pedestrians of the
+        sample.
+    :ivar npt.NDArray[np.float_] bboxes: The bounding boxes of the pedestrian in the
+        sample.
+    :ivar npt.NDArray[np.float_] original_bboxes: The non-modified bounding boxes of
+        the pedestrian in the sample.
+    :ivar npt.NDArray[np.int_] intention_binary: The binary label for pedestrian
+        crossing intent.
+    :ivar npt.NDArray[np.float_] intention_prob: The probability of the binary label
+        being true.
+    :ivar npt.NDArray[np.int_] frames: Frame indices of the sample of length
+        `observe_length`.
+    :ivar npt.NDArray[np.int_] total_frames: Full frame indices of the sample.
+    :ivar video_id: The video indices of the sample.
+    :vartype video_id: npt.NDArray[np.str_] | list[str]
+    :ivar ped_id: The index of the pedestrian in the sample.
+    :vartype ped_id: npt.NDArray[np.str_] | list[str]
+    :ivar npt.NDArray[np.float_] disagree_score: The disagree weight of the annotations
+        by the annotators.
+    :ivar npt.NDArray[np.float_] pose: The pose data of the pedestrian in COCO format.
+    :ivar npt.NDArrry[np.bool_] pose_masks: A boolean mask determining whether the
+        pose data was observed or missing when extracting from the PSI datasets.
+    """
+
+    global_featmaps: torch.Tensor | list[None]
+    local_featmaps: torch.Tensor | list[None]
+    image: torch.Tensor | list[None]
+    bboxes: npt.NDArray[np.float_]
+    original_bboxes: npt.NDArray[np.float_]
+    intention_binary: npt.NDArray[np.int_]
+    intention_prob: npt.NDArray[np.float_]
+    frames: npt.NDArray[np.int_]
+    total_frames: npt.NDArray[np.int_]
+    video_id: npt.NDArray[np.str_] | list[str]
+    ped_id: npt.NDArray[np.str_] | list[str]
+    disagree_score: npt.NDArray[np.float_]
+    pose: npt.NDArray[np.float_]
+    pose_masks: npt.NDArray[np.bool_]
+
+
+class T_intentBatch(TypedDict):
+    """A batch from the :py:class:`PedestrianIntentDataset` dataset.
+
+    :ivar image: The image data / frames of the batch.
+    :vartype image: torch.Tensor | list[None]
+    :ivar global_featmaps: The image feature embeddings of the batch.
+    :vartype global_featmaps: torch.Tensor | list[None]
+    :ivar local_featmaps: The image feature embeddings near the pedestrians of the
+        batch.
+    :ivar torch.Tensor bboxes: The bounding boxes of the pedestrians in the
+        batch.
+    :ivar torch.Tensor original_bboxes: The non-modified bounding boxes of
+        the pedestrian in the batch.
+    :ivar torch.Tensor intention_binary: The binary label for pedestrian
+        crossing intent.
+    :ivar torch.Tensor intention_prob: The probability of the binary label
+        being true.
+    :ivar torch.Tensor frames: Frame indices of the batch of length
+        `observe_length`.
+    :ivar torch.Tensor total_frames: Full frame indices of the batch.
+    :ivar video_id: The video indices of the batch.
+    :vartype video_id: npt.NDArray[np.str_] | list[str]
+    :ivar ped_id: The indices of the pedestrians in the batch.
+    :vartype ped_id: npt.NDArray[np.str_] | list[str]
+    :ivar torch.Tensor disagree_score: The disagree weight of the annotations
+        by the annotators.
+    :ivar torch.Tensor pose: The pose data of the pedestrian in COCO format.
+    :ivar torch.Tensor pose_masks: A boolean mask determining whether the
+        pose data was observed or missing when extracting from the PSI datasets.
+    """
+
+    global_featmaps: torch.Tensor | list[None]
+    local_featmaps: torch.Tensor | list[None]
+    image: torch.Tensor | list[None]
+    bboxes: torch.Tensor
+    original_bboxes: torch.Tensor
+    intention_binary: torch.Tensor
+    intention_prob: torch.Tensor
+    frames: torch.Tensor
+    total_frames: torch.Tensor
+    video_id: npt.NDArray[np.str_] | list[str]
+    ped_id: npt.NDArray[np.str_] | list[str]
+    disagree_score: torch.Tensor
+    pose: torch.Tensor
+    pose_masks: torch.Tensor
 
 
 class VideoDataset(Dataset[Any]):
+    """The base dataset class for task-specific dataset classes based on the PSI datasets.
+
+    :param data: Data loaded from pickled database files of the dataset.
+    :type data: T_intentSeqNumpy | T_drivingSeqNumpy
+    :param DefaultArguments args: Training arguments.
+    :param str stage: Training/Validation/Testing stages.
+    """
+
     def __init__(
         self,
         data: T_intentSeqNumpy | T_drivingSeqNumpy,
@@ -100,10 +197,12 @@ class VideoDataset(Dataset[Any]):
         self.images_path = os.path.join(args.dataset_root_path, "frames")
 
     @abc.abstractmethod
-    def __getitem__(self, index: int) -> dict[str, Any]:  # type: ignore[reportImplicitOverride]
+    def __getitem__(self, index: int) -> T_intentSample | T_drivingSample:  # type: ignore[reportImplicitOverride]
+        """Gets a sample of the dataset given an index."""
         raise NotImplementedError("Method not implemented")
 
     def __len__(self) -> int:
+        """Gets the length of the dataset."""
         return len(self.data["frame"])
 
     def load_images(
@@ -156,21 +255,21 @@ class VideoDataset(Dataset[Any]):
 
         return torch.stack(images), torch.stack(cropped_images)
 
-    def rgb_loader(self, img_path: os.PathLike[Any] | str) -> cv2.typing.MatLike:
+    def rgb_loader(self, img_path: os.PathLike[Any] | str) -> cvt.MatLike:
         """Loads the image in RGB format using OpenCV
 
         :param img_path: Path to the image.
         :type img_path: os.PathLike[Any] | str
         :returns: Image in RGB format.
-        :rtype: cv2.typing.MatLike
+        :rtype: cvt.MatLike
         """
-        img: cv2.typing.MatLike = cv2.imread(img_path)
+        img: cvt.MatLike = cv2.imread(img_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         return img
 
     def load_reason_features(
         self, video_ids: list[str], ped_ids: list[str], frame_list: list[int]
-    ) -> torch.Tensor | list[Any]:
+    ) -> torch.Tensor | list[torch.Tensor]:
         """Loads the reason features from the local storage
 
         :param video_ids: List of video IDs.
@@ -193,7 +292,9 @@ class VideoDataset(Dataset[Any]):
                     video_name,
                     pid,
                 )
-                feature_file = np.load(f"{local_path}/{fid:03d}.npy")
+                feature_file: npt.NDArray[np.float_] = np.load(
+                    f"{local_path}/{fid:03d}.npy"
+                )
                 feature_list.append(torch.tensor(feature_file))
 
         feature_list = [] if len(feature_list) < 1 else torch.stack(feature_list)
@@ -211,10 +312,10 @@ class VideoDataset(Dataset[Any]):
         :param frame_list: List of frame IDs.
         :type frame_list: list[int]
         :returns: Tuple of global and local features.
-        :rtype: tuple[torch.Tensor | list[torch.Tensor], torch.Tensor | list[torch.Tensor]]
+        :rtype: tuple[torch.Tensor | list[None], torch.Tensor | list[None]]
         """
-        global_featmaps: list[None] | torch.Tensor = []
-        local_featmaps: list[None] | torch.Tensor = []
+        global_featmaps: list[torch.Tensor] | torch.Tensor = []
+        local_featmaps: list[torch.Tensor] | torch.Tensor = []
         video_name = video_ids[0]
         if "global" in self.args.model_name and self.args.freeze_backbone:
             for i, fid in enumerate(frame_list):
@@ -225,7 +326,9 @@ class VideoDataset(Dataset[Any]):
                     "global_feats",
                     video_name,
                 )
-                global_featmap = np.load(f"{global_path}/{fid:03d}.npy")
+                global_featmap: npt.NDArray[np.float_] = np.load(
+                    f"{global_path}/{fid:03d}.npy"
+                )
                 global_featmaps.append(torch.tensor(global_featmap))
         elif "ctxt" in self.args.model_name:
             for i, fid in enumerate(frame_list):
@@ -238,7 +341,9 @@ class VideoDataset(Dataset[Any]):
                     video_name,
                     pid,
                 )
-                local_featmap = np.load(f"{local_path}/{fid:03d}.npy")
+                local_featmap: npt.NDArray[np.float_] = np.load(
+                    f"{local_path}/{fid:03d}.npy"
+                )
                 local_featmaps.append(torch.tensor(local_featmap))
 
         global_featmaps = (
@@ -319,11 +424,7 @@ class VideoDataset(Dataset[Any]):
 
     def jitter_bbox(
         self,
-        img: (
-            cv2.typing.MatLike
-            | npt.NDArray[np.float32 | np.float64 | np.uint8]
-            | Image.Image
-        ),
+        img: cvt.MatLike | npt.NDArray[np.float_ | np.uint] | Image.Image,
         bboxes: list[list[float | int]],
         mode: Literal["same", "enlarge", "move", "random_enlarge", "random_move"],
         ratio: float,
@@ -331,18 +432,20 @@ class VideoDataset(Dataset[Any]):
         """This method jitters the position or dimensions of the bounding box.
 
         :param img: Image to be cropped and/or padded.
-        :type img: cv2.typing.MatLike | np.NDArray[np.float32 | np.float64 | np.uint8] | Image.Image
+        :type img: cvt.MatLike | np.NDArray[np.float_ | np.uint] | Image.Image
         :param bboxes: List of bounding boxes for cropping.
         :type bboxes: list[list[float | int]]
         :param mode: The type of padding or resizing:
-            'same' returns the bounding box unchanged
-            'enlarge' increases the size of bounding box based on the given ratio
-            'random_enlarge' increases the size of bounding box by randomly sampling a
-            value in [0,ratio)
-            'move' moves the center of the bounding box in each direction based on the given ratio
-        :type mode: str
+        :type mode: Literal["same", "enlarge", "move", "random_enlarge", "random_move"]
         :param ratio: The ratio of change relative to the size of the bounding box (for modes
             'enlarge' and 'random_enlarge')
+
+        Mode options:
+            * 'same' returns the bounding box unchanged
+            * 'enlarge' increases the size of bounding box based on the given ratio
+            * 'random_enlarge' increases the size of bounding box by randomly sampling a value in [0,ratio)
+            * 'move' moves the center of the bounding box in each direction based on the given ratio
+
         :returns: Jittered bounding box coordinates.
         :rtype: list[list[float | int]]
         """
@@ -401,18 +504,14 @@ class VideoDataset(Dataset[Any]):
 
     def bbox_sanity_check(
         self,
-        img: (
-            cv2.typing.MatLike
-            | npt.NDArray[np.float32 | np.float64 | np.uint8]
-            | Image.Image
-        ),
+        img: cvt.MatLike | npt.NDArray[np.float_ | np.uint] | Image.Image,
         bbox: list[int | float],
     ) -> list[int | float]:
         """This is to confirm that the bounding boxes are within image boundaries.
         Otherwise, modifications are applied.
 
         Args:
-            img (cv2.typing.MatLike | npt.NDArray[np.float32 | np.float64 | np.uint8] | PIL.Image.Image): Image to be cropped and/or
+            img (cvt.MatLike | npt.NDArray[np.float_ | np.uint] | PIL.Image.Image): Image to be cropped and/or
             padded
             bbox (list): Bounding box dimensions for cropping
 
@@ -433,37 +532,28 @@ class VideoDataset(Dataset[Any]):
 
     def img_pad(
         self,
-        img: (
-            cv2.typing.MatLike
-            | npt.NDArray[np.float32 | np.float64 | np.uint8]
-            | Image.Image
-        ),
-        mode: str = "warp",
+        img: cvt.MatLike | npt.NDArray[np.float_ | np.uint] | Image.Image,
+        mode: Literal["warp", "same", "pad_same", "pad_resize", "pad_fit"] = "warp",
         size: int = 224,
-    ) -> (
-        cv2.typing.MatLike
-        | npt.NDArray[np.float32 | np.float64 | np.uint8]
-        | Image.Image
-        | None
-    ):
-        """Pads a given image, crops and/or pads a image given the boundries of the box needed.
+    ) -> cvt.MatLike | npt.NDArray[np.float_ | np.uint] | Image.Image | None:
+        """Pads a given image, crops and/or pads a image given the boundries of the box
+            needed.
 
-        Args:
-            img (cv2.typing.MatLike | npt.NDArray | PIL.Image.Image): Image to be cropped and/or
-            padded
-            mode (str, optional): The type of padding or resizing. Defaults to "warp".
-                - 'warp': crops the bounding box and resize to the output size.
-                - 'same': only crops the image.
-                - 'pad_same': maintains the original size of the cropped box and pads with zeros.
-                - 'pad_resize': crops the image and resize the cropped box in a way that the longer
-                edge is equal to the desired output size in that direction while maintaining the
-                aspect ratio. The rest of the image is padded with zeros.
-                - 'pad_fit': maintains the original size of the cropped box unless the image is
-                bigger than the size in which case it scales the image down, and then pads it.
-            size (int, optional): The desired size of output. Defaults to 224.
+        :param img: Image to be cropped and/or padded.
+        :type img: cvt.MatLike | npt.NDArray[np.float_ | np.uint]
+        :param mode: The type of padding or resizing. Defaults to "warp".
+        :type mode: Literal["warp", "same", "pad_same", "pad_resize", "pad_fit"]
+        :param int size: The desired size of the output. Defaults to 224.
 
-        Returns:
-            cv2.typing.MatLike | npt.NDArray | PIL.Image.Image: Padded image
+        Mode options:
+            * 'warp': crops the bounding box and resize to the output size.
+            * 'same': only crops the image.
+            * 'pad_same': maintains the original size of the cropped box and pads with zeros.
+            * 'pad_resize': crops the image and resize the cropped box in a way that the longer edge is equal to the desired output size in that direction while maintaining the aspect ratio. The rest of the image is padded with zeros.
+            * 'pad_fit': maintains the original size of the cropped box unless the image is bigger than the size in which case it scales the image down, and then pads it.
+
+        :returns: Cropped and padded image.
+        :rtype: cvt.MatLike | npt.NDArray[np.float_ | np.uint] | Image.Image | None
         """
         assert mode in [
             "same",
@@ -501,6 +591,9 @@ class VideoDataset(Dataset[Any]):
 
 
 class PedestrianIntentDataset(VideoDataset):
+    """The pedestrian intent/trajectory prediction task-specific dataset class."""
+
+    @override
     def __getitem__(self, index: int) -> T_intentSample:
         """Gets the item with the given index
 
@@ -585,6 +678,7 @@ class PedestrianIntentDataset(VideoDataset):
 
         return data
 
+    @override
     def load_images(self, video_name: str, frame_list: list[int]) -> torch.Tensor:
         """Loads images given the video name and list of frames
 
@@ -595,7 +689,7 @@ class PedestrianIntentDataset(VideoDataset):
         :returns: Video frames in tensor format.
         :rtype: torch.Tensor
         """
-        images: list[cv2.typing.MatLike | torch.Tensor] = []
+        images: list[cvt.MatLike | torch.Tensor] = []
 
         for frame_id in frame_list:
             # load original image
@@ -619,7 +713,10 @@ class PedestrianIntentDataset(VideoDataset):
 
 
 class DrivingDecisionDataset(VideoDataset):
-    def __getitem__(self, index: int) -> T_drivingSample:  # type: ignore[reportImplicitOverride]
+    """The driving decision prediction task-specific dataset class."""
+
+    @override
+    def __getitem__(self, index: int) -> T_drivingSample:
         """Gets the item with the given index
 
         :param index: Index of the item.
@@ -665,9 +762,8 @@ class DrivingDecisionDataset(VideoDataset):
 
         return data
 
-    def load_images(  # type: ignore[reportImplicitOverride]
-        self, video_name: str, frame_list: list[int]
-    ) -> torch.Tensor:
+    @override
+    def load_images(self, video_name: str, frame_list: list[int]) -> torch.Tensor:  # type: ignore[reportIncompatibleMethodOverride]
         """Loads images given the video filename (without ext) and the frame list.
 
         :param video_name: Name of the video file (without file ext).
@@ -677,7 +773,7 @@ class DrivingDecisionDataset(VideoDataset):
         :returns: Loaded frames.
         :rtype: torch.Tensor
         """
-        images: list[cv2.typing.MatLike | torch.Tensor] = []
+        images: list[cvt.MatLike | torch.Tensor] = []
 
         for frame_id in frame_list:
             # load original image
