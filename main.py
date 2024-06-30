@@ -21,8 +21,12 @@ import cv2
 from pathlib import Path
 from ultralytics import YOLO
 
-from boxmot import DeepOCSORT
+from boxmot import DeepOCSORT, BYTETracker, BoTSORT
 from data.custom_dataset import YoloDataset
+from utils.plotting import PosePlotter, draw_landmarks_on_image, road_lane_detection, overlay
+import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 
 def main(args):
     # writer = SummaryWriter(args.checkpoint_path)
@@ -38,23 +42,31 @@ def main(args):
     args.classes = 0
 
     # If video source source is from test
-    args.source = os.path.join(os.getcwd(), "PSI2.0_Test", "videos", "video_0147.mp4")
+    # args.source = os.path.join(os.getcwd(), "PSI2.0_Test", "videos", "video_0147.mp4")
     
     # If video source is from val
-    # args.source = os.path.join(os.getcwd(), "PSI_Videos", "videos", "video_0111.mp4")
+    args.source = os.path.join(os.getcwd(), "PSI_Videos", "videos", "video_0131.mp4")
     file_name = args.source.split("\\")[-1].split(".")[0]
     
-    model = YOLO("yolov8s.pt")
-    tracker = DeepOCSORT(
+    model = YOLO("yolov8s-pose.pt")
+    # tracker = DeepOCSORT(
+    # model_weights=Path('osnet_x0_25_msmt17.pt'), # which ReID model to use
+    # device='cuda:0',
+    # fp16=False,
+    # )
+    # tracker = BYTETracker()
+    tracker = BoTSORT(
     model_weights=Path('osnet_x0_25_msmt17.pt'), # which ReID model to use
     device='cuda:0',
-    fp16=False,
+    fp16=True,
     )
-    
-    # This tracking process can be functionised when got time
+    pose_plotter = PosePlotter()
+      
+    """Using YOLO POSE"""
     vid = cv2.VideoCapture(args.source)
-
+    
     frame_number = 0
+    
     while True:
         ret, im = vid.read()
 
@@ -63,12 +75,17 @@ def main(args):
         
         # Increment frame number
         frame_number += 1
-
-        result = model.predict(im, classes=[0], verbose=False)
-
+        result = model.predict(im, verbose=False, classes=[0], conf=0.15)
         dets = []
+        kp_dets = []
         result = result[0]
-        
+        # im = result.plot()  
+
+        for k in result.keypoints:
+            conf = k.conf
+            kp = k.data # x, y, visibility - xy non-normalized
+            kp_dets.append(kp.tolist())
+
         for box in result.boxes:
             cls = int(box.cls[0].item())
             cords = box.xyxy[0].tolist()
@@ -77,40 +94,44 @@ def main(args):
             dets.append([cords[0], cords[1], cords[2], cords[3], conf, cls])
                 
         dets = np.array(dets)
+        kp_dets = np.array(kp_dets)
 
         if len(dets) == 0:
             dets = np.empty((0, 6))
             
-        tracking_results = tracker.update(dets, im) 
-        if len(tracking_results) > 0:
-            x1 = tracking_results[0][0]
-            y1 = tracking_results[0][1]
-            x2 = tracking_results[0][2]
-            y2 = tracking_results[0][3]
-            id = tracking_results[0][4]
-            conf = tracking_results[0][5]
-            cls = tracking_results[0][6]
-            with open(file_name + ".txt", 'a') as f:
-                f.write(f"{int(id)} {x1} {y1} {x2} {y2} {conf} {int(cls)} {frame_number}\n")
-                
-        tracker.plot_results(im, show_trajectories=False)
-        
-        # break on pressing q or space
-    #     cv2.imshow('BoxMOT detection', im)     
-    #     key = cv2.waitKey(1) & 0xFF
-    #     if key == ord(' ') or key == ord('q'):
-    #         break
+        tracks = tracker.update(dets, im) 
+        if tracks.shape[0] != 0:
+        #     x1 = tracks[0][0]
+        #     y1 = tracks[0][1]
+        #     x2 = tracks[0][2]
+        #     y2 = tracks[0][3]
+        #     id = tracks[0][4]
+        #     conf = tracks[0][5]
+        #     cls = tracks[0][6]
+        #     with open(file_name + ".txt", 'a') as f:
+        #         f.write(f"{int(id)} {x1} {y1} {x2} {y2} {conf} {int(cls)} {frame_number}\n")
 
-    # vid.release()
-    # cv2.destroyAllWindows()
+            inds = tracks[:, 7].astype('int') # float64 to int
+            keypoints = kp_dets[inds]  
 
-    bbox_holder, frames_holder, video_id = consolidate_yolo_data(file_name)
-    save_data_to_txt(bbox_holder, frames_holder, video_id)    
+            pose_plotter.plot_keypoints(image=im, keypoints=keypoints)
+            tracker.plot_results(im, show_trajectories=False)        
+         
+        cv2.imshow('BoxMOT detection', im)     
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord(' ') or key == ord('q'):
+            break
 
-    example_data = YoloDataset(os.path.join(os.getcwd(), "yolo_results_data"))
+    vid.release()
+    cv2.destroyAllWindows()
 
-    example_loader = torch.utils.data.DataLoader(example_data, batch_size=args.batch_size, shuffle=False,
-                                           pin_memory=True, sampler=None, num_workers=4)
+    # bbox_holder, frames_holder, video_id = consolidate_yolo_data(file_name)
+    # save_data_to_txt(bbox_holder, frames_holder, video_id)    
+
+    # example_data = YoloDataset(os.path.join(os.getcwd(), "yolo_results_data"))
+
+    # example_loader = torch.utils.data.DataLoader(example_data, batch_size=args.batch_size, shuffle=False,
+    #                                        pin_memory=True, sampler=None, num_workers=4)
 
     ''' 2. Create models '''
     # model, optimizer, scheduler = build_model(args)
@@ -120,24 +141,24 @@ def main(args):
     # train_intent(model, optimizer, scheduler, train_loader, val_loader, args, recorder, writer)
 
     # Load Pretrained model
-    args.tcn_kernel_size = 4
-    args.kernel_size = 8
+    # args.tcn_kernel_size = 4
+    # args.kernel_size = 8
     
-    model, _, _ = build_model(args)
-    model = nn.DataParallel(model)
-    # Assuming pth file is at the root directory for now
-    model.load_state_dict(torch.load('latest.pth'))
+    # model, _, _ = build_model(args)
+    # model = nn.DataParallel(model)
+    # # Assuming pth file is at the root directory for now
+    # model.load_state_dict(torch.load('latest.pth'))
 
-    # val_gt_file = './test_gt/val_intent_gt.json'
-    # if not os.path.exists(val_gt_file):
-    #     get_intent_gt(val_loader, val_gt_file, args)
+    # # val_gt_file = './test_gt/val_intent_gt.json'
+    # # if not os.path.exists(val_gt_file):
+    # #     get_intent_gt(val_loader, val_gt_file, args)
     
-    # Set dset to test to write results to test_gt folder for now
-    predict_intent(model, example_loader, args, dset='test')
-    # Visualise specific bbox from specific frame fed into TCN for sanity check
-    # visualise_annotations(os.path.join(os.getcwd(), "yolo_results_data", "1.txt"), 0)
-    visualise_intent(os.path.join(os.getcwd(), file_name + ".txt"),
-                    os.path.join(os.getcwd(), "test_gt", "test_intent_pred"))
+    # # Set dset to test to write results to test_gt folder for now
+    # predict_intent(model, example_loader, args, dset='test')
+    # # Visualise specific bbox from specific frame fed into TCN for sanity check
+    # # visualise_annotations(os.path.join(os.getcwd(), "yolo_results_data", "1.txt"), 0)
+    # visualise_intent(os.path.join(os.getcwd(), file_name + ".txt"),
+    #                 os.path.join(os.getcwd(), "test_gt", "test_intent_pred"))
 
     # val_accuracy = evaluate_intent(val_gt_file, args.checkpoint_path + '/results/val_intent_pred', args)
 
