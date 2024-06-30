@@ -80,10 +80,11 @@ def evaluate_traj(
     :param prediction: (n_samples x ts x 4), directly predict coordinates
     :type prediction: npt.NDArray[np.float32 | np.float64]
     :return: Dictionary of metrics measured at [0.5s, 1.0s, 1.5s] in the future.
-        `ADE`: Average Displacement Error (Based on the centre of the bounding box)
-        `FDE`: Final Displacement Error (Based on the centre of the bounding box)
-        `ARB`: Average RMSE of Bounding Box coordinates
-        `FRB`: Final RMSE of Bounding Box coordinates
+    .. hlist::
+        * `ADE`: Average Displacement Error (Based on the centre of the bounding box)
+        * `FDE`: Final Displacement Error (Based on the centre of the bounding box)
+        * `ARB`: Average RMSE of Bounding Box coordinates
+        * `FRB`: Final RMSE of Bounding Box coordinates
     :rtype: T_trajEval
     """
 

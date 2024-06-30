@@ -1,3 +1,9 @@
+"""Temporal Convolutional Attention Network (TCAN) implementation. Adapted from
+    https://github.com/haohy/TCAN/
+"""
+
+from __future__ import annotations
+from typing_extensions import override
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -9,6 +15,16 @@ from utils.cuda import *
 
 
 class AttentionBlock(nn.Module):
+    """Attention block that performs causal self-attention on the input tensor.
+
+    :param int in_channels: Number of input channels.
+    :param int key_size: Size of the key vectors.
+    :param int value_size: Size of the value vectors.
+    :param int num_heads: Number of attention heads.
+    :param int seq_length: Length of the input sequence.
+    :param float dropout: Dropout rate.
+    """
+
     def __init__(
         self,
         in_channels: int,
@@ -17,7 +33,7 @@ class AttentionBlock(nn.Module):
         num_heads: int,
         seq_length: int,
         dropout: float,
-    ):
+    ) -> None:
         super().__init__()
         self.seq_length = seq_length
         self.attention = nn.MultiheadAttention(
@@ -38,6 +54,7 @@ class AttentionBlock(nn.Module):
             self.seq_length, device=DEVICE, dtype=torch.bool
         )
 
+    @override
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         attn_output, _ = self.attention(
             x,
@@ -50,6 +67,15 @@ class AttentionBlock(nn.Module):
 
 
 class CausalSelfAttention(nn.Module):
+    """Causal self-attention block. Adapted from: https://pytorch.org/tutorials/intermediate/scaled_dot_product_attention_tutorial.html#causal-self-attention
+
+    :param int num_heads: Number of attention heads.
+    :param int embed_dimension: Dimension of the input embeddings.
+    :param bool bias: Whether to use bias in the linear layers.
+    :param bool is_causal: Whether to use causal masking.
+    :param float dropout: Dropout rate.
+    """
+
     def __init__(
         self,
         num_heads: int,
@@ -72,6 +98,7 @@ class CausalSelfAttention(nn.Module):
         # Perform causal masking
         self.is_causal = is_causal
 
+    @override
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         query_projected: torch.Tensor = self.c_attn(x)
 
@@ -111,6 +138,25 @@ class CausalSelfAttention(nn.Module):
 
 
 class TemporalAttentionBlock(nn.Module):
+    """Temporal attention block that performs causal self-attention on the input tensor.
+
+    :param int n_inputs: Number of input channels.
+    :param int n_outputs: Number of output channels.
+    :param int kernel_size: Size of the convolutional kernel.
+    :param int key_size: Size of the key vectors.
+    :param int num_sub_blocks: Number of sub-blocks in the network.
+    :param bool temp_attn: Whether to use temporal attention.
+    :param int num_heads: Number of attention heads.
+    :param bool en_res: Whether to enable residual connections.
+    :param bool conv: Whether to use convolutional layers.
+    :param int stride: Stride of the convolutional layers.
+    :param int dilation: Dilation factor of the convolutional layers.
+    :param int padding: Padding of the convolutional layers.
+    :param bool visual: Whether to use visualisation.
+    :param int seq_length: Length of the input sequence.
+    :param float dropout: Dropout rate.
+    """
+
     def __init__(
         self,
         n_inputs: int,

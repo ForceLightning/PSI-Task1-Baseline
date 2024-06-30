@@ -3,15 +3,15 @@ import numpy as np
 from utils.args import DefaultArguments
 
 
-def save_args(self, args: DefaultArguments):
+def save_args(args: DefaultArguments):
     # 3. args
-    with open(args.checkpoint_path + "/args.txt", "w") as f:
-        for arg in vars(self.args):
-            val = getattr(self.args, arg)
+    with open(args.checkpoint_path + "/args.txt", "w", encoding="utf-8") as f:
+        for arg in vars(args):
+            val = getattr(args, arg)
             if isinstance(val, str):
                 val = f"'{val}'"
             f.write("{}: {}\n".format(arg, val))
-    np.save(self.args.checkpoint_path + "/args.npy", self.args)
+    np.save(args.checkpoint_path + "/args.npy", args)
 
 
 class AverageMeter(object):

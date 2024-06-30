@@ -1,8 +1,10 @@
+"""Evaluation functions for intent, trajectory, and driving prediction.
+"""
+
 from __future__ import annotations
-from dataclasses import dataclass
 import json
 import os
-from typing import Any, Optional, TypeAlias, TypedDict
+from typing import Any, TypeAlias
 
 import numpy as np
 from numpy import typing as npt
@@ -26,6 +28,21 @@ T_intentGT: TypeAlias = dict[
         ],
     ],
 ]
+"""Intent ground truth type alias.
+
+A dictionary with the following structure:
+{
+    "Video ID": {
+        "Pedestrian ID": {
+            "Frame ID": {
+                "intent": int,
+                "intent_prob": float,
+                "disagreement": float
+            }
+        }
+    }
+}
+"""
 
 T_intentPred: TypeAlias = dict[
     str,  # Video ID
@@ -37,6 +54,20 @@ T_intentPred: TypeAlias = dict[
         ],
     ],
 ]
+"""Intent prediction type alias.
+
+A dictionary with the following structure:
+{
+    "Video ID": {
+        "Pedestrian ID": {
+            "Frame ID": {
+                "intent": int,
+                "intent_prob": float
+            }
+        }
+    }
+}
+"""
 
 T_intentPredGT: TypeAlias = T_intentPred | T_intentGT
 
@@ -48,12 +79,44 @@ T_intentEval: TypeAlias = dict[
         "confusion_matrix": npt.NDArray[np.int_ | np.float_],
     }
 ]
+"""Intent evaluation type alias.
+
+A dictionary with the following structure:
+{
+    "acc": float,
+    "f1": float,
+    "mAcc": float,
+    "confusion_matrix": np.ndarray
+}
+"""
 
 T_trajPredGT: TypeAlias = dict[
     str, dict[str, dict[str, dict[{"traj": list[list[float]]}]]]
 ]
+"""Trajectory ground truth and prediction type alias.
+
+A dictionary with the following structure:
+{
+    "Video ID": {
+        "Pedestrian ID": {
+            "Frame ID": {
+                "traj": list[list[float]]
+            }
+        }
+    }
+}
+"""
 
 T_trajSubEval: TypeAlias = dict[{"0.5": float, "1.0": float, "1.5": float}]
+"""Trajectory sub-evaluation type alias.
+
+A dictionary with the following structure:
+{
+    "0.5": float,
+    "1.0": float,
+    "1.5": float
+}
+"""
 
 T_trajEval: TypeAlias = dict[
     {
@@ -63,10 +126,32 @@ T_trajEval: TypeAlias = dict[
         "FRB": T_trajSubEval,
     }
 ]
+"""Trajectory evaluation type alias.
+
+A dictionary with the following structure:
+{
+    "ADE": T_trajSubEval,
+    "FDE": T_trajSubEval,
+    "ARB": T_trajSubEval,
+    "FRB": T_trajSubEval
+}
+"""
 
 T_drivingPredGT: TypeAlias = dict[
     str, dict[str, dict[{"speed": int, "direction": int}]]
 ]
+"""Driving ground truth and prediction type alias.
+
+A dictionary with the following structure:
+{
+    "Video ID": {
+        "Frame ID": {
+            "speed": int,
+            "direction": int
+        }
+    }
+}
+"""
 
 T_drivingEval: TypeAlias = dict[
     {
@@ -78,6 +163,18 @@ T_drivingEval: TypeAlias = dict[
         "dir_confusion_matrix": npt.NDArray[np.int_ | np.float_],
     }
 ]
+"""Driving evaluation type alias.
+
+A dictionary with the following structure:
+{
+    "speed_Acc": float,
+    "speed_mAcc": float,
+    "speed_confusion_matrix": np.ndarray,
+    "direction_Acc": float,
+    "direction_mAcc": float,
+    "dir_confusion_matrix": np.ndarray
+}
+"""
 
 
 def evaluate_intent(
@@ -111,9 +208,9 @@ def evaluate_intent(
                 gt.append(gt_intent[vid][pid][fid]["intent"])
                 pred.append(pred_intent[vid][pid][fid]["intent"])
 
-    gt: npt.NDArray[np.int_] = np.array(gt)
-    pred: npt.NDArray[np.int_] = np.array(pred)
-    res = measure_intent_prediction(gt, pred, args)
+    gt_np: npt.NDArray[np.int_] = np.array(gt)
+    pred_np: npt.NDArray[np.int_] = np.array(pred)
+    res = measure_intent_prediction(gt_np, pred_np, args)
     print("Acc: ", res["acc"])
     print("F1: ", res["f1"])
     print("mAcc: ", res["mAcc"])
@@ -144,7 +241,7 @@ def measure_intent_prediction(
         "acc": 0.0,
         "f1": 0.0,
         "mAcc": 0.0,
-        "confusion_matrix": None,
+        "confusion_matrix": None,  # type: ignore[reportAssignmentType]
     }
 
     # hard label evaluation - acc, f1
@@ -226,10 +323,11 @@ def measure_traj_prediction(
     :param DefaultArguments args: Training arguments.
 
     :returns: Dictionary of metrics measured at [0.5s, 1.0s, 1.5s] in the future.
-        `ADE`: Average Displacement Error (Based on the centre of the bounding box)
-        `FDE`: Final Displacement Error (Based on the centre of the bounding box)
-        `ARB`: Average RMSE of Bounding Box coordinates
-        `FRB`: Final RMSE of Bounding Box coordinates
+    .. hlist::
+        * `ADE`: Average Displacement Error (Based on the centre of the bounding box)
+        * `FDE`: Final Displacement Error (Based on the centre of the bounding box)
+        * `ARB`: Average RMSE of Bounding Box coordinates
+        * `FRB`: Final RMSE of Bounding Box coordinates
     :rtype: T_trajEval
     """
     print("Evaluating Trajectory ...")
@@ -333,12 +431,14 @@ def evaluate_driving(
             gt_speed.append(gt_driving[vid][fid]["speed"])
             gt_dir.append(gt_driving[vid][fid]["direction"])
 
-    gt_speed: npt.NDArray[np.int_] = np.array(gt_speed)
-    gt_dir: npt.NDArray[np.int_] = np.array(gt_dir)
-    speed_pred: npt.NDArray[np.int_] = np.array(speed_pred)
-    dir_pred: npt.NDArray[np.int_] = np.array(dir_pred)
+    gt_speed_np: npt.NDArray[np.int_] = np.array(gt_speed)
+    gt_dir_np: npt.NDArray[np.int_] = np.array(gt_dir)
+    speed_pred_np: npt.NDArray[np.int_] = np.array(speed_pred)
+    dir_pred_np: npt.NDArray[np.int_] = np.array(dir_pred)
 
-    res = measure_driving_prediction(gt_speed, gt_dir, speed_pred, dir_pred, args)
+    res = measure_driving_prediction(
+        gt_speed_np, gt_dir_np, speed_pred_np, dir_pred_np, args
+    )
     for key in [
         "speed_Acc",
         "speed_mAcc",

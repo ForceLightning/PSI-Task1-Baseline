@@ -1,10 +1,16 @@
+"""Calculates the optimal learning rate for a given model and dataset using the LR
+    Finder method.
+"""
+
+from __future__ import annotations
 import os
 from typing import Any
+from typing_extensions import override
 
 import numpy as np
 from torch import nn
 
-from data.custom_dataset import T_drivingBatch, T_drivingSample, T_intentBatch
+from data.custom_dataset import T_drivingBatch, T_intentBatch
 from data.prepare_data import get_dataloader
 from database.create_database import create_database
 from models.build_model import build_model
@@ -19,7 +25,10 @@ class TrainIterBbox(TrainDataLoaderIter):
         super().__init__(*args, **kwargs)
         self.args = ag
 
-    def inputs_labels_from_batch(self, batch_data):
+    @override
+    def inputs_labels_from_batch(
+        self, batch_data: T_intentBatch
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         return (
             batch_data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
             / self.args.image_shape[0]
@@ -35,6 +44,7 @@ class TrainIterGlobalIntent(TrainDataLoaderIter):
         super().__init__(*args, **kwargs)
         self.args = ag
 
+    @override
     def inputs_labels_from_batch(
         self,
         batch_data: dict[
@@ -74,6 +84,7 @@ class TrainIterGlobalDecision(TrainDataLoaderIter):
         super().__init__(*args, **kwargs)
         self.args = ag
 
+    @override
     def inputs_labels_from_batch(
         self, batch_data: T_drivingBatch
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -95,6 +106,7 @@ class TrainIterTransformerTraj(TrainDataLoaderIter):
         super().__init__(*args, **kwargs)
         self.args = ag
 
+    @override
     def inputs_labels_from_batch(
         self, batch_data: T_intentBatch
     ) -> tuple[tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
@@ -113,6 +125,7 @@ class TrainIterTransformerTrajPose(TrainDataLoaderIter):
         super().__init__(*args, **kwargs)
         self.args = ag
 
+    @override
     def inputs_labels_from_batch(
         self, batch_data: T_intentBatch
     ) -> tuple[tuple[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor]:
@@ -132,6 +145,7 @@ class TrainIterTransformerTrajIntentPose(TrainDataLoaderIter):
         super().__init__(*args, **kwargs)
         self.args = ag
 
+    @override
     def inputs_labels_from_batch(
         self, batch_data: T_intentBatch
     ) -> tuple[tuple[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor]:

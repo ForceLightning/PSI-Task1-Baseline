@@ -1,5 +1,10 @@
+"""Saves the embeddings of the backbone model for each frame in a video.
+"""
+
+from math import ceil
 import os
-from typing import Optional
+from typing import Any
+from typing_extensions import override
 
 import numpy as np
 import torch
@@ -13,16 +18,13 @@ from torchvision.models.detection import (
     FasterRCNN_ResNet50_FPN_V2_Weights,
 )
 from torchvision.transforms import v2
+from tqdm.auto import tqdm
 
 from data.prepare_data import get_dataloader
 from database.create_database import create_database
 from opts import get_opts
 from utils.args import DefaultArguments
-
-CUDA: bool = True if torch.cuda.is_available() else False
-DEVICE = torch.device("cuda:0" if CUDA else "cpu")
-FloatTensor = torch.cuda.BFloat16Tensor if CUDA else torch.FloatTensor
-LongTensor = torch.cuda.LongTensor if CUDA else torch.LongTensor
+from utils.cuda import *
 
 
 class ResNet50_EmbeddingsOnly(nn.Module):
@@ -32,16 +34,17 @@ class ResNet50_EmbeddingsOnly(nn.Module):
         modules = list(resnet.children())[:-1]
         self.resnet = nn.Sequential(*modules)
 
-    def forward(self, x):
-        y = self.resnet(x)
+    @override
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y: torch.Tensor = self.resnet(x)
         z = y.view(y.size(0), -1)  # flatten output of resnet
         return z
 
 
-class VideoDataset(Dataset):
-    def __init__(self, image_dir, transforms=None):
+class VideoDataset(Dataset[Any]):
+    def __init__(self, image_dir: str, transforms: v2.Compose | None = None):
         self.image_dir = image_dir
-        self.X = []
+        self.X: list[dict[str, str]] = []
         self.transforms = transforms
         self._set_transforms()
         for root, _, files in os.walk(self.image_dir):
@@ -54,7 +57,8 @@ class VideoDataset(Dataset):
                     }
                 )
 
-    def __getitem__(self, index):
+    @override
+    def __getitem__(self, index: int) -> dict[str, Any]:
         img_path = self.X[index]["path"]
         img = Image.open(img_path)
         if self.transforms is not None:
@@ -65,7 +69,7 @@ class VideoDataset(Dataset):
             "frames": int(self.X[index]["frame"]),
         }
 
-    def _set_transforms(self):
+    def _set_transforms(self) -> None:
         if self.transforms is None:
             resize_size = 256
             self.transforms = v2.Compose(
@@ -78,24 +82,42 @@ class VideoDataset(Dataset):
                 ]
             )
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.X)
 
 
+@torch.no_grad()
 def infer(
     model: nn.Module,
     backbone_name: str,
-    dl: DataLoader,
+    dl: DataLoader[Any],
     args: DefaultArguments,
 ) -> None:
-    model.eval()
-    mb = master_bar(dl)
-    for itern, data in enumerate(mb):
-        embeddings = model(torch.squeeze(data["image"]).to(DEVICE))
+    """Run inference with the backbone model and save the embeddings.
+
+    :param nn.Module model: The backbone model to use.
+    :param str backbone_name: The name of the backbone model.
+    :param DataLoader[Any]
+    :param args: DefaultArguments: The arguments to use, as defined in `args.py`.
+
+    :return: None
+    """
+    _ = model.eval()
+    iters: int = ceil(len(dl.dataset) / args.batch_size)
+    dl_iterator = tqdm(
+        enumerate(dl), total=iters, desc="Batches", position=0, leave=True
+    )
+    for data in dl_iterator:
+        embeddings: torch.Tensor = model(torch.squeeze(data["image"]).to(DEVICE))
         embeddings = embeddings.detach().cpu().numpy()
-        for i, fid in enumerate(data["frames"]):
+        for i, fid in tqdm(
+            enumerate(data["frames"]),
+            desc="Frames",
+            position=1,
+            leave=False,
+        ):
             embedding = embeddings[i]
-            video_id = data["video_id"][i]
+            video_id: str = data["video_id"][i]
             global_path = os.path.join(
                 args.dataset_root_path,
                 "features",
@@ -103,14 +125,21 @@ def infer(
                 "global_feats",
                 video_id,
             )
-            mb.main_bar.comment = f"{itern}/{len(dl)}, {global_path}/{fid:03d}.npy"
+            dl_iterator.write(f"{global_path}/{fid:03d}.npy")
             if not os.path.exists(global_path):
                 os.makedirs(global_path)
             with open(f"{global_path}/{fid:03d}.npy", "wb") as f:
                 np.save(f, embedding)
 
 
-def main(backbone: str, args: DefaultArguments):
+def main(backbone: str, args: DefaultArguments) -> None:
+    """Main function for backbone inference.
+
+    :param str backbone: The backbone model to use.
+    :param DefaultArguments args: The arguments to use, as defined in `args.py`.
+
+    :return: None
+    """
     if not os.path.exists(os.path.join(args.database_path, args.database_file)):
         create_database(args)
     else:

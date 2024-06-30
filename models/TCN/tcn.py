@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing_extensions import override
 import numpy as np
 import torch
 from torch import nn
@@ -8,19 +10,44 @@ from utils.cuda import *
 
 
 class Chomp1d(nn.Module):
-    def __init__(self, chomp_size):
-        super(Chomp1d, self).__init__()
+    """Removes the last `chomp_size` elements from the input tensor.
+
+    :param int chomp_size: Number of elements to remove from the input tensor.
+    """
+
+    def __init__(self, chomp_size: int):
+        super().__init__()
         self.chomp_size = chomp_size
 
-    def forward(self, x):
+    @override
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x[:, :, : -self.chomp_size].contiguous()
 
 
 class TemporalBlock(nn.Module):
+    """A single temporal block that consists of two dilated causal convolutions with a
+        residual connection.
+
+    :param int n_inputs: Number of input channels.
+    :param int n_outputs: Number of output channels.
+    :param int kernel_size: Size of the convolutional kernel.
+    :param int stride: Stride of the convolutional kernel.
+    :param int dilation: Dilation factor of the convolutional kernel.
+    :param int padding: Padding of the convolutional kernel.
+    :param float dropout: Dropout rate.
+    """
+
     def __init__(
-        self, n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout=0.2
-    ):
-        super(TemporalBlock, self).__init__()
+        self,
+        n_inputs: int,
+        n_outputs: int,
+        kernel_size: int,
+        stride: int,
+        dilation: int,
+        padding: int,
+        dropout: float = 0.2,
+    ) -> None:
+        super().__init__()
         self.conv1 = weight_norm(
             nn.Conv1d(
                 n_inputs,
@@ -66,40 +93,59 @@ class TemporalBlock(nn.Module):
         self.init_weights()
 
     def init_weights(self):
+        """Initializes the weights of the convolutional layers with a normal
+        distribution.
+        """
         self.conv1.weight.data.normal_(0, 0.01)
         self.conv2.weight.data.normal_(0, 0.01)
         if self.downsample is not None:
             self.downsample.weight.data.normal_(0, 0.01)
 
-    def forward(self, x):
-        out = self.net(x)
+    @override
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out: torch.Tensor = self.net(x)
         res = x if self.downsample is None else self.downsample(x)
         return self.relu(out + res)
 
 
 class TemporalSkipBlock(TemporalBlock):
+    """A single temporal block that consists of two dilated causal convolutions with a
+        residual connection and skip connections.
+
+    :param int n_inputs: Number of input channels.
+    :param int n_outputs: Number of output channels.
+    :param int kernel_size: Size of the convolutional kernel.
+    :param int stride: Stride of the convolutional kernel.
+    :param int dilation: Dilation factor of the convolutional kernel.
+    :param int padding: Padding of the convolutional kernel.
+    :param float dropout: Dropout rate.
+    :param bool use_skips: Whether to use skip connections.
+    """
+
     def __init__(
         self,
-        n_inputs,
-        n_outputs,
-        kernel_size,
-        stride,
-        dilation,
-        padding,
-        dropout=0.2,
-        use_skips=False,
-    ):
+        n_inputs: int,
+        n_outputs: int,
+        kernel_size: int,
+        stride: int,
+        dilation: int,
+        padding: int,
+        dropout: float = 0.2,
+        use_skips: bool = False,
+    ) -> None:
         super().__init__(
             n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout=dropout
         )
         self.use_skips = use_skips
         self.downsample = nn.Conv1d(n_inputs, n_outputs, 1)
 
-    def init_weights(self):
-        super().init_weights()
-
-    def forward(self, x):
+    @override
+    def forward(
+        self, x: torch.Tensor | tuple[torch.Tensor, torch.Tensor]
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         if self.use_skips:
+            out: torch.Tensor
+            res: torch.Tensor
             if type(x) == tuple:
                 x, skip = x[0], x[1]
                 out = self.net(x)
@@ -116,21 +162,31 @@ class TemporalSkipBlock(TemporalBlock):
 
 
 class TemporalConvNet(nn.Module):
+    """A Temporal Convolutional Network (TCN) that consists of multiple temporal blocks.
+
+    :param int num_inputs: Number of input channels.
+    :param num_channels: List of the number of channels for each temporal block.
+    :type num_channels: list[int]
+    :param int kernel_size: Size of the convolutional kernel.
+    :param float dropout: Dropout rate.
+    :param bool use_skip_connections: Whether to use skip connections.
+    """
+
     def __init__(
         self,
-        num_inputs,
-        num_channels,
-        kernel_size=2,
-        dropout=0.2,
-        use_skip_connections=False,
+        num_inputs: int,
+        num_channels: list[int],
+        kernel_size: int = 2,
+        dropout: float = 0.2,
+        use_skip_connections: bool = False,
     ):
-        super(TemporalConvNet, self).__init__()
-        layers = []
+        super().__init__()
+        layers: list[TemporalSkipBlock | TemporalBlock] = []
 
         # Create temporal convolutional layers based on the number of channels
         num_levels = len(num_channels)
         for i in range(num_levels):
-            dilation_size = 2**i
+            dilation_size: int = 2**i
             in_channels = num_inputs if i == 0 else num_channels[i - 1]
             out_channels = num_channels[i]
 
@@ -163,5 +219,6 @@ class TemporalConvNet(nn.Module):
 
         self.network = nn.Sequential(*layers)
 
-    def forward(self, x):
+    @override
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.network(x)

@@ -7,12 +7,84 @@ from numpy import typing as npt
 import torch
 from torch.utils.tensorboard.writer import SummaryWriter
 
+from data.custom_dataset import T_intentBatch
 from utils.args import DefaultArguments
 from utils.metrics import evaluate_driving, evaluate_intent, evaluate_traj
 from utils.utils import AverageMeter
 
 
 class RecordResults:
+    """Record training and evaluation results for intent, trajectory, and driving.
+
+    :param DefaultArguments args: The arguments to use, as defined in `args.py`.
+    :param bool intent: Whether to record intent results.
+    :param bool traj: Whether to record trajectory results.
+    :param bool driving: Whether to record driving results.
+    :param bool reason: Whether to record reason results.
+    :param bool evidential: Whether to record evidential results.
+    :param bool extract_prediction: Whether to extract predictions.
+
+    :ivar DefaultArguments args: The arguments to use, as defined in `args.py`.
+    :ivar bool save_output: Whether to save the output.
+    :ivar bool intent: Whether to record intent results.
+    :ivar bool traj: Whether to record trajectory results.
+    :ivar bool driving: Whether to record driving results.
+    :ivar bool reason: Whether to record reason results.
+    :ivar bool evidential: Whether to record evidential results.
+
+    :ivar all_train_results: The results of all training epochs.
+    :vartype all_train_results: dict[str, Any]
+    :ivar all_eval_results: The results of all evaluation epochs.
+    :vartype all_eval_results: dict[str, Any]
+    :ivar all_val_results: The results of all validation epochs.
+    :vartype all_val_results: dict[str, Any]
+
+    :ivar str result_path: The path to save the results.
+    :ivar AverageMeter log_loss_total: The total loss log.
+    :ivar AverageMeter log_loss_intent: The intent loss log.
+    :ivar AverageMeter log_loss_traj: The trajectory loss log.
+    :ivar AverageMeter log_loss_driving_speed: The driving speed loss log.
+    :ivar AverageMeter log_loss_driving_dir: The driving direction loss log.
+
+    :ivar intention_gt: The ground truth intention.
+    :vartype intention_gt: list[npt.NDArray[np.float_]]
+    :ivar intention_prob_gt: The ground truth intention probability.
+    :vartype intention_prob_gt: list[npt.NDArray[np.float_]]
+    :ivar intention_pred: The predicted intention.
+    :vartype intention_pred: list[npt.NDArray[np.float_]]
+    :ivar intention_rsn_gt: The ground truth reason intention.
+    :vartype intention_rsn_gt: list[npt.NDArray[np.float_]]
+    :ivar intention_rsn_pred: The predicted reason intention.
+    :vartype intention_rsn_pred: list[npt.NDArray[np.float_]]
+
+    :ivar list[str] frames_list: The list of frames.
+    :ivar list[str] video_list: The list of videos.
+    :ivar list[str] ped_list: The list of pedestrians.
+
+    :ivar traj_gt: The ground truth trajectory.
+    :vartype traj_gt: list[npt.NDArray[np.float_]]
+    :ivar traj_ori_gt: The original trajectory.
+    :vartype traj_ori_gt: list[npt.NDArray[np.float_]]
+    :ivar traj_pred: The predicted trajectory.
+    :vartype traj_pred: list[npt.NDArray[np.float_]]
+
+    :ivar driving_speed_gt: The ground truth driving speed.
+    :vartype driving_speed_gt: list[npt.NDArray[np.float_]]
+    :ivar driving_speed_pred: The predicted driving speed.
+    :vartype driving_speed_pred: list[npt.NDArray[np.float_]]
+    :ivar driving_dir_gt: The ground truth driving direction.
+    :vartype driving_dir_gt: list[npt.NDArray[np.float_]]
+    :ivar driving_dir_pred: The predicted driving direction.
+    :vartype driving_dir_pred: list[npt.NDArray[np.float_]]
+
+    :ivar train_epoch_results: The results of the training epoch.
+    :vartype train_epoch_results: dict[str, Any]
+    :ivar eval_epoch_results: The results of the evaluation epoch.
+    :vartype eval_epoch_results: dict[str, Any]
+    :ivar int epoch: The epoch number.
+    :ivar int nitern: The number of iterations.
+    """
+
     def __init__(
         self,
         args: DefaultArguments,
@@ -83,6 +155,11 @@ class RecordResults:
         self.nitern: int
 
     def log_args(self, args: DefaultArguments):
+        """Log the arguments to a file.
+
+        :param DefaultArguments args: The arguments to use, as defined in `args.py`.
+        :return: None
+        """
         args_file = os.path.join(self.args.checkpoint_path, "args.txt")
         with open(args_file, "a") as f:
             json.dump(args.__dict__, f, indent=2)
@@ -94,6 +171,12 @@ class RecordResults:
         """
 
     def train_epoch_reset(self, epoch: int, nitern: int):
+        """Reset metrics for the training epoch.
+
+        :param int epoch: The epoch number.
+        :param int nitern: The number of iterations.
+        :return: None
+        """
         # 1. initialize log info
         # (1.1) loss log list
         self.log_loss_total = AverageMeter()
@@ -122,13 +205,27 @@ class RecordResults:
     def train_intent_batch_update(
         self,
         itern: int,
-        data: dict[str, torch.Tensor],
+        data: T_intentBatch,
         intent_gt: npt.NDArray[np.float_],
         intent_prob_gt: npt.NDArray[np.float_],
         intent_prob: npt.NDArray[np.float_],
         loss: float,
         loss_intent: float,
     ):
+        """Update the training batch results for intent.
+
+        :param int itern: The iteration number.
+        :param data: The training batch data.
+        :type data: T_intentBatch
+        :param intent_gt: The ground truth intent.
+        :type intent_gt: npt.NDArray[np.float_]
+        :param intent_prob_gt: The ground truth intent probability.
+        :type intent_prob_gt: npt.NDArray[np.float_]
+        :param intent_prob: The predicted intent.
+        :type intent_prob: npt.NDArray[np.float_]
+        :param float loss: The total loss.
+        :param float loss_intent: The intent loss.
+        """
         # 3. Update training info
         # (3.1) loss log list
         bs = intent_gt.shape[0]
@@ -159,6 +256,11 @@ class RecordResults:
                 )
 
     def train_intent_epoch_calculate(self, writer: SummaryWriter | None = None):
+        """Calculate the training epoch results for intent.
+
+        :param SummaryWriter writer: The tensorboard writer.
+        :return: None
+        """
         intent_results = None
         print("----------- Training results: ------------------------------------ ")
         if self.intention_pred:

@@ -1,37 +1,28 @@
-from datetime import datetime
+from __future__ import annotations
 import json
 import os
-import pickle
 from typing import Any
 
-import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
 
 from data.prepare_data import get_dataloader
 from database.create_database import create_database
-from models.build_model import build_model
-from opts import get_opts
-from eval import test_intent, validate_intent
-from train import train_intent
 from utils.args import DefaultArguments
-from utils.log import RecordResults
 
 
-def main(args):
-    writer = SummaryWriter(args.checkpoint_path)
-    recorder = RecordResults(args)
-    """ 1. Load database """
+def main(args: DefaultArguments):
+    """1. Load database"""
     if not os.path.exists(
         os.path.join(args.database_path, "intent_database_train.pkl")
     ):
         create_database(args)
     else:
         print("Database exists!")
-    train_loader, val_loader, test_loader = get_dataloader(args)
+    _, val_loader, test_loader = get_dataloader(args)
     get_intent_gt(val_loader, "../test_gt/val_intent_gt.json", args)
-    get_intent_gt(test_loader, "../test_gt/test_intent_gt.json", args)
+    if test_loader:
+        get_intent_gt(test_loader, "../test_gt/test_intent_gt.json", args)
 
 
 def get_intent_gt(

@@ -1,3 +1,6 @@
+"""Sets up CUDA device and data types for PyTorch if available.
+"""
+
 import torch
 
 CUDA = True if torch.cuda.is_available() else False

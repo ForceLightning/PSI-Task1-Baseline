@@ -1,16 +1,22 @@
+"""PyTorch Learning Rate Finder. Adapted from https://github.com/davidtvs/pytorch-lr-finder/
+"""
+
+from __future__ import annotations
+from collections.abc import Iterable
 import copy
 import os
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 from packaging import version
 import torch
+from torch import GradScaler, nn
 from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader
 from tqdm.autonotebook import tqdm
-from transformers.models.time_series_transformer.modeling_time_series_transformer import (
-    Seq2SeqTSPredictionOutput,
-)
+from transformers.modeling_outputs import Seq2SeqTSPredictionOutput
+from typing_extensions import override
 
 PYTORCH_VERSION = version.parse(torch.__version__)
 
@@ -32,7 +38,7 @@ except ImportError:
 
 
 class DataLoaderIter(object):
-    def __init__(self, data_loader):
+    def __init__(self, data_loader: DataLoader[Any]) -> None:
         self.data_loader = data_loader
         self._iterator = iter(data_loader)
 
@@ -40,7 +46,9 @@ class DataLoaderIter(object):
     def dataset(self):
         return self.data_loader.dataset
 
-    def inputs_labels_from_batch(self, batch_data):
+    def inputs_labels_from_batch(
+        self, batch_data: Iterable[Any] | dict[str, Iterable[Any]]
+    ):
         if not isinstance(batch_data, list) and not isinstance(batch_data, tuple):
             raise ValueError(
                 "Your batch type is not supported: {}. Please inherit from "
@@ -61,10 +69,11 @@ class DataLoaderIter(object):
 
 
 class TrainDataLoaderIter(DataLoaderIter):
-    def __init__(self, data_loader, auto_reset=True):
+    def __init__(self, data_loader: DataLoader[Any], auto_reset: bool = True):
         super().__init__(data_loader)
         self.auto_reset = auto_reset
 
+    @override
     def __next__(self):
         try:
             batch = next(self._iterator)
@@ -100,17 +109,19 @@ class ValDataLoaderIter(DataLoaderIter):
         ```
     """
 
-    def __init__(self, data_loader):
+    def __init__(self, data_loader: DataLoader[Any]):
         super().__init__(data_loader)
         self.run_limit = len(self.data_loader)
         self.run_counter = 0
 
+    @override
     def __iter__(self):
         if self.run_counter >= self.run_limit:
             self._iterator = iter(self.data_loader)
             self.run_counter = 0
         return self
 
+    @override
     def __next__(self):
         self.run_counter += 1
         return super(ValDataLoaderIter, self).__next__()
@@ -159,15 +170,15 @@ class LRFinder(object):
 
     def __init__(
         self,
-        model,
-        optimizer,
-        criterion,
-        device=None,
-        memory_cache=True,
-        cache_dir=None,
-        amp_backend=None,
-        amp_config=None,
-        grad_scaler=None,
+        model: nn.Module,
+        optimizer: torch.optim.Optimizer,
+        criterion: nn.Module,
+        device: torch.device | str | None = None,
+        memory_cache: bool = True,
+        cache_dir: str | None = None,
+        amp_backend: str | None = None,
+        amp_config: dict[str, Any] | None = None,
+        grad_scaler: GradScaler | None = None,
     ):
         # Check if the optimizer is already attached to a scheduler
         self.optimizer = optimizer
@@ -175,7 +186,7 @@ class LRFinder(object):
 
         self.model = model
         self.criterion = criterion
-        self.history = {"lr": [], "loss": []}
+        self.history: dict[str, list[float]] = {"lr": [], "loss": []}
         self.best_loss = None
         self.memory_cache = memory_cache
         self.cache_dir = cache_dir
@@ -214,16 +225,16 @@ class LRFinder(object):
 
     def range_test(
         self,
-        train_loader,
-        val_loader=None,
-        start_lr=None,
-        end_lr=10,
-        num_iter=100,
-        step_mode="exp",
-        smooth_f=0.05,
-        diverge_th=5,
-        accumulation_steps=1,
-        non_blocking_transfer=True,
+        train_loader: DataLoader[Any] | TrainDataLoaderIter,
+        val_loader: DataLoader[Any] | ValDataLoaderIter | None = None,
+        start_lr: float | None = None,
+        end_lr: float = 10,
+        num_iter: int = 100,
+        step_mode: str = "exp",
+        smooth_f: float = 0.05,
+        diverge_th: int = 5,
+        accumulation_steps: int = 1,
+        non_blocking_transfer: bool = True,
     ):
         """Performs the learning rate range test.
 
@@ -378,7 +389,7 @@ class LRFinder(object):
 
         print("Learning rate search finished. See the graph with {finder_name}.plot()")
 
-    def _set_learning_rate(self, new_lrs):
+    def _set_learning_rate(self, new_lrs: float | list[float]):
         if not isinstance(new_lrs, list):
             new_lrs = [new_lrs] * len(self.optimizer.param_groups)
         if len(new_lrs) != len(self.optimizer.param_groups):
@@ -663,7 +674,7 @@ class StateCacher(object):
 
         self.cached = {}
 
-    def store(self, key, state_dict):
+    def store(self, key: str, state_dict: dict[Any, Any]):
         if self.in_memory:
             self.cached.update({key: copy.deepcopy(state_dict)})
         else:

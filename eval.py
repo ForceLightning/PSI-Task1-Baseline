@@ -8,8 +8,6 @@ import torch
 from torch import nn
 from torch.utils.tensorboard.writer import SummaryWriter
 from torch.utils.data import DataLoader
-from transformers import TimeSeriesTransformerModel
-from transformers.modeling_outputs import SampleTSPredictionOutput
 
 from models.traj_modules.model_transformer_traj_bbox import TransformerTrajBbox
 from utils.args import DefaultArguments
@@ -24,7 +22,19 @@ def validate_intent(
     args: DefaultArguments,
     recorder: RecordResults,
     writer: SummaryWriter,
-):
+) -> RecordResults:
+    """Validate the intention model.
+
+    :param int epoch: Current epoch.
+    :param nn.Module model: Model to validate.
+    :param DataLoader[Any] dataloader: DataLoader for the dataset.
+    :param DefaultArguments args: Arguments for the model.
+    :param RecordResults recorder: Recorder for the results.
+    :param SummaryWriter writer: Tensorboard writer object.
+
+    :return: Recorder for the results.
+    :rtype: RecordResults
+    """
     model.eval()
     niters = len(dataloader)
     for itern, data in enumerate(dataloader):
@@ -67,6 +77,18 @@ def test_intent(
     recorder: RecordResults,
     writer: SummaryWriter,
 ) -> RecordResults:
+    """Test the intention model.
+
+    :param int epoch: Current epoch.
+    :param nn.Module model: Model to test.
+    :param DataLoader[Any] dataloader: DataLoader for the dataset.
+    :param DefaultArguments args: Arguments for the model.
+    :param RecordResults recorder: Recorder for the results.
+    :param SummaryWriter writer: Tensorboard writer object.
+
+    :return: Recorder for the results.
+    :rtype: RecordResults
+    """
     model.eval()
     niters = len(dataloader)
     recorder.eval_epoch_reset(epoch, niters)
@@ -104,6 +126,15 @@ def predict_intent(
     args: DefaultArguments,
     dset: str = "test",
 ) -> None:
+    """Predict and save prediction of intention for each sample in the dataset.
+
+    :param nn.Module model: Model to predict intention.
+    :param DataLoader[Any] dataloader: DataLoader for the dataset.
+    :param DefaultArguments args: Arguments for the model.
+    :param str dset: Dataset to predict intention.
+
+    :return: None
+    """
     _ = model.eval()
     dt = {}
     for itern, data in enumerate(dataloader):
@@ -146,6 +177,19 @@ def validate_traj(
     writer: SummaryWriter,
     criterion: nn.Module,
 ) -> float:
+    """Validate the trajectory model.
+
+    :param int epoch: Current epoch.
+    :param nn.Module model: Model to validate.
+    :param DataLoader[Any] dataloader: DataLoader for the dataset.
+    :param DefaultArguments args: Arguments for the model.
+    :param RecordResults recorder: Recorder for the results.
+    :param SummaryWriter writer: Tensorboard writer object.
+    :param nn.Module criterion: Loss function for the model.
+
+    :return: Validation loss.
+    :rtype: float
+    """
     _ = model.eval()
     niters: int = len(dataloader)
     num_samples: int = len(dataloader.dataset)
@@ -166,7 +210,9 @@ def validate_traj(
             old_num_parallel_samples = inner_model.config.num_parallel_samples
             inner_model.config.num_parallel_samples = 1
             traj_pred = inner_model.generate(data)
-            val_loss = criterion(traj_pred, traj_gt).item()
+            val_loss = criterion(
+                traj_pred / args.image_shape[0], traj_gt / args.image_shape[0]
+            ).item()
             inner_model.config.num_parallel_samples = old_num_parallel_samples
         else:
             traj_pred = model(data) / args.image_shape[0]
@@ -207,6 +253,15 @@ def predict_traj(
     args: DefaultArguments,
     dset: str = "test",
 ) -> None:
+    """Predict and save prediction of trajectory for each sample in the dataset.
+
+    :param nn.Module model: Model to predict trajectory.
+    :param DataLoader[Any] dataloader: DataLoader for the dataset.
+    :param DefaultArguments args: Arguments for the model.
+    :param str dset: Dataset to predict trajectory.
+
+    :return: None
+    """
     _ = model.eval()
     dt = {}
     for itern, data in enumerate(dataloader):
@@ -249,6 +304,15 @@ def get_test_traj_gt(
     args: DefaultArguments,
     dset: str = "test",
 ) -> None:
+    """Get ground truth trajectory for each sample in the dataset.
+
+    :param nn.Module model: Model to predict driving decision.
+    :param DataLoader[Any] dataloader: DataLoader for the dataset.
+    :param DefaultArguments args: Arguments for the model.
+    :param str dset: Dataset to predict driving decision.
+
+    :return: None
+    """
     _ = model.eval()
     gt = {}
     for data in dataloader:
@@ -290,7 +354,20 @@ def validate_driving(
     recorder: RecordResults,
     writer: SummaryWriter,
     criterion: nn.Module,
-):
+) -> float:
+    """Validate the driving decision model.
+
+    :param int epoch: Current epoch.
+    :param nn.Module model: Model to validate.
+    :param DataLoader[Any] dataloader: DataLoader for the dataset.
+    :param DefaultArguments args: Arguments for the model.
+    :param RecordResults recorder: Recorder for the results.
+    :param SummaryWriter writer: Tensorboard writer object.
+    :param nn.Module criterion: Loss function for the model.
+
+    :return: Validation loss.
+    :rtype: float
+    """
     print(f"Validate ...")
     model.eval()
     niters = len(dataloader)
@@ -331,7 +408,21 @@ def validate_driving(
 
 
 @torch.no_grad()
-def predict_driving(model, dataloader, args, dset="test"):
+def predict_driving(
+    model: nn.Module,
+    dataloader: DataLoader[Any],
+    args: DefaultArguments,
+    dset: str = "test",
+) -> None:
+    """Predict and save prediction of driving decision for each sample in the dataset.
+
+    :param nn.Module model: Model to predict driving decision.
+    :param DataLoader[Any] dataloader: DataLoader for the dataset.
+    :param DefaultArguments args: Arguments for the model.
+    :param str dset: Dataset to predict driving decision.
+
+    :return: None
+    """
     print(f"Predict and save prediction of {dset} set...")
     model.eval()
     dt = {}

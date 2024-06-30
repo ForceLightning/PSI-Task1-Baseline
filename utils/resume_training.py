@@ -1,3 +1,6 @@
+"""Contains the `ResumeTrainingInfo` class for resuming training from a checkpoint.
+"""
+
 from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass
@@ -7,7 +10,6 @@ from typing import Any
 
 import torch
 from torch import nn
-from typing_extensions import Self
 
 
 @dataclass

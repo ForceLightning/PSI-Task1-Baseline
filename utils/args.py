@@ -1,3 +1,6 @@
+"""Arguments and model options for training.
+"""
+
 import os
 from typing import Any, Literal, TypedDict
 from dataclasses import dataclass, field
