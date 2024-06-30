@@ -10,15 +10,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import cv2
+import mediapipe as mp
 import numpy as np
 import torch
 import torch.nn as nn
+from boxmot import BoTSORT, BYTETracker, DeepOCSORT
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 from sklearn.model_selection import ParameterSampler
 from torch.utils.tensorboard.writer import SummaryWriter
 from ultralytics import YOLO
 from yolo_tracking.boxmot.utils import ROOT
 from yolo_tracking.tracking.track import run
 
+from data.custom_dataset import YoloDataset
 from data.prepare_data import (
     get_dataloader,
     get_video_dimensions,
@@ -35,6 +41,12 @@ from utils.args import DefaultArguments
 from utils.evaluate_results import evaluate_driving, evaluate_intent, evaluate_traj
 from utils.get_test_intent_gt import get_intent_gt, get_test_driving_gt
 from utils.log import RecordResults
+from utils.plotting import (
+    PosePlotter,
+    draw_landmarks_on_image,
+    overlay,
+    road_lane_detection,
+)
 
 
 def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
@@ -58,7 +70,8 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
         fp16=False,
     )
     # If video source is from val
-    # args.source = os.path.join(os.getcwd(), "PSI_Videos", "videos", "video_0120.mp4")
+    args.source = os.path.join(os.getcwd(), "PSI_Videos", "videos", "video_0131.mp4")
+    file_name = args.source.split("\\")[-1].split(".")[0]
     width, height = get_video_dimensions(args.source)
     run(args)
 
@@ -89,6 +102,74 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
         num_workers=0,
     )
 
+    yolo = YOLO("yolov8s-pose.pt")
+    tracker = BoTSORT(
+        model_weights=Path("osnet_x0_25_msmt17.pt"), device="cuda:0", fp16=True
+    )
+
+    pose_plotter = PosePlotter()
+
+    vid = cv2.VideoCapture(args.source)
+
+    # frame_number = 0
+    #
+    # while True:
+    #     ret, im = vid.read()
+    #
+    #     if not ret :
+    #         break
+    #
+    #     # Increment frame number
+    #     frame_number += 1
+    #     result = model.predict(im, verbose=False, classes=[0], conf=0.15)
+    #     dets = []
+    #     kp_dets = []
+    #     result = result[0]
+    #     # im = result.plot()
+    #
+    #     for k in result.keypoints:
+    #         conf = k.conf
+    #         kp = k.data # x, y, visibility - xy non-normalized
+    #         kp_dets.append(kp.tolist())
+    #
+    #     for box in result.boxes:
+    #         cls = int(box.cls[0].item())
+    #         cords = box.xyxy[0].tolist()
+    #         conf = box.conf[0].item()
+    #         id = box.id
+    #         dets.append([cords[0], cords[1], cords[2], cords[3], conf, cls])
+    #
+    #     dets = np.array(dets)
+    #     kp_dets = np.array(kp_dets)
+    #
+    #     if len(dets) == 0:
+    #         dets = np.empty((0, 6))
+    #
+    #     tracks = tracker.update(dets, im)
+    #     if tracks.shape[0] != 0:
+    #     #     x1 = tracks[0][0]
+    #     #     y1 = tracks[0][1]
+    #     #     x2 = tracks[0][2]
+    #     #     y2 = tracks[0][3]
+    #     #     id = tracks[0][4]
+    #     #     conf = tracks[0][5]
+    #     #     cls = tracks[0][6]
+    #     #     with open(file_name + ".txt", 'a') as f:
+    #     #         f.write(f"{int(id)} {x1} {y1} {x2} {y2} {conf} {int(cls)} {frame_number}\n")
+    #
+    #         inds = tracks[:, 7].astype('int') # float64 to int
+    #         keypoints = kp_dets[inds]
+    #
+    #         pose_plotter.plot_keypoints(image=im, keypoints=keypoints)
+    #         tracker.plot_results(im, show_trajectories=False)
+    #
+    #     cv2.imshow('BoxMOT detection', im)
+    #     key = cv2.waitKey(1) & 0xFF
+    #     if key == ord(' ') or key == ord('q'):
+    #         break
+
+    vid.release()
+    cv2.destroyAllWindows()
     """ 2. Create models """
     model, optimizer, scheduler = build_model(args)
     if args.compile_model:
