@@ -1,16 +1,16 @@
 import json
-from math import ceil
 import os
+from math import ceil
 from typing import Any
-from typing_extensions import Literal
 
 import numpy as np
-from numpy import typing as npt
 import torch
+from numpy import typing as npt
 from torch import nn
-from torch.utils.tensorboard.writer import SummaryWriter
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm.auto import tqdm
+from typing_extensions import Literal
 
 from models.traj_modules.model_transformer_traj_bbox import TransformerTrajBbox
 from utils.args import DefaultArguments
