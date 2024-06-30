@@ -48,25 +48,27 @@ def main(args):
     args.source = os.path.join(os.getcwd(), "PSI_Videos", "videos", "video_0131.mp4")
     file_name = args.source.split("\\")[-1].split(".")[0]
     
-    model = YOLO("yolov8s-pose.pt")
+    model = YOLO("yolov8s-seg.pt")
     # tracker = DeepOCSORT(
     # model_weights=Path('osnet_x0_25_msmt17.pt'), # which ReID model to use
     # device='cuda:0',
     # fp16=False,
     # )
-    # tracker = BYTETracker()
-    tracker = BoTSORT(
-    model_weights=Path('osnet_x0_25_msmt17.pt'), # which ReID model to use
-    device='cuda:0',
-    fp16=True,
-    )
+    tracker = BYTETracker()
+    # tracker = BoTSORT(
+    # model_weights=Path('osnet_x0_25_msmt17.pt'), # which ReID model to use
+    # device='cuda:0',
+    # fp16=True,
+    # )
     pose_plotter = PosePlotter()
-      
-    """Using YOLO POSE"""
+
+    """
+    Segmentation
+    """
     vid = cv2.VideoCapture(args.source)
-    
+
     frame_number = 0
-    
+
     while True:
         ret, im = vid.read()
 
@@ -75,26 +77,35 @@ def main(args):
         
         # Increment frame number
         frame_number += 1
-        result = model.predict(im, verbose=False, classes=[0], conf=0.15)
+        
+        h, w, _ = im.shape
+        results = model.predict(im, verbose=False, classes=[0], conf=0.45)
+        # annotated_frame = result[0].plot()
+        # cv2.imshow("YOLO", annotated_frame)
+        # key = cv2.waitKey(1) & 0xFF
+        # if key == ord(' ') or key == ord('q'):
+        #     break
         dets = []
-        kp_dets = []
-        result = result[0]
-        # im = result.plot()  
-
-        for k in result.keypoints:
-            conf = k.conf
-            kp = k.data # x, y, visibility - xy non-normalized
-            kp_dets.append(kp.tolist())
-
-        for box in result.boxes:
-            cls = int(box.cls[0].item())
-            cords = box.xyxy[0].tolist()
-            conf = box.conf[0].item()
-            id = box.id
-            dets.append([cords[0], cords[1], cords[2], cords[3], conf, cls])
+        masks_det = []
+        for r in results:
+            boxes = r.boxes 
+            masks = r.masks 
+        
+        if masks is not None:
+            masks = masks.data.cpu()
+            for seg in masks.data.cpu().numpy():
+                seg = cv2.resize(seg, (w, h))
+                masks_det.append(seg)
+            
+            for box in boxes:
+                cls = int(box.cls[0].item())
+                cords = box.xyxy[0].tolist()
+                conf = box.conf[0].item()
+                id = box.id
+                dets.append([cords[0], cords[1], cords[2], cords[3], conf, cls])
                 
         dets = np.array(dets)
-        kp_dets = np.array(kp_dets)
+        masks_det = np.array(masks_det)
 
         if len(dets) == 0:
             dets = np.empty((0, 6))
@@ -112,11 +123,29 @@ def main(args):
         #         f.write(f"{int(id)} {x1} {y1} {x2} {y2} {conf} {int(cls)} {frame_number}\n")
 
             inds = tracks[:, 7].astype('int') # float64 to int
-            keypoints = kp_dets[inds]  
+            
+            masks = masks_det[inds]  
+            
+            for i, j in zip(tracks, masks):
+                x1 = i[0]
+                y1 = i[1]
+                x2 = i[2]
+                y2 = i[3]
+                id = i[4]
+                conf = i[5]
+                cls = i[6]
+                mask = j 
+                
+                with open(file_name + ".txt", 'a') as f:
+                    f.write(f"{int(id)} {x1} {y1} {x2} {y2} {conf} {int(cls)} {mask} {frame_number}\n")
 
-            pose_plotter.plot_keypoints(image=im, keypoints=keypoints)
-            tracker.plot_results(im, show_trajectories=False)        
-         
+            for m in masks:
+                seg = cv2.resize(m, (w, h))     
+                im = overlay(im, seg, (0, 0, 255), 0.4)
+           
+            tracker.plot_results(im, show_trajectories=False)
+            
+        # break on pressing q or space
         cv2.imshow('BoxMOT detection', im)     
         key = cv2.waitKey(1) & 0xFF
         if key == ord(' ') or key == ord('q'):
@@ -124,6 +153,7 @@ def main(args):
 
     vid.release()
     cv2.destroyAllWindows()
+
 
     # bbox_holder, frames_holder, video_id = consolidate_yolo_data(file_name)
     # save_data_to_txt(bbox_holder, frames_holder, video_id)    
