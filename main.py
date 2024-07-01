@@ -46,11 +46,46 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
 
     """ 2. Create models """
     model, optimizer, scheduler = build_model(args)
+    if args.compile_model:
+        model = torch.compile(
+            model, options={"triton.cudagraphs": True}, fullgraph=True
+        )
     model = nn.DataParallel(model)
     metrics = {}
 
     # ''' 3. Train '''
     val_score, test_acc = 0.0, 0.0
+    prof: torch.profiler.profile | None = None
+    if args.profile_execution:
+        if not os.path.exists(os.path.join(args.checkpoint_path, "log")):
+            os.makedirs(os.path.join(args.checkpoint_path, "log"))
+
+        def trace_handler(prof: torch.profiler.profile):
+            prof.export_chrome_trace(
+                os.path.join(
+                    args.checkpoint_path,
+                    "log",
+                    f"profiling_results_{prof.step_num}.json",
+                )
+            )
+            torch.profiler.tensorboard_trace_handler(
+                os.path.join(args.checkpoint_path, "log")
+            )
+
+        prof = torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            record_shapes=True,
+            profile_memory=True,
+            schedule=torch.profiler.schedule(
+                wait=1, warmup=1, active=2, repeat=1, skip_first=8
+            ),
+            on_trace_ready=trace_handler,
+        )
+        prof.start()
+
     match args.task_name:
         case "ped_intent":
             train_intent(
@@ -62,8 +97,11 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
                 args,
                 recorder,
                 writer,
+                prof,
             )
-            val_gt_file = "./test_gt/val_intent_gt.json"
+            val_gt_file = os.path.join(
+                args.dataset_root_path, "test_gt/val_intent_gt.json"
+            )
             if not os.path.exists(val_gt_file):
                 get_intent_gt(val_loader, val_gt_file, args)
             predict_intent(model, val_loader, args, dset="val")
@@ -90,6 +128,7 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
                 metrics["hparam/test_accuracy"] = test_acc
                 metrics["hparam/test_f1"] = test_f1
                 metrics["hparam/test_mAcc"] = test_mAcc
+
         case "ped_traj":
             train_traj(
                 model,
@@ -100,8 +139,11 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
                 args,
                 recorder,
                 writer,
+                prof,
             )
-            val_gt_file = "./test_gt/val_traj_gt.json"
+            val_gt_file = os.path.join(
+                args.dataset_root_path, "test_gt/val_traj_gt.json"
+            )
             if not os.path.exists(val_gt_file):
                 get_test_traj_gt(model, val_loader, args, dset="val")
             predict_traj(model, val_loader, args, dset="val")
@@ -111,6 +153,7 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
                 args,
             )
             metrics = {"hparam/val_score": val_score}
+
         case "driving_decision":
             train_driving(
                 model,
@@ -121,9 +164,12 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
                 args,
                 recorder,
                 writer,
+                prof,
             )
 
-            val_gt_file = "./test_gt/val_driving_gt.json"
+            val_gt_file = os.path.join(
+                args.dataset_root_path, "test_gt/val_driving_gt.json"
+            )
             if not os.path.exists(val_gt_file):
                 get_test_driving_gt(model, val_loader, args, dset="val")
             predict_driving(model, val_loader, args, dset="val")
@@ -133,6 +179,12 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
                 args,
             )
             metrics = {"hparam/val_score": val_score}
+
+    if args.profile_execution and prof is not None:
+        prof.export_chrome_trace(
+            os.path.join(args.checkpoint_path, "log", "profiling_results.json")
+        )
+        prof.stop()
 
     hparams = {
         "lr": args.lr,
@@ -252,12 +304,13 @@ if __name__ == "__main__":
     #     "epochs": [50],
     #     "n_layers-kernel_size": [(2, 8), (3, 3), (4, 2)],
     # }
+
     hyperparameter_list = {
         # "lr": [3e-2],
         # "lr": [3e-3],
         "lr": [3e-3],
         "batch_size": args.batch_size,
-        "epochs": [50],
+        "epochs": [4],
         "n_layers-kernel_size": [(4, 2)],
     }
 

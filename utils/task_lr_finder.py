@@ -173,7 +173,7 @@ def main(args: DefaultArguments):
     # 1. Load database
     if not os.path.exists(os.path.join(args.database_path, args.database_file)):
         create_database(args)
-    train_loader, _, _ = get_dataloader(args)
+    train_loader, _, _ = get_dataloader(args, load_test=False)
     args.steps_per_epoch = int(np.ceil(len(train_loader.dataset) / args.batch_size))
     criterion: nn.Module
     if "global" not in args.model_name:
@@ -264,8 +264,8 @@ if __name__ == "__main__":
             # args.model_name = "tcan_traj_bbox"
             # args.model_name = "tcan_traj_bbox_int"
             # args.model_name = "tcan_traj_global"
-            # args.model_name = "transformer_traj_bbox_pose"
-            args.model_name = "transformer_traj_intent_bbox_pose"
+            args.model_name = "transformer_traj_bbox_pose"
+            # args.model_name = "transformer_traj_intent_bbox_pose"
             args.loss_weights = {
                 "loss_intent": 0.0,
                 "loss_traj": 1.0,

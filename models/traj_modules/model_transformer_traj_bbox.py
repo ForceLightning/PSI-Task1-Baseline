@@ -5,6 +5,7 @@ import torch
 from torch import nn
 from torch.optim import Adam, AdamW, Optimizer, SGD
 from torch.optim.lr_scheduler import (
+    CosineAnnealingWarmRestarts,
     ExponentialLR,
     LRScheduler,
     OneCycleLR,
@@ -247,6 +248,13 @@ class TransformerTrajBbox(nn.Module, IConstructOptimizer):
                     factor=sched_factor,
                     threshold=sched_threshold,
                 )
+
+            case "CosineAnnealingWarmRestarts":
+                t_0 = self.model_opts.get("scheduler_t_0", 10)
+                t_mult = self.model_opts.get("scheduler_t_mult", 2)
+                eta_min = self.model_opts.get("scheduler_eta_min", 1e-6)
+
+                scheduler = CosineAnnealingWarmRestarts(optimizer, t_0, t_mult, eta_min)
 
             case _:
                 sched_gamma = self.model_opts.get("scheduler_gamma", 0.9)

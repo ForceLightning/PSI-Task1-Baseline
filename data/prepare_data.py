@@ -57,38 +57,50 @@ def get_dataloader(
     ) as fid:
         imdb_val = pickle.load(fid)
     val_seq = generate_data_sequence("val", imdb_val, args)
-    with open(
-        os.path.join(
-            args.dataset_root_path, args.database_path, f"{task}_database_test.pkl"
-        ),
-        "rb",
-    ) as fid:
-        imdb_test = pickle.load(fid)
-    test_seq = generate_data_sequence("test", imdb_test, args)
+    if load_test:
+        with open(
+            os.path.join(
+                args.dataset_root_path, args.database_path, f"{task}_database_test.pkl"
+            ),
+            "rb",
+        ) as fid:
+            imdb_test = pickle.load(fid)
+        test_seq = generate_data_sequence("test", imdb_test, args)
 
     train_d = get_train_val_data(
         train_seq, args, overlap=args.seq_overlap_rate
     )  # returned tracks
     val_d = get_train_val_data(val_seq, args, overlap=args.seq_overlap_rate)
-    test_d = get_test_data(test_seq, args, overlap=args.test_seq_overlap_rate)
+    test_d = None
+    if load_test:
+        test_d = get_test_data(test_seq, args, overlap=args.test_seq_overlap_rate)
 
     # Create video dataset and dataloader
     match (args.task_name):
         case "driving_decision":
             train_dataset = DrivingDecisionDataset(train_d, args)
             val_dataset = DrivingDecisionDataset(val_d, args)
-            test_dataset = DrivingDecisionDataset(test_d, args)
+            test_dataset = (
+                DrivingDecisionDataset(test_d, args) if load_test and test_d else None
+            )
         case "ped_intent":
             train_dataset = PedestrianIntentDataset(train_d, args)
             val_dataset = PedestrianIntentDataset(val_d, args)
-            test_dataset = PedestrianIntentDataset(test_d, args)
+            test_dataset = (
+                PedestrianIntentDataset(test_d, args) if load_test and test_d else None
+            )
         case "ped_traj":
             train_dataset = PedestrianIntentDataset(train_d, args)
             val_dataset = PedestrianIntentDataset(val_d, args)
-            test_dataset = PedestrianIntentDataset(test_d, args)
+            test_dataset = (
+                PedestrianIntentDataset(test_d, args) if load_test and test_d else None
+            )
         case _:
             raise NotImplementedError
-    print(len(train_dataset), len(val_dataset), len(test_dataset))
+
+    print(
+        len(train_dataset), len(val_dataset), len(test_dataset) if test_dataset else 0
+    )
 
     if not args.persist_dataloader:
         train_loader = DataLoader(
@@ -110,7 +122,7 @@ def get_dataloader(
             num_workers=8,
         )
         test_loader = None
-        if len(test_dataset) > 0 and load_test:
+        if test_dataset and load_test:
             test_loader = DataLoader(
                 test_dataset,
                 batch_size=args.batch_size,
@@ -142,7 +154,7 @@ def get_dataloader(
             persistent_workers=True,
         )
         test_loader = None
-        if len(test_dataset) > 0 and load_test:
+        if test_dataset and load_test:
             test_loader = MultiEpochsDataLoader(
                 test_dataset,
                 batch_size=args.batch_size,
@@ -163,11 +175,11 @@ def get_train_val_data(
     """Given the data sequences, return preprocessed dicts of numpy data.
 
     :param data: Data sequences to be processed.
-    :type data: T_intentSeq | T_drivingSeq
+    :type data: T_intentSeq or T_drivingSeq
     :param DefaultArguments args: Training arguments.
     :param float overlap: Amount of overlap between sequences. Defaults to 0.5.
     :returns: Processed data.
-    :rtype: T_intentSeqNumpy | T_drivingSeqNumpy
+    :rtype: T_intentSeqNumpy or T_drivingSeqNumpy
     """
     seq_len = args.max_track_size
     overlap = overlap
@@ -176,7 +188,18 @@ def get_train_val_data(
     return tracks
 
 
-def get_test_data(data, args, overlap=1):  # overlap==0.5, seq_len=15
+def get_test_data(
+    data: T_intentSeq | T_drivingSeq, args: DefaultArguments, overlap: float = 1
+) -> T_intentSeqNumpy | T_drivingSeqNumpy:
+    """Given the data sequences, return preprocessed dicts of numpy data.
+
+    :param data: Data sequences to be processed.
+    :type data: T_intentSeq or T_drivingSeq
+    :param DefaultArguments args: Training arguments.
+    :param float overlap: Amount of overlap between sequences. Defaults to 0.5.
+    :returns: Processed data.
+    :rtype: T_intentSeqNumpy or T_drivingSeqNumpy
+    """
     # return splited train/val dataset
     seq_len = args.max_track_size
     overlap = overlap
@@ -195,11 +218,13 @@ def get_tracks(
     """Processes data sequences into tracks of overlapping data.
 
     :param data: Data sequences to be processed.
-    :type data: T_intentSeq | T_drivingSeq
+    :type data: T_intentSeq or T_drivingSeq
     :param int seq_length: Max sequence length.
     :param int observed_seq_length: Contextual sequence length.
     :param float overlap: How much tracks should overlap with each other.
     :param DefaultArguments args: Training arguments.
+    :returns tracks: Processed data.
+    :rtype: T_intentSeqNumpy or T_drivingSeqNumpy
     """
     overlap_stride = (
         observed_seq_len if overlap == 0 else int((1 - overlap) * observed_seq_len)

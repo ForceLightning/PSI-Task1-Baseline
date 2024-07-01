@@ -2,6 +2,7 @@
 """
 
 from __future__ import annotations
+from typing import Any
 import torch
 from torch import nn
 from transformers import TimeSeriesTransformerConfig
@@ -19,6 +20,20 @@ from models.traj_modules.model_transformer_traj_bbox import (
 )
 from utils.args import DefaultArguments
 from utils.cuda import *
+
+TRANSFORMER_BASE_CONFIG = {
+    "d_model": 256,
+    "encoder_attention_heads": 4,
+    "decoder_attention_heads": 4,
+    "encoder_ffn_dim": 128,
+    "decoder_ffn_dim": 128,
+    "dropout": 0.125,
+    "attention_dropout": 0.125,
+    "lags_sequence": [1],  # defaults to 0..7
+    "activation_function": "mish",
+    "optimizer": "AdamW",
+    "opt_wd": 0.1,
+}
 
 
 def build_model(
@@ -187,19 +202,17 @@ def get_transformer_traj_bbox(args: DefaultArguments) -> TransformerTrajBbox:
     """Gets the Transformer model for trajectory prediction.
     :param DefaultArguments args: Training arguments.
     """
-    model_configs = {
+    model_configs: dict[str, Any] = {
         "prediction_length": args.predict_length,
         "context_length": args.observe_length - 1,
         "input_size": 4,  # number of bbox coords per frame
         "num_time_features": 1,  # number of additional features
         "encoder_layers": args.n_layers,
         "decoder_layers": args.n_layers,
-        "encoder_attention_heads": 4,
-        "decoder_attention_heads": 4,
-        "dropout": 0.125,
-        "attention_dropout": 0.125,
-        "lags_sequence": [1],  # defaults to 0..7
     }
+    for key, val in TRANSFORMER_BASE_CONFIG.items():
+        if model_configs.get(key) is None:
+            model_configs[key] = val
     args.model_configs = model_configs
     config = TimeSeriesTransformerConfig(**model_configs)  # type: ignore[reportArgumentType]
     model = TransformerTrajBbox(args, config)
@@ -210,19 +223,18 @@ def get_transformer_traj_bbox_pose(args: DefaultArguments) -> TransformerTrajBbo
     """Gets the Transformer model for trajectory prediction with pose.
     :param DefaultArguments args: Training arguments.
     """
-    model_configs = {
+    model_configs: dict[str, Any] = {
         "prediction_length": args.predict_length,
         "context_length": args.observe_length - 1,
         "input_size": 4,  # number of bbox coords per frame
-        "num_time_features": 35,  # number of additional features
+        "num_time_features": 1,  # number of additional monotonically increasing features
+        "num_dynamic_real_features": 34,  # number of dynamic features (pose data)
         "encoder_layers": args.n_layers,
         "decoder_layers": args.n_layers,
-        "encoder_attention_heads": 4,
-        "decoder_attention_heads": 4,
-        "dropout": 0.125,
-        "attention_dropout": 0.125,
-        "lags_sequence": [1],  # defaults to 0..7
     }
+    for key, val in TRANSFORMER_BASE_CONFIG.items():
+        if model_configs.get(key) is None:
+            model_configs[key] = val
     args.model_configs = model_configs
     config = TimeSeriesTransformerConfig(**model_configs)  # type: ignore[reportArgumentType]
     model = TransformerTrajBboxPose(args, config)
@@ -236,19 +248,18 @@ def get_transformer_traj_intent_bbox_pose(
     pose data.
     :param DefaultArguments args: Training arguments.
     """
-    model_configs = {
+    model_configs: dict[str, Any] = {
         "prediction_length": args.predict_length,
         "context_length": args.observe_length - 1,
         "input_size": 4,  # number of bbox coords per frame
-        "num_time_features": 35,  # number of additional features
+        "num_time_features": 1,  # number of additional monotonically increasing features
+        "num_dynamic_real_features": 34,  # number of dynamic features (pose data)
         "encoder_layers": args.n_layers,
         "decoder_layers": args.n_layers,
-        "encoder_attention_heads": 4,
-        "decoder_attention_heads": 4,
-        "dropout": 0.125,
-        "attention_dropout": 0.125,
-        "lags_sequence": [1],  # defaults to 0..7
     }
+    for key, val in TRANSFORMER_BASE_CONFIG.items():
+        if model_configs.get(key) is None:
+            model_configs[key] = val
     args.model_configs = model_configs
     config = TimeSeriesTransformerConfig(**model_configs)  # type: ignore[reportArgumentType]
     model = TransformerTrajIntentBboxPose(args, config)

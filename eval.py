@@ -1,6 +1,8 @@
 import json
+from math import ceil
 import os
 from typing import Any
+from typing_extensions import Literal
 
 import numpy as np
 from numpy import typing as npt
@@ -8,6 +10,7 @@ import torch
 from torch import nn
 from torch.utils.tensorboard.writer import SummaryWriter
 from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
 
 from models.traj_modules.model_transformer_traj_bbox import TransformerTrajBbox
 from utils.args import DefaultArguments
@@ -251,37 +254,43 @@ def predict_traj(
     model: nn.Module,
     dataloader: DataLoader[Any],
     args: DefaultArguments,
-    dset: str = "test",
+    dset: Literal["train", "val", "test"] = "test",
 ) -> None:
     """Predict and save prediction of trajectory for each sample in the dataset.
 
     :param nn.Module model: Model to predict trajectory.
     :param DataLoader[Any] dataloader: DataLoader for the dataset.
     :param DefaultArguments args: Arguments for the model.
-    :param str dset: Dataset to predict trajectory.
+    :param dset: Dataset to predict trajectory.
+    :type dset: Literal["train", "val", "test"]
 
     :return: None
     """
     _ = model.eval()
     dt = {}
-    for itern, data in enumerate(dataloader):
+    num_batches: int = ceil(len(dataloader.dataset) / dataloader.batch_size)
+    for itern, data in tqdm(
+        enumerate(dataloader), total=num_batches, desc="Test batches"
+    ):
         # TODO: (chris) Allow for evaluation of transformer outputs, see
         # `test.py:validate_traj` for info. Otherwise the following line will just
         # return a tuple and we have no error handling :)
-        traj_pred: torch.Tensor = model(data)
-        # traj_gt = data['original_bboxes'][:, args.observe_length:, :].type(FloatTensor)
-        traj_gt: torch.Tensor = data["bboxes"][:, args.observe_length :, :].type(
-            FloatTensor
-        )
-        # bs, ts, _ = traj_gt.shape
-        # print("Prediction: ", traj_pred.shape)
+        inner_model = getattr(model, "module", model)
+        traj_pred: torch.Tensor
+        if isinstance(inner_model, TransformerTrajBbox):
+            old_num_parallel_samples = inner_model.config.num_parallel_samples
+            inner_model.config.num_parallel_samples = 1
+            traj_pred = inner_model.generate(data)
+            inner_model.config.num_parallel_samples = old_num_parallel_samples
+        else:
+            traj_pred = model(data)
 
         for i in range(len(data["frames"])):  # for each sample in a batch
             vid: str = data["video_id"][i]  # str list, bs x 60
             pid: str = data["ped_id"][i]  # str list, bs x 60
-            fid: int = (
-                data["frames"][i][-1] + 1
-            ).item()  # int list, bs x 15, observe 0~14, predict 15th intent
+
+            # int list, bs x 15, observe 0~14, predict 15th intent
+            fid: int = (data["frames"][i][-1] + 1).item()
 
             if vid not in dt:
                 dt[vid] = {}

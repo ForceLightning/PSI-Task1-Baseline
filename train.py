@@ -8,7 +8,13 @@ import torch
 from torch import nn
 from torch.cuda.amp.grad_scaler import GradScaler
 from torch.optim import Optimizer
-from torch.optim.lr_scheduler import LRScheduler, OneCycleLR, ReduceLROnPlateau
+from torch.optim.lr_scheduler import (
+    CosineAnnealingWarmRestarts,
+    ExponentialLR,
+    LRScheduler,
+    OneCycleLR,
+    ReduceLROnPlateau,
+)
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard.writer import SummaryWriter
 from transformers.modeling_outputs import Seq2SeqTSPredictionOutput
@@ -32,6 +38,7 @@ def train_intent(
     args: DefaultArguments,
     recorder: RecordResults,
     writer: SummaryWriter,
+    prof: torch.profiler.profile | None = None,
 ) -> None:
     pos_weight = torch.tensor(args.intent_positive_weight).to(
         DEVICE
@@ -59,8 +66,11 @@ def train_intent(
             args,
             recorder,
             writer,
+            prof,
         )
-        if not isinstance(scheduler, OneCycleLR):
+        if not isinstance(scheduler, OneCycleLR) and not isinstance(
+            scheduler, CosineAnnealingWarmRestarts
+        ):
             scheduler.step()
 
         if epoch % 1 == 0:
@@ -92,6 +102,7 @@ def train_intent_epoch(
     args: DefaultArguments,
     recorder: RecordResults,
     writer: SummaryWriter,
+    prof: torch.profiler.profile | None = None,
 ):
     model.train()
     batch_losses: dict[
@@ -181,6 +192,9 @@ def train_intent_epoch(
             loss_intent.item(),
         )
 
+        if prof is not None:  # Profile the training process
+            prof.step()
+
     epoch_loss["loss_intent"].append(np.mean(batch_losses["loss_intent"]))
 
     recorder.train_intent_epoch_calculate(writer)
@@ -201,6 +215,7 @@ def train_traj(
     args: DefaultArguments,
     recorder: RecordResults,
     writer: SummaryWriter,
+    prof: torch.profiler.profile | None = None,
 ) -> None:
     """Trains the model for the trajectory task.
 
@@ -222,7 +237,9 @@ def train_traj(
     :type writer: SummaryWriter
     """
     # Handles some form of resumption of training.
-    resume_info = ResumeTrainingInfo.load_resume_info(args.checkpoint_path)
+    resume_info: ResumeTrainingInfo | None = None
+    if args.resume:
+        resume_info = ResumeTrainingInfo.load_resume_info(args.checkpoint_path)
     if resume_info is None:
         resume_info = ResumeTrainingInfo(args.epochs + 1, 1)
         resume_info.dump_resume_info(args.checkpoint_path)
@@ -268,14 +285,13 @@ def train_traj(
             args,
             recorder,
             writer,
+            prof,
         )
-        if not isinstance(scheduler, OneCycleLR) and not isinstance(
-            scheduler, ReduceLROnPlateau
-        ):
+        if isinstance(scheduler, ExponentialLR):
             scheduler.step()
 
         # Purge cache.
-        gc.collect()
+        _ = gc.collect()
         torch.cuda.empty_cache()
 
         if epoch % 1 == 0:
@@ -323,33 +339,28 @@ def train_traj_epoch(
     args: DefaultArguments,
     recorder: RecordResults,
     writer: SummaryWriter,
+    prof: torch.profiler.profile | None = None,
 ) -> dict[str, list[np.floating[Any] | float]]:
     """Trains the model over 1 epoch.
 
-    :param epoch: Current epoch value.
-    :type epoch: int
-    :param model: Model to train for 1 epoch.
-    :type model: nn.Module
-    :param optimizer: PyTorch optimizer used for training.
-    :type optimizer: torch.optim.Optimizer
-    :param scheduler: Learning rate scheduler used for training.
-    :type scheduler: torch.optim.lr_scheduler.LRScheduler
-    :param criterions: List of criterion names and callable criterions used to calculate loss.
-    :type criterions: dict[str, nn.Module]
-    :param epoch_loss: Dictionary containing various loss types. This object is used as a return
-        value for the function.
-    :type epoch_loss: dict
-    :param args: Training arguments.
-    :type args: DefaultArguments
-    :param recorder: Recorder object to log metrics.
-    :type recorder: RecordResults
-    :param writer: Tensorboard logging object.
-    :type writer: SummaryWriter
+    :param int epoch: Current epoch value.
+    :param nn.Module model: Model to train for 1 epoch.
+    :param torch.optim.Optimizer optimizer: PyTorch optimizer used for training.
+    :param torch.optim.lr_scheduler.LRScheduler scheduler: Learning rate scheduler used for training.
+    :param dict[str, nn.Module] criterions: List of criterion names and callable criterions used to calculate loss.
+    :param epoch_loss: Dictionary containing various loss types. This object is used as a return value for the function.
+    :type epoch_loss: dict[str, list[np.floating[Any] | float]]
+    :param DataLoader[Any] dataloader: Dataloader object for the training set.
+    :param DefaultArguments args: Training arguments.
+    :param RecordResults recorder: Recorder object to log metrics.
+    :param SummaryWriter writer: Tensorboard logging object.
+    :param prof: Profiler object to profile the training process.
+    :type prof: torch.profiler.profile or None
 
     :returns: Losses for the epoch.
-    :rtype: dict[str, np.floating | float]
+    :rtype: dict[str, np.floating[Any] | float]
     """
-    model.train()
+    _ = model.train()
     batch_losses: dict[str, list[float]] = collections.defaultdict(list)
     num_samples = len(dataloader.dataset)
     niters: int = int(np.ceil(num_samples / args.batch_size))
@@ -437,7 +448,9 @@ def train_traj_epoch(
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 
             scaler.step(optimizer)
-            if isinstance(scheduler, OneCycleLR):
+            if isinstance(scheduler, OneCycleLR) or isinstance(
+                scheduler, CosineAnnealingWarmRestarts
+            ):
                 scheduler.step()
 
             scaler.update()
@@ -519,7 +532,9 @@ def train_traj_epoch(
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
-            if isinstance(scheduler, OneCycleLR):
+            if isinstance(scheduler, OneCycleLR) or isinstance(
+                scheduler, CosineAnnealingWarmRestarts
+            ):
                 scheduler.step()
 
         # Record results
@@ -542,6 +557,9 @@ def train_traj_epoch(
             loss_traj.item(),
         )
 
+        if prof is not None:  # step the profiler
+            prof.step()
+
     epoch_loss["loss_traj"].append(np.mean(batch_losses["loss_traj"]))
 
     recorder.train_traj_epoch_calculate(writer)
@@ -562,9 +580,12 @@ def train_driving(
     args: DefaultArguments,
     recorder: RecordResults,
     writer: SummaryWriter,
+    prof: torch.profiler.profile | None = None,
 ):
     # Handle resumption of training
-    resume_info = ResumeTrainingInfo.load_resume_info(args.checkpoint_path)
+    resume_info: ResumeTrainingInfo | None = None
+    if args.resume:
+        resume_info = ResumeTrainingInfo.load_resume_info(args.checkpoint_path)
     if resume_info is None:
         resume_info = ResumeTrainingInfo(args.epochs + 1, 1)
         resume_info.dump_resume_info(args.checkpoint_path)
@@ -608,8 +629,10 @@ def train_driving(
             args,
             recorder,
             writer,
+            prof,
         )
-        scheduler.step()
+        if isinstance(scheduler, ExponentialLR):
+            scheduler.step()
 
         if epoch % 1 == 0:
             print(
@@ -658,6 +681,7 @@ def train_driving_epoch(
     args: DefaultArguments,
     recorder: RecordResults,
     writer: SummaryWriter,
+    prof: torch.profiler.profile | None = None,
 ) -> dict[
     {
         "loss_driving": list[float],
@@ -701,7 +725,9 @@ def train_driving_epoch(
             scaler.step(optimizer)
             scaler.update()
 
-            if isinstance(scheduler, OneCycleLR):
+            if isinstance(scheduler, OneCycleLR) or isinstance(
+                scheduler, CosineAnnealingWarmRestarts
+            ):
                 scheduler.step()
 
         else:
@@ -743,7 +769,9 @@ def train_driving_epoch(
             optimizer.step()
 
             # Handle scheduler steps
-            if isinstance(scheduler, OneCycleLR):
+            if isinstance(scheduler, OneCycleLR) or isinstance(
+                scheduler, CosineAnnealingWarmRestarts
+            ):
                 scheduler.step()
 
         # Record results
@@ -769,8 +797,8 @@ def train_driving_epoch(
             loss_driving_dir.item(),
         )
 
-        # if itern >= 10:
-        #     break
+        if prof is not None:  # step the profiler
+            prof.step()
 
     epoch_loss["loss_driving"].append(np.mean(batch_losses["loss_driving"]))
     epoch_loss["loss_driving_speed"].append(np.mean(batch_losses["loss_driving_speed"]))

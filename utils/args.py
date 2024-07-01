@@ -68,7 +68,7 @@ class DefaultArguments:
     :param model_configs: Framework information, defaults to {}.
     :type model_configs: dict
 
-    :param checkpoint_path: Path to save model checkpoints, defaults to './ckpts'.
+    :param checkpoint_path: Path to save model checkpoints, defaults to 'ckpts'.
     :type checkpoint_path: str
     :param epochs: Total number of training epochs, defaults to 1000.
     :type epochs: int
@@ -147,7 +147,7 @@ class DefaultArguments:
     model_configs: dict = field(default_factory=dict)
 
     # About training
-    checkpoint_path: str = "./ckpts"
+    checkpoint_path: str = "ckpts"
     epochs: int = 1000
     batch_size: int = 128
     lr: float = 1e-3
@@ -170,6 +170,8 @@ class DefaultArguments:
     persist_dataloader: bool = True
     n_layers: int = 4
     kernel_size: int = 4
+    profile_execution: bool = False
+    compile_model: bool = False
 
 
 class ModelOpts(TypedDict):
