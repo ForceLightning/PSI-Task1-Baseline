@@ -28,6 +28,9 @@ class TransformerTrajBbox(nn.Module, IConstructOptimizer):
     """A transformer-based architecture to predict the trajectory of pedestrians
     from their past bounding boxes.
 
+    :param DefaultArguments args: Training arguments.
+    :param TimeSeriesTransformerConfig config: Config for the transformer model.
+
     :ivar DefaultArguments args: Training arguments.
     :ivar ModelOpts model_opts: Model configuration options.
     :ivar TimeSeriesTransformerConfig config: Config for the transformer model.
@@ -63,10 +66,9 @@ class TransformerTrajBbox(nn.Module, IConstructOptimizer):
         self, x: T_intentBatch | tuple[torch.Tensor, torch.Tensor]
     ) -> Seq2SeqTSPredictionOutput | tuple[torch.Tensor, ...]:
         """Forward pass for training the model. See :py:meth:`generate` to generate
-            inferences.
+        inferences.
 
-        :param x: Input data, dictionary if using custom dataset, or tuple if using
-            :py:mod:`lr_finder`.
+        :param x: Input data, dictionary if using custom dataset, or tuple if using :py:mod:`utils.lr_finder`.
         :type x: T_intentBatch or tuple[torch.Tensor, torch.Tensor]
         :returns: Transformer prediction output.
         :rtype: Seq2SeqTSPredictionOutput or tuple[torch.Tensor, ...]
@@ -132,6 +134,13 @@ class TransformerTrajBbox(nn.Module, IConstructOptimizer):
     def generate(
         self, x: T_intentBatch | tuple[torch.Tensor, torch.Tensor]
     ) -> torch.Tensor:
+        """Generates samples from the model without :py:meth:`forward` hooks.
+
+        :param x: Input data, dictionary if using custom dataset, or tuple if using :py:mod:`utils.lr_finder`.
+        :type x: T_intentBatch or tuple[torch.Tensor, torch.Tensor]
+        :returns: Predictions from the model.
+        :rtype: torch.Tensor
+        """
         past_values: torch.Tensor
         past_time_features: torch.Tensor
         future_time_features: torch.Tensor
@@ -163,7 +172,6 @@ class TransformerTrajBbox(nn.Module, IConstructOptimizer):
 
         past_time_features = past_time_features.unsqueeze(2)
         future_time_features = future_time_features.unsqueeze(2)
-        bs, ts, _ = past_values.shape
         past_observed_mask: torch.Tensor = torch.ones_like(
             past_values, dtype=torch.bool
         )
@@ -248,6 +256,10 @@ class TransformerTrajBbox(nn.Module, IConstructOptimizer):
 
 
 class TransformerTrajBboxPose(TransformerTrajBbox):
+    """A transformer-based architecture to predict the trajectory of pedestrians from
+    their past bounding boxes and pose features.
+    """
+
     @overload
     def forward(
         self,
@@ -269,11 +281,10 @@ class TransformerTrajBboxPose(TransformerTrajBbox):
         output_hidden_states: bool | None = None,
     ) -> Seq2SeqTSPredictionOutput | tuple[torch.Tensor, ...]:
         """Forward pass for training the model. See :py:meth:`generate` to generate
-            inferences.
+        inferences.
 
-        :param x: Input data, dictionary if using custom dataset, or tuple if using
-            :py:mod:`PSI_Intent_Prediction.utils.lr_finder`.
-        :type x: T_intentBatch or tuple[torch.Tensor, torch.Tensor]
+        :param x: Input data, dictionary if using custom dataset, or tuple if using :py:mod:`utils.lr_finder`.
+        :type x: T_intentBatch or tuple[torch.Tensor, torch.Tensor, torch.Tensor]
         :returns: Transformer prediction output.
         :rtype: Seq2SeqTSPredictionOutput or tuple[torch.Tensor, ...]
         """
@@ -412,6 +423,21 @@ class TransformerTrajBboxPose(TransformerTrajBbox):
 
 
 class TransformerTrajIntentBboxPose(TransformerTrajBboxPose, IConstructOptimizer):
+    """A transformer-based architecture to predict the trajectory of pedestrians
+    from their past bounding boxes and crossing intentions.
+
+    :param DefaultArguments args: Training arguments.
+    :param TimeSeriesTransformerConfig config: Config for the transformer model.
+
+    :ivar DefaultArguments args: Training arguments.
+    :ivar ModelOpts model_opts: Model configuration options.
+    :ivar TimeSeriesTransformerConfig config: Config for the transformer model.
+    :ivar TimeSeriesTransformerForPrediction transformer: The transformer model.
+    :ivar nn.Module intent_loss: The loss function for the intention prediction.
+    :ivar nn.Module intent_activation: The activation function for the intention prediction.
+    :ivar nn.Sequential intent_head: The head for the intention prediction.
+    """
+
     def __init__(
         self, args: DefaultArguments, config: TimeSeriesTransformerConfig
     ) -> None:
@@ -462,6 +488,14 @@ class TransformerTrajIntentBboxPose(TransformerTrajBboxPose, IConstructOptimizer
             | tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
         ),
     ) -> Seq2SeqTSPredictionOutput | tuple[torch.Tensor, ...]:
+        """Forward pass for training the model. See :py:meth:`generate` to generate
+        inferences.
+
+        :param x: Input data, dictionary if using custom dataset, or tuple if using :py:mod:`utils.lr_finder`.
+        :type x: T_intentBatch or tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        :returns: Transformer prediction output.
+        :rtype: Seq2SeqTSPredictionOutput or tuple[torch.Tensor, ...]
+        """
         intent: torch.Tensor
         outputs: Seq2SeqTSPredictionOutput | tuple[torch.Tensor, ...]
         match x:

@@ -12,7 +12,10 @@ from utils.args import DefaultArguments
 
 
 def main(args: DefaultArguments):
-    """1. Load database"""
+    """Loads the database
+
+    :param DefaultArguments args: The training arguments.
+    """
     if not os.path.exists(
         os.path.join(args.database_path, "intent_database_train.pkl")
     ):
@@ -28,6 +31,12 @@ def main(args: DefaultArguments):
 def get_intent_gt(
     dataloader: DataLoader[Any], output_path: str, args: DefaultArguments
 ) -> None:
+    """Gets the ground truth intention and disagreement scores.
+
+    :param torch.utils.data.DataLoader dataloader: The dataloader.
+    :param str output_path: The output path.
+    :param DefaultArguments args: The training arguments.
+    """
     dt = {}
     for itern, data in enumerate(dataloader):
         # if args.intent_type == 'mean' and args.intent_num == 2:  # BCEWithLogitsLoss
@@ -71,6 +80,13 @@ def get_test_driving_gt(
     args: DefaultArguments,
     dset: str = "test",
 ) -> None:
+    """Gets the ground truth driving decision.
+
+    :param torch.nn.Module model: The model (unused).
+    :param torch.utils.data.DataLoader dataloader: The dataloader.
+    :param DefaultArguments args: The training arguments.
+    :param str dset: The dataset.
+    """
     dt = {}
     niters = len(dataloader)
     for itern, data in enumerate(dataloader):

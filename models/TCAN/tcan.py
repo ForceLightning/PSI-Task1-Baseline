@@ -301,6 +301,22 @@ class TemporalAttentionBlock(nn.Module):
 
 
 class TemporalConvAttnNet(nn.Module):
+    """Temporal Convolutional Attention Network (TCAN) model.
+
+    :param int emb_size: Size of the input embeddings.
+    :param list[int] num_channels: List of the number of channels for each temporal block.
+    :param int num_sub_blocks: Number of sub-blocks in the network.
+    :param bool temp_attn: Whether to use temporal attention.
+    :param int num_heads: Number of attention heads.
+    :param bool en_res: Whether to enable residual connections.
+    :param bool conv: Whether to use convolutional layers.
+    :param int key_size: Size of the key vectors.
+    :param int kernel_size: Size of the convolutional kernel.
+    :param bool visual: Whether to use visualisation.
+    :param int seq_length: Length of the input sequence.
+    :param float dropout: Dropout rate.
+    """
+
     def __init__(
         self,
         emb_size: int,
@@ -345,6 +361,7 @@ class TemporalConvAttnNet(nn.Module):
             ]
         self.network = nn.Sequential(*layers)
 
+    @override
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # attn_weight_list: list[list[torch.Tensor]] = []
         # if self.temp_attn:

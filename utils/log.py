@@ -7,7 +7,7 @@ from numpy import typing as npt
 import torch
 from torch.utils.tensorboard.writer import SummaryWriter
 
-from data.custom_dataset import T_intentBatch
+from data.custom_dataset import T_drivingBatch, T_intentBatch
 from utils.args import DefaultArguments
 from utils.metrics import evaluate_driving, evaluate_intent, evaluate_traj
 from utils.utils import AverageMeter
@@ -258,7 +258,8 @@ class RecordResults:
     def train_intent_epoch_calculate(self, writer: SummaryWriter | None = None):
         """Calculate the training epoch results for intent.
 
-        :param SummaryWriter writer: The tensorboard writer.
+        :param writer: The tensorboard writer.
+        :type writer: SummaryWriter or None
         :return: None
         """
         intent_results = None
@@ -296,6 +297,14 @@ class RecordResults:
         traj: bool = True,
         args: DefaultArguments | None = None,
     ):
+        """Reset metrics for evaluation at the end of the epoch.
+
+        :param int epoch: The epoch number.
+        :param int nitern: The number of iterations.
+        :param bool intent: Whether to evaluate intent.
+        :param bool traj: Whether to evaluate trajectory.
+        :param DefaultArguments args: The arguments to use, as defined in `utils.args.py`.
+        """
         # 1. initialize log info
         self.log_loss_total = AverageMeter()
         self.log_loss_driving_speed = AverageMeter()
@@ -332,16 +341,30 @@ class RecordResults:
     def eval_intent_batch_update(
         self,
         itern: int,
-        data: dict[str, Any],
+        data: T_intentBatch,
         intent_gt: npt.NDArray[np.float_],
         intent_prob: npt.NDArray[np.float_],
         intent_prob_gt: npt.NDArray[np.float_],
         intent_rsn_gt: npt.NDArray[Any] | None = None,
         intent_rsn_pred: npt.NDArray[Any] | None = None,
     ):
+        """Update the evaluation batch results for intent.
+
+        :param int itern: The iteration number.
+        :param dict[str, Any] data: The evaluation batch data.
+        :param intent_gt: The ground truth intent.
+        :type intent_gt: np.typing.NDArray[np.float_]
+        :param intent_prob: The predicted intent.
+        :type intent_prob: np.typing.NDArray[np.float_]
+        :param intent_prob_gt: The ground truth intent probability.
+        :type intent_prob_gt: np.typing.NDArray[np.float_]
+        :param intent_rsn_gt: The ground truth reason intention.
+        :type intent_rsn_gt: np.typing.NDArray[Any] or None
+        :param intent_rsn_pred: The predicted reason intention.
+        :type intent_rsn_pred: np.typing.NDArray[Any] or None
+        """
         # 3. Update training info
         # (3.1) loss log list
-        bs = intent_gt.shape[0]
         # (3.2) training data info
         self.frames_list.extend(
             data["frames"].detach().cpu().numpy()
@@ -356,14 +379,19 @@ class RecordResults:
             self.intention_gt.extend(intent_gt)  # bs
             self.intention_prob_gt.extend(intent_prob_gt)
             self.intention_pred.extend(intent_prob)  # bs
-            if intent_rsn_gt is not None:
+            if intent_rsn_gt is not None and intent_rsn_pred is not None:
                 self.intention_rsn_gt.extend(intent_rsn_gt)
                 self.intention_rsn_pred.extend(intent_rsn_pred)
             # assert len(self.intention_gt[0]) == 1 #self.args.predict_length, intent only predict 1 result
         else:
             pass
 
-    def eval_intent_epoch_calculate(self, writer: SummaryWriter):
+    def eval_intent_epoch_calculate(self, writer: SummaryWriter) -> None:
+        """Calculate metrics for the intent task at the end of the epoch.
+
+        :param SummaryWriter writer: The tensorboard writer.
+        :return: None
+        """
         print("----------- Evaluate results: ------------------------------------ ")
 
         intent_results = None
@@ -386,7 +414,7 @@ class RecordResults:
         # write scalar to tensorboard
         if writer and intent_results:
             for key in ["MSE", "Acc", "F1", "mAcc"]:
-                val = intent_results[key]
+                val: float = intent_results[key]
                 writer.add_scalar(f"Eval/Results/{key}", val, self.epoch)
 
             for i in range(self.args.intent_num):
@@ -418,12 +446,23 @@ class RecordResults:
     def train_traj_batch_update(
         self,
         itern: int,
-        data: dict[str, torch.Tensor],
+        data: T_intentBatch,
         traj_gt: npt.NDArray[np.float_],
         traj_pred: npt.NDArray[np.float_],
         loss: float,
         loss_traj: float,
-    ):
+    ) -> None:
+        """Update the training metrics at the end of the batch for trajectory.
+
+        :param int itern: The iteration number.
+        :param T_intentBatch data: The training batch data.
+        :param traj_gt: The ground truth trajectory.
+        :type traj_gt: np.typing.NDArray[np.float_]
+        :param traj_pred: The predicted trajectory.
+        :type traj_pred: np.typing.NDArray[np.float_]
+        :param float loss: The total loss.
+        :param float loss_traj: The trajectory loss.
+        """
         # evidence: bs x ts x 4: mu,v,alpha,beta
 
         # (3.1) loss log list
@@ -451,7 +490,13 @@ class RecordResults:
                     )
                 )
 
-    def train_traj_epoch_calculate(self, writer: SummaryWriter | None = None):
+    def train_traj_epoch_calculate(self, writer: SummaryWriter | None = None) -> None:
+        """Calculate the training results at the end of the epoch for trajectory.
+
+        :param writer: The tensorboard writer.
+        :type writer: SummaryWriter or None
+        :return: None
+        """
         print("----------- Training results: ------------------------------------ ")
         traj_results = None
         if self.traj_pred != []:
@@ -472,16 +517,25 @@ class RecordResults:
                 "FRB",
             ]:  # , 'Bbox_MSE', 'Bbox_FMSE', 'Center_MSE', 'Center_FMSE']:
                 for time in ["0.5", "1.0", "1.5"]:
-                    val = traj_results[key][time]
+                    val: float = traj_results[key][time]
                     writer.add_scalar(f"Train/Results/{key}_{time}", val, self.epoch)
 
     def eval_traj_batch_update(
         self,
         itern: int,
-        data: dict[str, torch.Tensor | list[str | float | int]],
+        data: T_intentBatch,
         traj_gt: npt.NDArray[np.float_],
         traj_pred: npt.NDArray[np.float_],
-    ):
+    ) -> None:
+        """Update the evaluation metrics at the end of the batch for trajectory.
+
+        :param int itern: The iteration number.
+        :param T_intentBatch data: The evaluation batch data.
+        :param traj_gt: The ground truth trajectory.
+        :type traj_gt: np.typing.NDArray[np.float_]
+        :param traj_pred: The predicted trajectory.
+        :type traj_pred: np.typing.NDArray[np.float_]
+        """
         # 3. Update training info
         self.frames_list.extend(
             data["frames"].detach().cpu().numpy()
@@ -500,7 +554,12 @@ class RecordResults:
         else:
             pass
 
-    def eval_traj_epoch_calculate(self, writer: SummaryWriter):
+    def eval_traj_epoch_calculate(self, writer: SummaryWriter) -> None:
+        """Calculate the evaluation results at the end of the epoch for trajectory.
+
+        :param SummaryWriter writer: The tensorboard writer.
+        :return: None
+        """
         print("----------- Eval results: ------------------------------------ ")
         traj_results = None
         if self.traj_pred != []:
@@ -530,7 +589,7 @@ class RecordResults:
     def train_driving_batch_update(
         self,
         itern: int,
-        data: dict[str, torch.Tensor | list[str | int | float]],
+        data: T_drivingBatch,
         speed_gt: npt.NDArray[np.int_],
         direction_gt: npt.NDArray[np.int_],
         speed_pred_logit: npt.NDArray[np.float_],
@@ -539,6 +598,23 @@ class RecordResults:
         loss_driving_speed: float,
         loss_driving_dir: float,
     ) -> None:
+        """Update the training batch results for driving.
+
+        :param int itern: The iteration number.
+        :param T_drivingBatch data: The training batch data.
+        :param speed_gt: The ground truth driving speed.
+        :type speed_gt: np.typing.NDArray[np.int_]
+        :param direction_gt: The ground truth driving direction.
+        :type direction_gt: np.typing.NDArray[np.int_]
+        :param speed_pred_logit: The predicted driving speed.
+        :type speed_pred_logit: np.typing.NDArray[np.float_]
+        :param dir_pred_logit: The predicted driving direction.
+        :type dir_pred_logit: np.typing.NDArray[np.float_]
+        :param float loss: The total loss.
+        :param float loss_driving_speed: The driving speed loss.
+        :param float loss_driving_dir: The driving direction loss.
+        :return: None
+        """
         # 3. Update training info
         # (3.1) loss log list
         bs = speed_gt.shape[0]
@@ -569,6 +645,12 @@ class RecordResults:
     def train_driving_epoch_calculate(
         self, writer: SummaryWriter | None = None
     ) -> None:
+        """Calculate the training results at the end of the epoch for driving.
+
+        :param writer: The tensorboard writer.
+        :type writer: SummaryWriter or None
+        :return: None
+        """
         print("----------- Training results: ------------------------------------ ")
         driving_results = None
         if self.driving:
@@ -604,14 +686,32 @@ class RecordResults:
     def eval_driving_batch_update(
         self,
         itern: int,
-        data: dict[str, torch.Tensor | list[float | int | str]],
-        speed_gt: npt.NDArray[np.float_],
-        direction_gt: npt.NDArray[np.float_],
+        data: T_drivingBatch,
+        speed_gt: npt.NDArray[np.float_ | np.int_],
+        direction_gt: npt.NDArray[np.float_ | np.int_],
         speed_pred_logit: npt.NDArray[np.float_],
         dir_pred_logit: npt.NDArray[np.float_],
-        reason_gt=None,
-        reason_pred=None,
+        reason_gt: npt.NDArray[Any] | None = None,
+        reason_pred: npt.NDArray[Any] | None = None,
     ) -> None:
+        """Update the evaluation metrics at the end of the batch for driving.
+
+        :param int itern: The iteration number.
+        :param T_drivingBatch data: The evaluation batch data.
+        :param speed_gt: The ground truth driving speed.
+        :type speed_gt: np.typing.NDArray[np.float_ | np.int_]
+        :param direction_gt: The ground truth driving direction.
+        :type direction_gt: np.typing.NDArray[np.float_ | np.int_]
+        :param speed_pred_logit: The predicted driving speed.
+        :type speed_pred_logit: np.typing.NDArray[np.float_]
+        :param dir_pred_logit: The predicted driving direction.
+        :type dir_pred_logit: np.typing.NDArray[np.float_]
+        :param reason_gt: The ground truth reason.
+        :type reason_gt: np.typing.NDArray[Any] or None
+        :param reason_pred: The predicted reason.
+        :type reason_pred: np.typing.NDArray[Any] or None
+        :return: None
+        """
         # 3. Update training info
         # (3.1) loss log list
         # bs = speed_gt.shape[0]
@@ -628,6 +728,12 @@ class RecordResults:
             pass  # store reason prediction
 
     def eval_driving_epoch_calculate(self, writer: SummaryWriter | None = None) -> None:
+        """Calculate the evaluation results at the end of the epoch for driving.
+
+        :param writer: The tensorboard writer.
+        :type writer: SummaryWriter or None
+        :return: None
+        """
         print("----------- Evaluate results: ------------------------------------ ")
         driving_results = None
         if self.driving:
@@ -651,7 +757,7 @@ class RecordResults:
             for key in ["speed_Acc", "speed_mAcc", "direction_Acc", "direction_mAcc"]:
                 if key not in driving_results.keys():
                     continue
-                val = driving_results[key]
+                val: float = driving_results[key]
                 print("results: ", key, val)
                 writer.add_scalar(f"Eval/Results/{key}", val, self.epoch)
         print("log info finished")
@@ -659,7 +765,13 @@ class RecordResults:
             "----------------------finished results calculation------------------------------------- "
         )
 
-    def log_msg(self, msg: str, filename: str | None = None):
+    def log_msg(self, msg: str, filename: str | None = None) -> None:
+        """Log a message to a file.
+
+        :param str msg: The message to log.
+        :param str filename: The name of the file to log to.
+        :return: None
+        """
         if not filename:
             filename = os.path.join(self.args.checkpoint_path, "log.txt")
         else:
@@ -668,7 +780,16 @@ class RecordResults:
         with open(savet_to_file, "a") as f:
             _ = f.write(str(msg) + "\n")
 
-    def log_info(self, epoch: int, info: dict[str, Any], filename: str | None = None):
+    def log_info(
+        self, epoch: int, info: dict[str, Any], filename: str | None = None
+    ) -> None:
+        """Log information to a file.
+
+        :param int epoch: The epoch number.
+        :param dict[str, Any] info: The information to log.
+        :param str filename: The name of the file to log to.
+        :return: None
+        """
         if not filename:
             filename = "log.txt"
         else:

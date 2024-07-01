@@ -1,3 +1,7 @@
+"""Main script for training and testing the model.
+"""
+
+from __future__ import annotations
 from datetime import datetime
 import json
 import os
@@ -22,6 +26,11 @@ from utils.log import RecordResults
 
 
 def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
+    """Main function for training and testing the model.
+
+    :param DefaultArguments args: The training arguments.
+    :return: The validation score and test accuracy.
+    """
     writer = SummaryWriter(args.checkpoint_path, comment=args.comment)
     recorder = RecordResults(args)
     if "transformer" in args.model_name:  # handles "lag" in the sequence
@@ -265,7 +274,8 @@ if __name__ == "__main__":
     best_val_accuracy = 0.0
     best_hyperparameters = None
 
-    checkpoint_path = os.path.join(args.dataset_root_path, args.checkpoint_path)
+    checkpoint_path: str = os.path.join(args.dataset_root_path, args.checkpoint_path)
+    args.checkpoint_path = checkpoint_path
 
     for params in parameter_samples:
         args.lr = params["lr"]

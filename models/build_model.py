@@ -1,3 +1,7 @@
+"""Builds the model, optimizer, and scheduler objects for training.
+"""
+
+from __future__ import annotations
 import torch
 from torch import nn
 from transformers import TimeSeriesTransformerConfig
@@ -22,10 +26,9 @@ def build_model(
 ) -> tuple[nn.Module, torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]:
     """Builds the model, optimizer, and scheduler objects for training.
 
-    :param args: Training arguments.
-    :type args: DefaultArguments
+    :param DefaultArguments args: Training arguments.
     :returns: Model, Optimizer, and Scheduler in a tuple.
-    :rtype: tuple[nn.Module, torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]
+    :rtype: tuple[torch.nn.Module, torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]
     """
     match args.model_name:
         case "tcn_int_bbox":
@@ -60,6 +63,9 @@ def build_model(
 # 1. Intent prediction
 # 1.1 input bboxes only
 def get_tcn_intent_bbox(args: DefaultArguments) -> TCNINTBbox:
+    """Gets the TCN model for intent prediction.
+    :param DefaultArguments args: Training arguments.
+    """
     model_configs = {}
     model_configs["intent_model_opts"] = {
         "enc_in_dim": 4,  # input bbox (normalized OR not) + img_context_feat_dim
@@ -82,6 +88,9 @@ def get_tcn_intent_bbox(args: DefaultArguments) -> TCNINTBbox:
 
 
 def get_tcn_traj_bbox(args: DefaultArguments) -> TCNTrajBbox:
+    """Gets the TCN model for trajectory prediction.
+    :param DefaultArguments args: Training arguments.
+    """
     model_configs = {}
     model_configs["traj_model_opts"] = {
         "enc_in_dim": 4,
@@ -103,6 +112,9 @@ def get_tcn_traj_bbox(args: DefaultArguments) -> TCNTrajBbox:
 
 
 def get_tcn_traj_bbox_int(args: DefaultArguments) -> TCNTrajBboxInt:
+    """Gets the TCN model for trajectory prediction with intent.
+    :param DefaultArguments args: Training arguments.
+    """
     model_configs = {}
     model_configs["traj_model_opts"] = {
         "enc_in_dim": 5,
@@ -124,6 +136,9 @@ def get_tcn_traj_bbox_int(args: DefaultArguments) -> TCNTrajBboxInt:
 
 
 def get_tcan_traj_bbox(args: DefaultArguments) -> TCANTrajBbox:
+    """Gets the TCAN model for trajectory prediction.
+    :param DefaultArguments args: Training arguments.
+    """
     model_configs = {}
     model_configs["traj_model_opts"] = {
         "enc_in_dim": 0,
@@ -145,6 +160,9 @@ def get_tcan_traj_bbox(args: DefaultArguments) -> TCANTrajBbox:
 
 
 def get_tcan_traj_bbox_int(args: DefaultArguments) -> TCANTrajBboxInt:
+    """Gets the TCAN model for trajectory prediction with intent.
+    :param DefaultArguments args: Training arguments.
+    """
     model_configs = {}
     model_configs["traj_model_opts"] = {
         "enc_in_dim": 5,
@@ -166,11 +184,18 @@ def get_tcan_traj_bbox_int(args: DefaultArguments) -> TCANTrajBboxInt:
 
 
 def get_transformer_traj_bbox(args: DefaultArguments) -> TransformerTrajBbox:
+    """Gets the Transformer model for trajectory prediction.
+    :param DefaultArguments args: Training arguments.
+    """
     model_configs = {
         "prediction_length": args.predict_length,
         "context_length": args.observe_length - 1,
         "input_size": 4,  # number of bbox coords per frame
         "num_time_features": 1,  # number of additional features
+        "encoder_layers": args.n_layers,
+        "decoder_layers": args.n_layers,
+        "encoder_attention_heads": 4,
+        "decoder_attention_heads": 4,
         "dropout": 0.125,
         "attention_dropout": 0.125,
         "lags_sequence": [1],  # defaults to 0..7
@@ -182,11 +207,18 @@ def get_transformer_traj_bbox(args: DefaultArguments) -> TransformerTrajBbox:
 
 
 def get_transformer_traj_bbox_pose(args: DefaultArguments) -> TransformerTrajBboxPose:
+    """Gets the Transformer model for trajectory prediction with pose.
+    :param DefaultArguments args: Training arguments.
+    """
     model_configs = {
         "prediction_length": args.predict_length,
         "context_length": args.observe_length - 1,
         "input_size": 4,  # number of bbox coords per frame
         "num_time_features": 35,  # number of additional features
+        "encoder_layers": args.n_layers,
+        "decoder_layers": args.n_layers,
+        "encoder_attention_heads": 4,
+        "decoder_attention_heads": 4,
         "dropout": 0.125,
         "attention_dropout": 0.125,
         "lags_sequence": [1],  # defaults to 0..7
@@ -200,11 +232,19 @@ def get_transformer_traj_bbox_pose(args: DefaultArguments) -> TransformerTrajBbo
 def get_transformer_traj_intent_bbox_pose(
     args: DefaultArguments,
 ) -> TransformerTrajIntentBboxPose:
+    """Gets the Transformer model for trajectory and intent prediction with bbox and
+    pose data.
+    :param DefaultArguments args: Training arguments.
+    """
     model_configs = {
         "prediction_length": args.predict_length,
         "context_length": args.observe_length - 1,
         "input_size": 4,  # number of bbox coords per frame
         "num_time_features": 35,  # number of additional features
+        "encoder_layers": args.n_layers,
+        "decoder_layers": args.n_layers,
+        "encoder_attention_heads": 4,
+        "decoder_attention_heads": 4,
         "dropout": 0.125,
         "attention_dropout": 0.125,
         "lags_sequence": [1],  # defaults to 0..7
@@ -216,6 +256,9 @@ def get_transformer_traj_intent_bbox_pose(
 
 
 def get_tcn_traj_bbox_global(args: DefaultArguments) -> TCNTrajGlobal:
+    """Gets the TCN model for trajectory prediction with global image features.
+    :param DefaultArguments args: Training arguments.
+    """
     model_configs = {}
     model_configs["traj_model_opts"] = {
         "enc_in_dim": 4,
@@ -237,6 +280,9 @@ def get_tcn_traj_bbox_global(args: DefaultArguments) -> TCNTrajGlobal:
 
 
 def get_tcan_traj_bbox_global(args: DefaultArguments) -> TCANTrajGlobal:
+    """Gets the TCAN model for trajectory prediction with global image features.
+    :param DefaultArguments args: Training arguments.
+    """
     model_configs = {}
     model_configs["traj_model_opts"] = {
         "enc_in_dim": 516,
@@ -261,6 +307,9 @@ def get_tcan_traj_bbox_global(args: DefaultArguments) -> TCANTrajGlobal:
 # 3. driving decision prediction
 # 3.1 input global images only
 def get_lstm_driving_global(args: DefaultArguments):
+    """Gets the LSTM model for driving decision prediction with global image features.
+    :param DefaultArguments args: Training arguments.
+    """
     model_configs = {}
     model_configs["driving_model_opts"] = {
         "enc_in_dim": 4,  # input bbox (normalized OR not) + img_context_feat_dim
@@ -281,6 +330,9 @@ def get_lstm_driving_global(args: DefaultArguments):
 
 
 def get_tcn_driving_global(args: DefaultArguments):
+    """Gets the TCN model for driving decision prediction with global image features.
+    :param DefaultArguments args: Training arguments.
+    """
     model_configs = {}
     model_configs["driving_model_opts"] = {
         "enc_in_dim": 0,  # input bbox (normalized OR not) + img_context_feat_dim

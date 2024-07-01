@@ -1,15 +1,47 @@
 from typing import Any
+from typing_extensions import overload, override
 
 import numpy as np
 import torch
 from torch import nn
 
+from data.custom_dataset import T_intentBatch
 from models.TCAN.tcan import TemporalConvAttnNet
+from models.base_model import IConstructOptimizer
 from utils.args import DefaultArguments, ModelOpts
 from utils.cuda import *
 
 
-class TCANTrajBbox(nn.Module):
+class TCANTrajBbox(nn.Module, IConstructOptimizer):
+    """A TCAN model for trajectory prediction with bbox input.
+
+    The model consists of a Temporal Convolutional Attention Network (TCAN) that
+    processes the input bbox sequence and predicts the future trajectory.
+
+    :param DefaultArguments args: The training arguments.
+    :param ModelOpts model_opts: The model options.
+
+    :ivar DefaultArguments args: The training arguments.
+    :ivar int observe_length: The length of the observed trajectory.
+    :ivar int predict_length: The length of the predicted trajectory.
+    :ivar int output_dim: The output dimension of the model.
+    :ivar int TCAN_enc_in_dim: The input dimension of the TCAN encoder.
+    :ivar int TCAN_dec_out_dim: The output dimension of the TCAN decoder.
+    :ivar int TCAN_hidden_layers: The number of hidden layers in the TCAN.
+    :ivar float TCAN_dropout: The dropout rate in the TCAN.
+    :ivar int TCAN_kernel_size: The kernel size in the TCAN.
+    :ivar bool TCAN_skip_connections: Whether to use skip connections in the TCAN.
+    :ivar int TCAN_num_heads: The number of heads in the TCAN attention mechanism.
+    :ivar bool temp_attn: Whether to use the temporal attention mechanism.
+    :ivar TemporalConvAttnNet tcan: The TCAN model.
+    :ivar nn.Sequential fc: The fully connected layer.
+    :ivar nn.Module activation: The activation function.
+    :ivar list[nn.Module] module_list: The list of modules in the model.
+    :ivar bool intent_reasoning: Whether to use intention reasoning.
+    :ivar bool reason_embedding: Whether to use the reason embedding.
+    :ivar bool speed_embedding: Whether to use the speed embedding.
+    """
+
     def __init__(self, args: DefaultArguments, model_opts: ModelOpts) -> None:
         super().__init__()
 
@@ -63,12 +95,18 @@ class TCANTrajBbox(nn.Module):
         self.reason_embedding = "rsn" in self.args.model_name
         self.speed_embedding = "speed" in self.args.model_name
 
+    @overload
+    def forward(self, data: T_intentBatch) -> torch.Tensor: ...
+
+    @overload
+    def forward(self, data: torch.Tensor) -> torch.Tensor: ...
+
+    @override
     def forward(
         self,
-        data: (
-            dict[str, torch.Tensor | np.ndarray[Any, Any] | float | int] | torch.Tensor
-        ),
+        data: T_intentBatch | torch.Tensor,
     ) -> torch.Tensor:
+        bbox: torch.Tensor
         if isinstance(data, dict):
             bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
         else:
@@ -95,6 +133,7 @@ class TCANTrajBbox(nn.Module):
         )
         return output
 
+    @override
     def build_optimizer(
         self, args: DefaultArguments
     ) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]:
@@ -129,18 +168,33 @@ class TCANTrajBbox(nn.Module):
 
 
 class TCANTrajBboxInt(TCANTrajBbox):
+    """A TCAN model for trajectory prediction with bbox and intention input.
+
+    The model consists of a Temporal Convolutional Attention Network (TCAN) that
+    processes the input bbox sequence and intention probabilities and predicts
+    the future trajectory.
+
+    :param DefaultArguments args: The training arguments.
+    :param ModelOpts model_opts: The model options.
+    """
+
+    @override
     def forward(
-        self, data: dict[str, torch.Tensor | np.ndarray[Any, Any] | float | int]
+        self, data: T_intentBatch | tuple[torch.Tensor, torch.Tensor]
     ) -> torch.Tensor:
 
         # bs x ts x 4
-        bbox: torch.Tensor = data["bboxes"][:, : self.args.observe_length, :].type(
-            FloatTensor
-        )
+        bbox: torch.Tensor
+        intent: torch.Tensor
+        if isinstance(data, dict):
+            bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
+            intent = data["intention_prob"][:, : self.args.observe_length].type(
+                FloatTensor
+            )
+        else:
+            bbox = data[0]
+            intent = data[1]
 
-        intent: torch.Tensor = data["intention_prob"][
-            :, : self.args.observe_length
-        ].type(FloatTensor)
         # bs x ts x 1
         intent = intent.unsqueeze(2)
         assert (

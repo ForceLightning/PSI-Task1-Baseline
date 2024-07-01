@@ -1,17 +1,46 @@
 from __future__ import annotations
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LRScheduler
 from typing_extensions import override
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from data.custom_dataset import T_intentBatch
+from models.base_model import IConstructOptimizer
 from utils.args import DefaultArguments, ModelOpts
 from utils.cuda import *
 
 
-class LSTMedTrajBbox(nn.Module):
+class LSTMedTrajBbox(nn.Module, IConstructOptimizer):
+    """An LSTM encoder-decoder model for trajectory prediction with bbox input.
+
+    The model consists of an LSTM encoder and an LSTM decoder. The encoder processes the
+    input bbox sequence and produces a context vector. The decoder takes the context
+    vector and the previous decoder output as input and predicts the future
+    trajectory.
+
+    :param DefaultArguments args: The training arguments.
+    :param ModelOpts model_opts: The model options.
+
+    :ivar int enc_in_dim: The input dimension of the encoder.
+    :ivar int enc_out_dim: The output dimension of the encoder.
+    :ivar int dec_in_emb_dim: The embedding dimension of the decoder input.
+    :ivar int dec_out_dim: The output dimension of the decoder.
+    :ivar int output_dim: The output dimension of the model.
+    :ivar nn.LSTM encoder: The LSTM encoder.
+    :ivar nn.LSTM decoder: The LSTM decoder.
+    :ivar nn.Sequential fc: The fully connected layer.
+    :ivar nn.Module activation: The activation function.
+    :ivar module_list: The list of modules in the model.
+    :vartype module_list: list[nn.Module]
+    :ivar bool intent_embedding: Whether to use the intention embedding.
+    :ivar bool reason_embedding: Whether to use the reason embedding.
+    :ivar bool speed_embedding: Whether to use the speed embedding.
+    """
+
     def __init__(self, args: DefaultArguments, model_opts: ModelOpts):
-        super(LSTMedTrajBbox, self).__init__()
+        super().__init__()
 
         self.enc_in_dim = model_opts[
             "enc_in_dim"
@@ -31,7 +60,7 @@ class LSTMedTrajBbox(nn.Module):
         self.predict_length = predict_length
         self.args = args
 
-        self.backbone = None
+        self.backbone: nn.Module | None = None
 
         self.encoder = nn.LSTM(
             input_size=self.enc_in_dim,
@@ -74,7 +103,7 @@ class LSTMedTrajBbox(nn.Module):
         self.speed_embedding = "speed" in self.args.model_name
 
     @override
-    def forward(self, data: T_intentBatch):
+    def forward(self, data: T_intentBatch) -> torch.Tensor:
         bbox: torch.Tensor = data["bboxes"][:, : self.args.observe_length, :].type(
             FloatTensor
         )
@@ -90,10 +119,9 @@ class LSTMedTrajBbox(nn.Module):
         enc_last_output = enc_output[:, -1:, :]  # bs x 1 x hidden_dim
 
         # 2. decoder
-        traj_pred_list = []
-        evidence_list = []
-        prev_hidden = enc_hc
-        prev_cell = enc_nc
+        traj_pred_list: list[torch.Tensor] = []
+        prev_hidden: torch.Tensor = enc_hc
+        prev_cell: torch.Tensor = enc_nc
 
         dec_input_emb = None
         # if self.intent_embedding:
@@ -103,7 +131,7 @@ class LSTMedTrajBbox(nn.Module):
 
         for t in range(self.predict_length):
             if dec_input_emb is None:
-                dec_input = enc_last_output
+                dec_input: torch.Tensor = enc_last_output
             else:
                 dec_input = torch.cat(
                     [enc_last_output, dec_input_emb[:, t, :].unsqueeze(1)]
@@ -112,7 +140,7 @@ class LSTMedTrajBbox(nn.Module):
             dec_output, (dec_hc, dec_nc) = self.decoder(
                 dec_input, (prev_hidden, prev_cell)
             )
-            logit = self.fc(dec_output.squeeze(1))  # bs x 4
+            logit: torch.Tensor = self.fc(dec_output.squeeze(1))  # bs x 4
             traj_pred_list.append(logit)
             prev_hidden = dec_hc
             prev_cell = dec_nc
@@ -123,8 +151,11 @@ class LSTMedTrajBbox(nn.Module):
 
         return traj_pred
 
-    def build_optimizer(self, args):
-        param_group = []
+    @override
+    def build_optimizer(self, args: DefaultArguments) -> tuple[Optimizer, LRScheduler]:
+        param_group: list[
+            dict[{"params": torch.ParameterDict | nn.Parameter, "lr": float}]
+        ] = []
         learning_rate = args.lr
         if self.backbone is not None:
             for name, param in self.backbone.named_parameters():
@@ -139,16 +170,34 @@ class LSTMedTrajBbox(nn.Module):
 
         optimizer = torch.optim.Adam(param_group, lr=args.lr, eps=1e-7)
 
-        for param_group in optimizer.param_groups:
-            param_group["lr0"] = param_group["lr"]
+        for param_group_opt in optimizer.param_groups:
+            param_group_opt["lr0"] = param_group_opt["lr"]
 
         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
         # self.optimizer = optimizer
 
         return optimizer, scheduler
 
-    def lr_scheduler(self, optimizer, cur_epoch, args, gamma=10, power=0.75):
-        decay = (1 + gamma * cur_epoch / args.epochs) ** (-power)
+    def lr_scheduler(
+        self,
+        optimizer: Optimizer,
+        cur_epoch: int,
+        args: DefaultArguments,
+        gamma: float = 10,
+        power: float = 0.75,
+    ):
+        r"""Decay the learning rate of the optimizer with a power decay.
+
+        The learning rate is decayed by a factor of gamma every epoch, where
+        :math:`\texttt{lr}_t = \texttt{lr}_{t-1} \times (1 +  \gamma \times \frac{\texttt{cur_epoch}}{\texttt{args.epochs}})^{-\texttt{power}}`
+
+        :param Optimizer optimizer: The optimizer.
+        :param int cur_epoch: The current epoch.
+        :param DefaultArguments args: The training arguments.
+        :param float gamma: The gamma value.
+        :param float power: The power value.
+        """
+        decay: float = (1 + gamma * cur_epoch / args.epochs) ** (-power)
         for param_group in optimizer.param_groups:
             param_group["lr"] = param_group["lr0"] * decay
             param_group["weight_decay"] = 1e-3

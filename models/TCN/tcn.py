@@ -25,8 +25,7 @@ class Chomp1d(nn.Module):
 
 
 class TemporalBlock(nn.Module):
-    """A single temporal block that consists of two dilated causal convolutions with a
-        residual connection.
+    """A temporal block that consists of dilated causal convolutions with a residual connection.
 
     :param int n_inputs: Number of input channels.
     :param int n_outputs: Number of output channels.
@@ -109,8 +108,7 @@ class TemporalBlock(nn.Module):
 
 
 class TemporalSkipBlock(TemporalBlock):
-    """A single temporal block that consists of two dilated causal convolutions with a
-        residual connection and skip connections.
+    """A temporal block with a residual connection and skip connections.
 
     :param int n_inputs: Number of input channels.
     :param int n_outputs: Number of output channels.

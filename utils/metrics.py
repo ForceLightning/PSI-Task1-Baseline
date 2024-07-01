@@ -23,19 +23,35 @@ T_intentEvalM: TypeAlias = dict[
         "ConfusionMatrix": npt.NDArray[np.float64 | Any],
     }
 ]
+"""Type alias for intent evaluation metrics.
+
+This type alias is different from :py:data:`utils.evaluate_results.T_intentEval` due to
+a difference in key capitalization.
+
+:ivar float MSE: Mean Squared Error.
+:ivar float Acc: Accuracy.
+:ivar float F1: F1 Score.
+:ivar float mAcc: Mean Accuracy.
+:ivar np.typing.NDArray[np.float64 | Any] ConfusionMatrix: Confusion Matrix.
+"""
 
 
 def evaluate_intent(
-    target: npt.NDArray[np.float32 | np.float64],
-    target_prob: npt.NDArray[np.float32 | np.float64],
-    prediction: npt.NDArray[np.float32 | np.float64],
+    target: npt.NDArray[np.float_],
+    target_prob: npt.NDArray[np.float_],
+    prediction: npt.NDArray[np.float_],
     args: DefaultArguments,
 ) -> T_intentEvalM:
     """
-    Here we only predict one 'intention' for one track (15 frame observation). (not a sequence as before)
+    Here we only predict one 'intention' for one track (15 frame observation).
+    (not a sequence as before)
 
-    :param target: (bs x 1), hard label; target_prob: soft probability, 0-1, agreement mean([0, 0.5, 1]).
+    :param target: (bs x 1), hard label, 0 or 1.
+    :type target: np.typing.NDArray[np.float_]
+    :param target_prob: soft probability, 0-1, agreement mean([0, 0.5, 1]).
+    :type target_prob: np.typing.NDArray[np.float_]
     :param prediction: (bs), sigmoid probability, 1-dim, should use 0.5 as threshold
+    :type prediction: np.typing.NDArray[np.float_]
     :return: MSE, Accuracy, F1 Score, mAccuracy, and a confusion matrix in a dictionary.
     :rtype: T_intentEvalM
     """
@@ -76,9 +92,9 @@ def evaluate_traj(
     Evaluates the predicted trajectory of a pedestrian.
 
     :param target: (n_samples x ts x 4), original size coordinates. Notice: the 1st dimension is not batch-size
-    :type target: npt.NDArray[np.float32 | np.float64]
+    :type target: np.typing.NDArray[np.float32 | np.float64]
     :param prediction: (n_samples x ts x 4), directly predict coordinates
-    :type prediction: npt.NDArray[np.float32 | np.float64]
+    :type prediction: np.typing.NDArray[np.float32 | np.float64]
     :return: Dictionary of metrics measured at [0.5s, 1.0s, 1.5s] in the future.
     .. hlist::
         * `ADE`: Average Displacement Error (Based on the centre of the bounding box)
@@ -160,10 +176,10 @@ def evaluate_driving(
 ) -> T_drivingEval:
     """Evaluates driving predictions from ground truth and prediction values.
 
-    :param npt.NDArray[np.float_] target_speed: Ground truth speed decision targets.
-    :param npt.NDArray[np.float_] target_dir: Ground truth direction decision targets.
-    :param npt.NDArray[np.float_] pred_speed: Speed decision predictions.
-    :param npt.NDArray[np.float_] pred_dir: Direction decision predictions.
+    :param np.typing.NDArray[np.float_] target_speed: Ground truth speed decision targets.
+    :param np.typing.NDArray[np.float_] target_dir: Ground truth direction decision targets.
+    :param np.typing.NDArray[np.float_] pred_speed: Speed decision predictions.
+    :param np.typing.NDArray[np.float_] pred_dir: Direction decision predictions.
     :param DefaultArguments args: Training arguments.
 
     :returns: Dictionary containing acc, mAcc, and confusion matrices for speed and
@@ -208,7 +224,7 @@ def evaluate_driving(
 def shannon(data: npt.NDArray[np.float_]) -> np.float_:
     """Calculates the Shannon Entropy.
 
-    :param npt.NDArray[np.float_] data: Data to calculate for.
+    :param np.typing.NDArray[np.float_] data: Data to calculate for.
     :returns: Shannon Entropy
     :rtype: np.float_
     """

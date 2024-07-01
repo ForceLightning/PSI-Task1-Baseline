@@ -214,7 +214,7 @@ def main(args: DefaultArguments):
         grad_scaler=grad_scaler,
     )
     lr_finder.range_test(train_data_iter, start_lr=1e-6, end_lr=0.1, num_iter=300)
-    lr_finder.plot()
+    _ = lr_finder.plot()
 
 
 if __name__ == "__main__":

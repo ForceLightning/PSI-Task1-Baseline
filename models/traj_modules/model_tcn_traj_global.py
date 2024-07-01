@@ -22,6 +22,13 @@ class TCNTrajGlobal(nn.Module, IConstructOptimizer):
     """
     A TCN-based model for the Pedestrian Trajectory task with image features.
 
+    The model consists of a ResNet50-based CNN backbone for image features and a
+    Temporal Convolutional Network (TCN) for processing the image features and
+    predicting the future trajectory.
+
+    :param DefaultArguments args: Training command-line arguments.
+    :param ModelOpts model_opts: Model configuration options.
+
     :ivar int observe_length: Number of observed frames in the past.
     :ivar int predict_length: Number of frames to predict in the future.
     :ivar DefaultArguments args: Training command-line arguments.
@@ -52,7 +59,6 @@ class TCNTrajGlobal(nn.Module, IConstructOptimizer):
         # EncoderCNN architecture
         CNN_fc_hidden1, CNN_fc_hidden2 = 1024, 768
         CNN_embed_dim = 512  # latent dim extracted by 2D CNN
-        res_size = 224  # ResNet image size
         dropout_p = 0.0  # dropout probability
 
         # DecoderTCN architecture
@@ -147,11 +153,13 @@ class TCNTrajGlobal(nn.Module, IConstructOptimizer):
 
         tcn_input = torch.cat([visual_feats, bbox], dim=2)  # bs x (512 + 4) x ts
 
-        tcn_output = self.tcn(tcn_input.transpose(1, 2))  # bs x tcn_dec_out_dim x ts
+        tcn_output: torch.Tensor = self.tcn(
+            tcn_input.transpose(1, 2)
+        )  # bs x tcn_dec_out_dim x ts
         tcn_output = tcn_output.reshape(-1, self.TCN_dec_out_dim * self.observe_length)
         # tcn_last_output = tcn_output[:, -1:, :]
         # output = self.fc(tcn_last_output)
-        output = self.fc(tcn_output)
+        output: torch.Tensor = self.fc(tcn_output)
         output = self.activation(output).reshape(
             -1, self.predict_length, self.output_dim
         )
@@ -244,10 +252,17 @@ class TCNTrajGlobal(nn.Module, IConstructOptimizer):
 class TCANTrajGlobal(TCNTrajGlobal):
     """A Temporal Convolutional Attention-based Network (TCAN) with a CNN backbone.
 
-    :param args: Training arguments.
-    :type args: DefaultArguments
-    :param model_opts: Model configuration options.
-    :type model_opts: ModelOpts
+    The model consists of a ResNet50-based CNN backbone for image features and a
+    Temporal Convolutional Attention Network (TCAN) for processing the image features
+    and predicting the future trajectory.
+
+    :param DefaultArguments args: Training command-line arguments.
+    :param ModelOpts model_opts: Model configuration options.
+
+    :ivar int TCN_num_heads: Number of attention heads in the TCAN.
+    :ivar bool temp_attn: Whether to use temporal attention in the TCAN.
+    :ivar TemporalConvAttnNet tcn: TCAN model.
+    :ivar list[nn.Module] module_list: List of model modules.
     """
 
     def __init__(self, args: DefaultArguments, model_opts: ModelOpts) -> None:

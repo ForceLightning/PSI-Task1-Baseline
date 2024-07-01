@@ -8,6 +8,7 @@ import os
 from typing import Any
 
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 import numpy as np
 from packaging import version
 import torch
@@ -494,12 +495,12 @@ class LRFinder(object):
 
     def plot(
         self,
-        skip_start=10,
-        skip_end=5,
-        log_lr=True,
-        show_lr=None,
-        ax=None,
-        suggest_lr=True,
+        skip_start: int = 10,
+        skip_end: int = 5,
+        log_lr: bool = True,
+        show_lr: float | None = None,
+        ax: Axes | None = None,
+        suggest_lr: bool = True,
     ):
         """Plots the learning rate range test.
 

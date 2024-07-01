@@ -1,16 +1,48 @@
 from typing import Any
+from typing_extensions import overload, override
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.parametrizations import weight_norm
 
+from data.custom_dataset import T_intentBatch
 from models.TCN.tcn import TemporalConvNet
 
+from models.base_model import IConstructOptimizer
 from utils.args import DefaultArguments, ModelOpts
 from utils.cuda import *
 
 
-class TCNTrajBbox(nn.Module):
+class TCNTrajBbox(nn.Module, IConstructOptimizer):
+    """A TCN model for trajectory prediction with bbox input.
+
+    The model consists of a Temporal Convolutional Network (TCN) that processes the
+    input bbox sequence and predicts the future trajectory.
+
+    :param DefaultArguments args: The training arguments.
+    :param ModelOpts model_opts: The model options.
+
+    :ivar int enc_in_dim: The input dimension of the encoder.
+    :ivar int enc_out_dim: The output dimension of the encoder.
+    :ivar int dec_in_emb_dim: The embedding dimension of the decoder input.
+    :ivar int dec_out_dim: The output dimension of the decoder.
+    :ivar int output_dim: The output dimension of the model.
+    :ivar int n_layers: The number of layers in the TCN.
+    :ivar float dropout: The dropout rate.
+    :ivar int predict_length: The length of the predicted trajectory.
+    :ivar int kernel_size: The kernel size of the TCN.
+    :ivar bool use_skip_connections: Whether to use skip connections in the TCN.
+    :ivar DefaultArguments args: The training arguments.
+    :ivar nn.Module backbone: The backbone model.
+    :ivar TemporalConvNet tcn: The TCN model.
+    :ivar nn.Sequential fc: The fully connected layer.
+    :ivar nn.Module activation: The activation function.
+    :ivar list[nn.Module] module_list: The list of modules in the model.
+    :ivar bool intent_embedding: Whether to use the intention embedding.
+    :ivar bool reason_embedding: Whether to use the reason embedding.
+    :ivar bool speed_embedding: Whether to use the speed embedding.
+    """
+
     def __init__(self, args: DefaultArguments, model_opts: ModelOpts) -> None:
         super().__init__()
         self.enc_in_dim = model_opts["enc_in_dim"]
@@ -56,9 +88,13 @@ class TCNTrajBbox(nn.Module):
         self.reason_embedding = "rsn" in self.args.model_name
         self.speed_embedding = "speed" in self.args.model_name
 
-    def forward(self, data: dict[str, Any] | torch.Tensor) -> torch.Tensor:
+    @override
+    def forward(self, data: T_intentBatch | torch.Tensor) -> torch.Tensor:
+        enc_input: torch.Tensor
         if isinstance(data, dict):
-            bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
+            bbox: torch.Tensor = data["bboxes"][:, : self.args.observe_length, :].type(
+                FloatTensor
+            )
             enc_input = bbox
         else:
             enc_input = data
@@ -76,6 +112,7 @@ class TCNTrajBbox(nn.Module):
         )
         return output
 
+    @override
     def build_optimizer(
         self, args: DefaultArguments
     ) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]:
@@ -124,12 +161,19 @@ class TCNTrajBbox(nn.Module):
 
 
 class TCNTrajBboxInt(TCNTrajBbox):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    """A TCN model for trajectory prediction with bbox input and intention embedding."""
 
+    @overload
+    def forward(self, data: T_intentBatch) -> torch.Tensor: ...
+
+    @overload
+    def forward(self, data: tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor: ...
+
+    @override
     def forward(
-        self, data: dict[str, Any] | tuple[torch.Tensor, torch.Tensor]
+        self, data: T_intentBatch | tuple[torch.Tensor, torch.Tensor]
     ) -> torch.Tensor:
+        enc_input: torch.Tensor
         if isinstance(data, dict):
             bbox: torch.Tensor = data["bboxes"][:, : self.args.observe_length, :].type(
                 FloatTensor
