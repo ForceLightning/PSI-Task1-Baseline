@@ -166,8 +166,8 @@ class T_intentBatch(TypedDict):
     intention_prob: torch.Tensor
     frames: torch.Tensor
     total_frames: torch.Tensor
-    video_id: npt.NDArray[np.str_] | list[str]
-    ped_id: npt.NDArray[np.str_] | list[str]
+    video_id: npt.NDArray[np.str_] | list[list[str]]
+    ped_id: npt.NDArray[np.str_] | list[list[str]]
     disagree_score: torch.Tensor
     pose: torch.Tensor
     pose_masks: torch.Tensor

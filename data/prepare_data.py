@@ -146,7 +146,8 @@ def get_dataloader(
         val_loader = MultiEpochsDataLoader(
             val_dataset,
             batch_size=args.batch_size,
-            shuffle=False,
+            # shuffle=False,
+            shuffle=shuffle_train,
             # pin_memory=True,
             sampler=None,
             drop_last=False,

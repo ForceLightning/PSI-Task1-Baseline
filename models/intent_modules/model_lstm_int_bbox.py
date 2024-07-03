@@ -1,22 +1,26 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LRScheduler
+from typing_extensions import override
 
+from data.custom_dataset import T_intentBatch
+from models.base_model import IConstructOptimizer
+from utils.args import DefaultArguments, ModelOpts
 from utils.cuda import *
 
 
-class LSTMIntBbox(nn.Module):
-    def __init__(self, args, model_configs):
-        super(LSTMIntBbox, self).__init__()
+class LSTMIntBbox(nn.Module, IConstructOptimizer):
+    def __init__(self, args: DefaultArguments, model_configs: ModelOpts):
+        super().__init__()
         self.args = args
         self.model_configs = model_configs
         self.observe_length = self.args.observe_length
         self.predict_length = self.args.predict_length
 
         self.backbone = args.backbone
-        self.intent_predictor = LSTMInt(
-            self.args, self.model_configs["intent_model_opts"]
-        )
+        self.intent_predictor = LSTMInt(self.args, self.model_configs)
         # intent predictor, always output (bs x 1) intention logits
         self.traj_predictor = None
 
@@ -26,8 +30,9 @@ class LSTMIntBbox(nn.Module):
         # self.optimizer = None
         # self.build_optimizer(args)
 
-    def forward(self, data):
-        bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
+    @override
+    def forward(self, x: T_intentBatch) -> torch.Tensor:
+        bbox = x["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
         # global_imgs = data['images']
         # local_imgs = data['cropped_images']
         dec_input_emb = None  # as the additional emb for intent predictor
@@ -44,10 +49,11 @@ class LSTMIntBbox(nn.Module):
 
         return intent_pred.squeeze()
 
-    def build_optimizer(self, args):
+    @override
+    def build_optimizer(self, args: DefaultArguments) -> tuple[Optimizer, LRScheduler]:
         param_group = []
         learning_rate = args.lr
-        if self.backbone is not None:
+        if isinstance(self.backbone, nn.Module):
             for name, param in self.backbone.named_parameters():
                 if not self.args.freeze_backbone:
                     param.requres_grad = True
@@ -100,8 +106,8 @@ class LSTMIntBbox(nn.Module):
 
 
 class LSTMInt(nn.Module):
-    def __init__(self, args, model_opts):
-        super(LSTMInt, self).__init__()
+    def __init__(self, args: DefaultArguments, model_opts: ModelOpts):
+        super().__init__()
 
         enc_in_dim = model_opts["enc_in_dim"]
         enc_out_dim = model_opts["enc_out_dim"]
@@ -143,14 +149,17 @@ class LSTMInt(nn.Module):
         # self._reset_parameters()
         # assert self.enc_out_dim == self.dec_out_dim
 
-    def forward(self, enc_input, dec_input_emb=None):
-        enc_output, (enc_hc, enc_nc) = self.encoder(enc_input)
+    @override
+    def forward(
+        self, enc_input: torch.Tensor, dec_input_emb: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        enc_output, _ = self.encoder(enc_input)
         # because 'batch_first=True'
         # enc_output: bs x ts x (1*hiden_dim)*enc_hidden_dim --- only take the last output, concatenated with dec_input_emb, as input to decoder
         # enc_hc:  (n_layer*n_directions) x bs x enc_hidden_dim
         # enc_nc:  (n_layer*n_directions) x bs x enc_hidden_dim
-        enc_last_output = enc_output[:, -1:, :]  # bs x 1 x hidden_dim
-        output = self.fc(enc_last_output)
+        enc_last_output: torch.Tensor = enc_output[:, -1:, :]  # bs x 1 x hidden_dim
+        output: torch.Tensor = self.fc(enc_last_output)
         outputs = output.unsqueeze(1)  # bs x 1 --> bs x 1 x 1
         return outputs  # shape: bs x predict_length x output_dim, no activation
 

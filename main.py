@@ -65,7 +65,7 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
                 os.path.join(
                     args.checkpoint_path,
                     "log",
-                    f"profiling_results_{prof.step_num}.json",
+                    f"profiling_results_{prof.step_num}.pt.trace.json",
                 )
             )
             torch.profiler.tensorboard_trace_handler(
@@ -77,7 +77,7 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
                 torch.profiler.ProfilerActivity.CPU,
                 torch.profiler.ProfilerActivity.CUDA,
             ],
-            record_shapes=True,
+            # record_shapes=True,
             profile_memory=True,
             schedule=torch.profiler.schedule(
                 wait=1, warmup=1, active=2, repeat=1, skip_first=8

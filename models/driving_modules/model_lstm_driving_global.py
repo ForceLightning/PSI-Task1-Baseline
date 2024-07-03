@@ -1,4 +1,5 @@
 from typing import overload
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,13 +8,9 @@ import torchvision.models as models
 
 from data.custom_dataset import T_drivingBatch
 from utils.args import DefaultArguments, ModelOpts
+from utils.cuda import *
 
 # import torchvision.transforms as transforms
-
-cuda = True if torch.cuda.is_available() else False
-device = torch.device("cuda:0" if cuda else "cpu")
-FloatTensor = torch.cuda.BFloat16Tensor if cuda else torch.FloatTensor
-LongTensor = torch.cuda.LongTensor if cuda else torch.LongTensor
 
 
 class ResLSTMDrivingGlobal(nn.Module):
@@ -50,7 +47,7 @@ class ResLSTMDrivingGlobal(nn.Module):
             drop_p=dropout_p,
             CNN_embed_dim=CNN_embed_dim,
             args=args,
-        ).to(device)
+        ).to(DEVICE)
         num_pred_class = 3
         self.rnn_decoder_speed = DecoderRNN(
             CNN_embed_dim=CNN_embed_dim,
@@ -59,7 +56,7 @@ class ResLSTMDrivingGlobal(nn.Module):
             h_FC_dim=RNN_FC_dim,
             drop_p=dropout_p,
             num_classes=num_pred_class,
-        ).to(device)
+        ).to(DEVICE)
         self.rnn_decoder_dir = DecoderRNN(
             CNN_embed_dim=CNN_embed_dim,
             h_RNN_layers=RNN_hidden_layers,
@@ -67,7 +64,7 @@ class ResLSTMDrivingGlobal(nn.Module):
             h_FC_dim=RNN_FC_dim,
             drop_p=dropout_p,
             num_classes=num_pred_class,
-        ).to(device)
+        ).to(DEVICE)
 
         # if model_opts['output_activation'] == 'tanh':
         #     self.activation = nn.Tanh()

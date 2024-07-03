@@ -1,10 +1,9 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.nn.utils.parametrizations import weight_norm
+from typing_extensions import override
 
+from data.custom_dataset import T_intentBatch
 from models.TCN.tcn import TemporalConvNet
-
 from utils.args import DefaultArguments, ModelOpts
 from utils.cuda import *
 
@@ -18,15 +17,14 @@ class TCNINTBbox(nn.Module):
         self.predict_length = self.args.predict_length
 
         self.backbone = args.backbone
-        self.intent_predictor = TCNINT(
-            self.args, self.model_configs["intent_model_opts"]
-        )
+        self.intent_predictor = TCNINT(self.args, self.model_configs)
 
         self.module_list = self.intent_predictor.module_list
         self.network_list = [self.intent_predictor]
 
-    def forward(self, data: torch.Tensor) -> torch.Tensor:
-        bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
+    @override
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        bbox = x["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
         assert bbox.shape[1] == self.observe_length
 
         intent_pred = self.intent_predictor(bbox)
@@ -37,7 +35,7 @@ class TCNINTBbox(nn.Module):
     ) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]:
         param_group = []
         learning_rate = args.lr
-        if self.backbone is not None:
+        if isinstance(self.backbone, nn.Module):
             for name, param in self.backbone.named_parameters():
                 if not self.args.freeze_backbone:
                     param.requires_grad = True
@@ -70,7 +68,7 @@ class TCNINTBbox(nn.Module):
         nn.init.xavier_uniform_(self.fc.weight)
         self.fc.bias.data.fill_(0)
 
-    def predict_intent(self, data):
+    def predict_intent(self, data: T_intentBatch) -> torch.Tensor:
         bbox = data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
         assert bbox.shape[1] == self.observe_length
 
@@ -79,7 +77,7 @@ class TCNINTBbox(nn.Module):
 
 
 class TCNINT(nn.Module):
-    def __init__(self, args, model_opts):
+    def __init__(self, args: DefaultArguments, model_opts: ModelOpts):
         super(TCNINT, self).__init__()
 
         self.enc_in_dim = model_opts["enc_in_dim"]
@@ -116,8 +114,9 @@ class TCNINT(nn.Module):
 
         self.module_list = [self.tcn, self.fc]
 
-    def forward(self, enc_input):
-        tcn_output = self.tcn(enc_input.transpose(1, 2)).transpose(1, 2)
+    @override
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        tcn_output = self.tcn(x.transpose(1, 2)).transpose(1, 2)
         tcn_last_output = tcn_output[:, -1:, :]
         output = self.fc(tcn_last_output)
         outputs = output.unsqueeze(1)

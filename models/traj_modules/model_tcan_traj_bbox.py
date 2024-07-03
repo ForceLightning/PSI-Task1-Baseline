@@ -117,10 +117,11 @@ class TCANTrajBbox(nn.Module, IConstructOptimizer):
         enc_input = bbox
 
         tcan_output: torch.Tensor
-        if self.temp_attn:
-            tcan_output, _ = self.tcan(enc_input)
-        else:
-            tcan_output = self.tcan(enc_input)
+        # if self.temp_attn:
+        #     tcan_output, _ = self.tcan(enc_input)
+        # else:
+        #     tcan_output = self.tcan(enc_input)
+        tcan_output = self.tcan(enc_input)
 
         tcan_output = tcan_output.transpose(1, 2)
         tcan_output = tcan_output.reshape(

@@ -614,7 +614,7 @@ class TransformerTrajIntentBboxPose(TransformerTrajBboxPose, IConstructOptimizer
         )
 
         traj_full_preds, dec_last_hidden = self._generate_with_last_hidden_state(
-            outputs
+            outputs, past_values, future_time_features
         )
 
         traj_preds = traj_full_preds.sequences.mean(dim=1)
@@ -626,7 +626,10 @@ class TransformerTrajIntentBboxPose(TransformerTrajBboxPose, IConstructOptimizer
 
     @torch.no_grad()
     def _generate_with_last_hidden_state(
-        self, outputs: Seq2SeqTSModelOutput
+        self,
+        outputs: Seq2SeqTSModelOutput,
+        past_values: torch.Tensor,
+        future_time_features: torch.Tensor,
     ) -> tuple[SampleTSPredictionOutput, torch.Tensor]:
         decoder = self.transformer.model.get_decoder()
         enc_last_hidden = outputs.encoder_last_hidden_state
@@ -660,7 +663,7 @@ class TransformerTrajIntentBboxPose(TransformerTrajBboxPose, IConstructOptimizer
         # greedy decoding
         dec_last_hidden: torch.Tensor
         for k in range(self.config.prediction_length):
-            lagged_sequence = self.model.get_lagged_subsequences(
+            lagged_sequence = self.transformer.model.get_lagged_subsequences(
                 sequence=repeated_past_values,
                 subsequences_length=1 + k,
                 shift=1,
@@ -681,8 +684,8 @@ class TransformerTrajIntentBboxPose(TransformerTrajBboxPose, IConstructOptimizer
             )
             dec_last_hidden = dec_output.last_hidden_state
 
-            params = self.parameter_projection(dec_last_hidden[:, -1:])
-            distr = self.output_distribution(
+            params = self.transformer.parameter_projection(dec_last_hidden[:, -1:])
+            distr = self.transformer.output_distribution(
                 params, loc=repeated_loc, scale=repeated_scale
             )
             next_sample = distr.sample()
@@ -697,7 +700,8 @@ class TransformerTrajIntentBboxPose(TransformerTrajBboxPose, IConstructOptimizer
 
         pred_output = SampleTSPredictionOutput(
             sequences=concat_future_samples.reshape(
-                -1, self.config.prediction_length, self.config.target_dim
+                (-1, self.transformer.config.prediction_length)
+                + self.transformer.target_shape,
             )
         )
 

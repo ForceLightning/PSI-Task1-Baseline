@@ -9,7 +9,9 @@ from transformers import TimeSeriesTransformerConfig
 
 from models.driving_modules.model_lstm_driving_global import ResLSTMDrivingGlobal
 from models.driving_modules.model_tcn_driving_global import ResTCNDrivingGlobal
+from models.intent_modules.model_lstm_int_bbox import LSTMIntBbox
 from models.intent_modules.model_tcn_int_bbox import TCNINTBbox
+from models.traj_modules.model_lstmed_traj_bbox import LSTMedTrajBbox
 from models.traj_modules.model_tcan_traj_bbox import TCANTrajBbox, TCANTrajBboxInt
 from models.traj_modules.model_tcn_traj_bbox import TCNTrajBbox, TCNTrajBboxInt
 from models.traj_modules.model_tcn_traj_global import TCANTrajGlobal, TCNTrajGlobal
@@ -18,7 +20,7 @@ from models.traj_modules.model_transformer_traj_bbox import (
     TransformerTrajBboxPose,
     TransformerTrajIntentBboxPose,
 )
-from utils.args import DefaultArguments
+from utils.args import DefaultArguments, ModelOpts
 from utils.cuda import *
 
 TRANSFORMER_BASE_CONFIG = {
@@ -46,8 +48,12 @@ def build_model(
     :rtype: tuple[torch.nn.Module, torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]
     """
     match args.model_name:
+        case "lstm_int_bbox":
+            model = get_lstm_intent_bbox(args).to(DEVICE)
         case "tcn_int_bbox":
             model = get_tcn_intent_bbox(args).to(DEVICE)
+        case "lstm_traj_bbox":
+            model = get_lstmed_traj_bbox(args).to(DEVICE)
         case "tcn_traj_bbox":
             model = get_tcn_traj_bbox(args).to(DEVICE)
         case "tcn_traj_bbox_int":
@@ -77,6 +83,29 @@ def build_model(
 
 # 1. Intent prediction
 # 1.1 input bboxes only
+def get_lstm_intent_bbox(args: DefaultArguments) -> LSTMIntBbox:
+    """Gets the LSTM model for intent prediction.
+    :param DefaultArguments args: Training arguments.
+    """
+    model_configs: dict[str, ModelOpts] = {}
+    model_configs["intent_model_opts"] = {
+        "enc_in_dim": 4,  # input bbox (normalized OR not) + img_context_feat_dim
+        "enc_out_dim": 64,
+        "dec_in_emb_dim": None,  # encoder output + bbox
+        "dec_out_dim": 64,
+        "output_dim": 1,  # intent prediction, output logits, add activation later
+        "n_layers": 1,
+        "dropout": 0.5,
+        "observe_length": args.observe_length,  # 15
+        "predict_length": 1,  # only predict one intent
+        "return_sequence": False,  # False for reason/intent/trust. True for trajectory
+        "output_activation": "None",  # [None | tanh | sigmoid | softmax]
+    }
+    args.model_configs = model_configs
+    model = LSTMIntBbox(args, model_configs["intent_model_opts"])
+    return model
+
+
 def get_tcn_intent_bbox(args: DefaultArguments) -> TCNINTBbox:
     """Gets the TCN model for intent prediction.
     :param DefaultArguments args: Training arguments.
@@ -98,7 +127,30 @@ def get_tcn_intent_bbox(args: DefaultArguments) -> TCNINTBbox:
         "use_skip_connection": True,
     }
     args.model_configs = model_configs
-    model = TCNINTBbox(args, model_configs)
+    model = TCNINTBbox(args, model_configs["intent_model_opts"])
+    return model
+
+
+def get_lstmed_traj_bbox(args: DefaultArguments) -> LSTMedTrajBbox:
+    """Gets the LSTM model for trajectory prediction.
+    :param DefaultArguments args: Training arguments.
+    """
+    model_configs = {}
+    model_configs["traj_model_opts"] = {
+        "enc_in_dim": 4,  # input bbox (normalized OR not) + img_context_feat_dim
+        "enc_out_dim": 64,
+        "dec_in_emb_dim": 0,  # intent(1), speed(1), rsn(? Bert feats dim)
+        "dec_out_dim": 64,
+        "output_dim": 4,  # intent prediction, output logits, add activation later
+        "n_layers": 1,
+        "dropout": 0.5,
+        "observe_length": args.observe_length,  # 15
+        "predict_length": args.predict_length,  # only predict one intent
+        "return_sequence": True,  # False for reason/intent/trust. True for trajectory
+        "output_activation": "None",  # [None | tanh | sigmoid | softmax]
+    }
+    args.model_configs = model_configs
+    model = LSTMedTrajBbox(args, model_configs["traj_model_opts"])
     return model
 
 
@@ -156,7 +208,7 @@ def get_tcan_traj_bbox(args: DefaultArguments) -> TCANTrajBbox:
     """
     model_configs = {}
     model_configs["traj_model_opts"] = {
-        "enc_in_dim": 0,
+        "enc_in_dim": 4,
         "enc_out_dim": 64,
         "dec_in_emb_dim": 0,
         "dec_out_dim": 64,
