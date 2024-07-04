@@ -74,7 +74,7 @@ def plot_pose_from_video(
                 continue
 
             np_dets = np.array(dets)
-            kp_np_dets = np.array(kp_dets)
+            np_kp_dets = np.array(kp_dets)
 
             if len(np_dets) == 0:
                 np_dets = np.empty((0, 6))
@@ -83,10 +83,10 @@ def plot_pose_from_video(
 
             if tracks.shape[0] != 0:
                 inds = tracks[:, 7].astype("int")  # float64 to int
-                kps = kp_np_dets[inds]
+                kps = np_kp_dets[inds]
 
                 pose_plotter.plot_keypoints(image=im, keypoints=kps)
-                tracker.plot_results(im, show_trajectories=False)
+                _ = tracker.plot_results(im, show_trajectories=True)
 
             cv2.imshow(f"{tracker.__class__} detection", im)
             key = cv2.waitKey(1) & 0xFF

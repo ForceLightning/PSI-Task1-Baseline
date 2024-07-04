@@ -27,6 +27,7 @@ def get_dataloader(
     shuffle_train: bool = True,
     drop_last_train: bool = True,
     load_test: bool = False,
+    yolo_transforms: bool = False,
 ) -> tuple[DataLoader[Any], DataLoader[Any], DataLoader[Any] | None]:
     """Instantiatees dataloaders based on the prediction task.
 
@@ -78,22 +79,46 @@ def get_dataloader(
     # Create video dataset and dataloader
     match (args.task_name):
         case "driving_decision":
-            train_dataset = DrivingDecisionDataset(train_d, args)
-            val_dataset = DrivingDecisionDataset(val_d, args)
+            train_dataset = DrivingDecisionDataset(
+                train_d, args, apply_yolo_transforms=yolo_transforms
+            )
+            val_dataset = DrivingDecisionDataset(
+                val_d, args, apply_yolo_transforms=yolo_transforms
+            )
             test_dataset = (
-                DrivingDecisionDataset(test_d, args) if load_test and test_d else None
+                DrivingDecisionDataset(
+                    test_d, args, apply_yolo_transforms=yolo_transforms
+                )
+                if load_test and test_d
+                else None
             )
         case "ped_intent":
-            train_dataset = PedestrianIntentDataset(train_d, args)
-            val_dataset = PedestrianIntentDataset(val_d, args)
+            train_dataset = PedestrianIntentDataset(
+                train_d, args, apply_yolo_transforms=yolo_transforms
+            )
+            val_dataset = PedestrianIntentDataset(
+                val_d, args, apply_yolo_transforms=yolo_transforms
+            )
             test_dataset = (
-                PedestrianIntentDataset(test_d, args) if load_test and test_d else None
+                PedestrianIntentDataset(
+                    test_d, args, apply_yolo_transforms=yolo_transforms
+                )
+                if load_test and test_d
+                else None
             )
         case "ped_traj":
-            train_dataset = PedestrianIntentDataset(train_d, args)
-            val_dataset = PedestrianIntentDataset(val_d, args)
+            train_dataset = PedestrianIntentDataset(
+                train_d, args, apply_yolo_transforms=yolo_transforms
+            )
+            val_dataset = PedestrianIntentDataset(
+                val_d, args, apply_yolo_transforms=yolo_transforms
+            )
             test_dataset = (
-                PedestrianIntentDataset(test_d, args) if load_test and test_d else None
+                PedestrianIntentDataset(
+                    test_d, args, apply_yolo_transforms=yolo_transforms
+                )
+                if load_test and test_d
+                else None
             )
         case _:
             raise NotImplementedError

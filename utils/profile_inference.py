@@ -16,16 +16,16 @@ from utils.cuda import *
 torch._dynamo.config.suppress_errors = True
 
 TASK_MODELS: dict[Literal["ped_intent", "ped_traj", "driving_decision"], list[str]] = {
-    # "ped_intent": ["lstm_int_bbox", "tcn_int_bbox"],
+    "ped_intent": ["lstm_int_bbox", "tcn_int_bbox"],
     "ped_traj": [
-        # "lstm_traj_bbox",
-        # "tcn_traj_bbox",
-        # "tcn_traj_bbox_int",
-        # "tcn_traj_global",
-        # "tcan_traj_bbox",
-        # "tcan_traj_global",
-        # "transformer_traj_bbox",
-        # "transformer_traj_bbox_pose",
+        "lstm_traj_bbox",
+        "tcn_traj_bbox",
+        "tcn_traj_bbox_int",
+        "tcn_traj_global",
+        "tcan_traj_bbox",
+        "tcan_traj_global",
+        "transformer_traj_bbox",
+        "transformer_traj_bbox_pose",
         "transformer_traj_intent_bbox_pose",
     ],
     "driving_decision": ["reslstm_driving_global", "restcn_driving_global"],

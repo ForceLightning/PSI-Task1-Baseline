@@ -15,6 +15,7 @@ from numpy import typing as npt
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset, Sampler
 from torchvision.transforms import v2
+from tqdm.auto import tqdm
 from typing_extensions import override
 
 from data.process_sequence import T_drivingSeqNumpy, T_intentSeqNumpy
@@ -189,12 +190,14 @@ class VideoDataset(Dataset[Any]):
         data: T_intentSeqNumpy | T_drivingSeqNumpy,
         args: DefaultArguments,
         stage: str = "train",
+        apply_yolo_transforms: bool = False,
     ) -> None:
         super().__init__()
         self.data = data
         self.args = args
         self.stage = stage
         self.transform: v2.Compose
+        self.apply_yolo_transforms = apply_yolo_transforms
         self.set_transform()
         self.images_path = os.path.join(args.dataset_root_path, "frames")
 
@@ -359,6 +362,16 @@ class VideoDataset(Dataset[Any]):
         """Sets the transformation for the images based on the stage of the dataset"""
         # ! Chris: Consider that the backbone embeddings are being loaded at training time, should
         # ! the transformations still perform random resized crops and horizontal flips?
+        if not self.apply_yolo_transforms:
+            self.transform = v2.Compose(
+                [
+                    v2.ToPILImage(),
+                    v2.Resize((640, 640)),
+                    v2.ToImage(),
+                    v2.ToDtype(torch.float32, scale=True),
+                ]
+            )
+            return
         match (self.stage):
             case "train":
                 resize_size = 256
@@ -858,7 +871,7 @@ class YoloDataset(Dataset[Any]):
         return len(os.listdir(self.dataset_path))
 
     @override
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int):
         result_file = os.path.join(self.dataset_path, self.yolo_results[idx])
         with open(result_file, "r") as f:
             lines = f.readlines()
