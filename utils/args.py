@@ -2,8 +2,9 @@
 """
 
 import os
-from typing import Any, Literal, TypedDict
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Literal, TypedDict
 
 ROOT_DIR = "../"
 
@@ -13,51 +14,57 @@ class DefaultArguments:
     """Default arguments for training.
 
     :param dataset: The dataset to perform train/val/test on.
-    :type dataset: Literal['PSI2.0'] | Literal['PSI1.0']
+    :type dataset: Literal['PSI2.0', 'PSI1.0']
     :param task_name: The task to perform train/val/test on.
-    :type task_name: Literal['ped_intent'] | Literal['ped_traj'] | Literal['driving_decision']
+    :type task_name: Literal['ped_intent', 'ped_traj', 'driving_decision']
     :param video_splits: Path to the train/val/test splitting JSON.
-    :type video_splits: os.PathLike | str
+    :type video_splits: os.PathLike or str
     :param dataset_root_path: Path to the dataset root (dataset must be a directory in this path).
-    :type dataset_root_path: os.PathLike | str
+    :type dataset_root_path: os.PathLike or str
     :param database_path: Path to the database directory.
-    :type database_path: os.PathLike | str
+    :type database_path: os.PathLike or str
     :param database_file: Filename of pickled database.
     :type database_file: str
     :param fps: FPS of original video, PSI and PEI == 30.
     :type fps: int
     :param seq_overlap_rate: Train/Val rate of the overlapping frames of sliding windows,
-        `(1 - rate) * seq_length` is the step size.
+    `(1 - rate) * seq_length` is the step size.
     :type seq_overlap_rate: float
     :param test_seq_overlap_rate: Test overlap rate of the overlapping frames of sliding windows,
-        `(1 - rate) * seq_length` is the step size.
+    `(1 - rate) * seq_length` is the step size.
     :type test_seq_overlap_rate: float
     :param intent_num: Type of intention categories. 2: {cross / not-cross} | 3 {not-sure}
-    :type intent_num: Literal[2] | Literal[3]
-    :param intent_type: Type of intention lables, out of 24 annotators. Only when set to separate
-        can the NLP reasoning be of use, otherwise you may take the weighted mean of NLP
-        embeddings, defaults to 'mean'.
-    :type intent_type: Literal['major'] | Literal['mean'] | Literal['separate'] | Literal['soft_vote']
+    :type intent_num: Literal[2] or Literal[3]
+    :param intent_type: Type of intention lables, out of 24 annotators. Only when set
+    to separate can the NLP reasoning be of use, otherwise you may take the weighted
+    mean of NLP embeddings, defaults to 'mean'.
+    :type intent_type: Literal['major', 'mean', 'separate', 'soft_vote']
     :param observe_length: Sequence length of one observed clip, defaults to 15.
     :type observe_length: int
-    :param predict_length: Sequence length of predicted trajectory/intention, defaults to 45.
+    :param predict_length: Sequence length of predicted trajectory/intention, defaults
+    to 45.
     :type predict_length: int
-    :param max_track_size: Sequence length of observed + predicted trajectory/intention, defaults to 60.
+    :param max_track_size: Sequence length of observed + predicted trajectory/
+    intention, defaults to 60.
     :type max_track_size: int
-    :param crop_mode: Cropping mode of cropping the region surrounding the pedestrian, defaults to 'enlarge'.
+    :param crop_mode: Cropping mode of cropping the region surrounding the pedestrian,
+    defaults to 'enlarge'.
     :type crop_mode: str
-    :param balance_data: Whether to use a balanced data sampler with random class weights, defaults to False.
+    :param balance_data: Whether to use a balanced data sampler with random class
+    weights, defaults to False.
     :type balance_data: bool
     :param normalize_bbox: How to normalize bounding boxes, defaults to None.
-    :type normalize_bbox: Literal['L2'] | Literal['subtract_first_frame'] | Literal['divide_image_size'] | None
+    :type normalize_bbox: Literal['L2', 'subtract_first_frame', 'divide_image_size'] or None
     :param image_shape: Image shape: PSI (1280, 720), defaults to (1280, 720).
     :type image_shape: tuple[int, int]
-    :param load_image: Whether to load the image to the backbone model, defaults to False.
+    :param load_image: Whether to load the image to the backbone model, defaults to
+    False.
     :type load_image: bool
 
     :param backbone: Backbone model type, defaults to ''.
-    :type backbone: Literal['resnet50'] | Literal['vgg16'] | Literal['faster_rcnn']
-    :param freeze_backbone: Whether to freeze the backbone model layers during training, defaults to False.
+    :type backbone: Literal['resnet50', 'vgg16', 'faster_rcnn']
+    :param freeze_backbone: Whether to freeze the backbone model layers during
+    training, defaults to False.
     :type freeze_backbone: bool
     :param model_name: Model name, defaults to 'lstm'.
     :type model_name: str
@@ -90,8 +97,11 @@ class DefaultArguments:
     :type intent_positive_weight: float
     :param traj_loss: Loss function for trajectory, defaults to ['mse'].
     :type traj_loss: list[str]
-    :param steps_per_epoch: Number of mini-batches per epoch, used for the OneCycleLR, defaults to 0.
+    :param steps_per_epoch: Number of mini-batches per epoch, used for the OneCycleLR,
+    defaults to 0.
     :type steps_per_epoch: int
+    :param list[str] driving_loss: Loss function for driving decision, defaults to
+    ["cross_entropy"]
 
     :param val_freq: Validation frequency, defaults to 10.
     :type val_freq: int
@@ -144,7 +154,7 @@ class DefaultArguments:
     model_name: str = "lstm"
     intent_model: bool = True
     traj_model: bool = False
-    model_configs: dict = field(default_factory=dict)
+    model_configs: dict[str, Any] = field(default_factory=lambda: {})
 
     # About training
     checkpoint_path: str = "ckpts"
@@ -155,13 +165,14 @@ class DefaultArguments:
     loss_weights: dict[str, float] = field(
         default_factory=dict
     )  # weight of loss terms {loss_intent, loss_traj}
-    intent_loss: Literal["bce"] | Literal["mse"] | Literal["cross_entropy"] = "bce"
+    intent_loss: Literal["bce", "mse", "cross_entropy"] = "bce"
     intent_disagreement: float = -1.0
     ignore_uncertain: bool = False
     intent_positive_weight: float = 1.0
     traj_loss: list[str] = field(default_factory=lambda: ["mse"])
     steps_per_epoch: int = 0
     comment: str = ""
+    driving_loss: list[str] = field(default_factory=lambda: ["cross_entropy"])
 
     # Other parameters
     val_freq: int = 10
@@ -172,6 +183,10 @@ class DefaultArguments:
     kernel_size: int = 4
     profile_execution: bool = False
     compile_model: bool = False
+
+    # YOLO
+    classes: int | list[int] = 0
+    source: str | Path = "../PSI2.0_Test/videos/video_0147.mp4"
 
 
 class ModelOpts(TypedDict):

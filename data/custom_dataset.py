@@ -4,7 +4,7 @@ import abc
 import ast
 import os
 from copy import deepcopy
-from typing import Any, Generator, Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 import cv2
 import numpy as np
@@ -816,6 +816,7 @@ class MultiEpochsDataLoader(DataLoader[Any]):
         self._items_to_consume = 0
         self._last_consume_item = -1
 
+    @override
     def __len__(self) -> int:
         return (
             len(self.sampler)
@@ -823,7 +824,8 @@ class MultiEpochsDataLoader(DataLoader[Any]):
             else len(self.batch_sampler.sampler)
         )
 
-    def __iter__(self):  # type: ignore[reportImplicitOverride] Need Python 3.12 for this
+    @override
+    def __iter__(self):
         for _ in range(self._items_to_consume - 1 - self._last_consume_item):
             next(self.iterator)
         self._items_to_consume = len(self)
@@ -844,15 +846,18 @@ class _RepeatSampler:
             yield from iter(self.sampler)
 
 
-class YoloDataset(Dataset):
-        def __init__(self, dataset_path):
-            self.dataset_path = dataset_path
-            file_list = os.listdir(dataset_path)
-            self.yolo_results = sorted(file_list, key=lambda x: int(x.split('_')[-1].split('.')[0]))
+class YoloDataset(Dataset[Any]):
+    def __init__(self, dataset_path: str):
+        self.dataset_path = dataset_path
+        file_list = os.listdir(dataset_path)
+        self.yolo_results = sorted(
+            file_list, key=lambda x: int(x.split("_")[-1].split(".")[0])
+        )
 
-        def __len__(self):
-            return len(os.listdir(self.dataset_path))  
+    def __len__(self):
+        return len(os.listdir(self.dataset_path))
 
+    @override
     def __getitem__(self, idx):
         result_file = os.path.join(self.dataset_path, self.yolo_results[idx])
         with open(result_file, "r") as f:

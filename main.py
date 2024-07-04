@@ -3,35 +3,18 @@
 
 from __future__ import annotations
 
-import glob
 import json
 import os
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
-import cv2
-import mediapipe as mp
 import numpy as np
 import torch
 import torch.nn as nn
-from boxmot import BoTSORT, BYTETracker, DeepOCSORT
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
 from sklearn.model_selection import ParameterSampler
 from torch.utils.tensorboard.writer import SummaryWriter
-from ultralytics import YOLO
-from yolo_tracking.boxmot.utils import ROOT
-from yolo_tracking.tracking.track import run
 
-from data.custom_dataset import YoloDataset
-from data.prepare_data import (
-    get_dataloader,
-    get_video_dimensions,
-    save_data_to_txt,
-    visualise_annotations,
-    visualise_intent,
-)
+from data.prepare_data import get_dataloader
 from database.create_database import create_database
 from eval import get_test_traj_gt, predict_driving, predict_intent, predict_traj
 from models.build_model import build_model
@@ -41,42 +24,14 @@ from utils.args import DefaultArguments
 from utils.evaluate_results import evaluate_driving, evaluate_intent, evaluate_traj
 from utils.get_test_intent_gt import get_intent_gt, get_test_driving_gt
 from utils.log import RecordResults
-from utils.plotting import (
-    PosePlotter,
-    draw_landmarks_on_image,
-    overlay,
-    road_lane_detection,
-)
 
 
-def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
+def train(args: DefaultArguments) -> tuple[float | np.floating[Any], float]:
     """Main function for training and testing the model.
 
     :param DefaultArguments args: The training arguments.
     :return: The validation score and test accuracy.
     """
-    # Set args.classes to 0 for pedestrian tracking
-    args.classes = 0
-
-    # If video source source is from test
-    args.source = os.path.join(os.getcwd(), "PSI2.0_Test", "videos", "video_0147.mp4")
-
-    file_name = args.source.split("\\")[-1].split(".")[0]
-
-    model = YOLO("yolov8s.pt")
-    tracker = DeepOCSORT(
-        model_weights=Path("osnet_x0_25_msmt17.pt"),  # which ReID model to use
-        device="cuda:0",
-        fp16=False,
-    )
-    # If video source is from val
-    args.source = os.path.join(os.getcwd(), "PSI_Videos", "videos", "video_0131.mp4")
-    file_name = args.source.split("\\")[-1].split(".")[0]
-    width, height = get_video_dimensions(args.source)
-    run(args)
-
-    bbox_holder, frames_holder, video_id = consolidate_yolo_data(width, height)
-    save_data_to_txt(bbox_holder, frames_holder, video_id)
     writer = SummaryWriter(args.checkpoint_path, comment=args.comment)
     recorder = RecordResults(args)
     if "transformer" in args.model_name:  # handles "lag" in the sequence
@@ -90,86 +45,6 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
     train_loader, val_loader, test_loader = get_dataloader(args)
     args.steps_per_epoch = int(np.ceil(len(train_loader.dataset) / args.batch_size))
 
-    example_data = YoloDataset(os.path.join(ROOT, "yolo_results_data"))
-
-    # num_workers > 0 gives me error
-    example_loader = torch.utils.data.DataLoader(
-        example_data,
-        batch_size=args.batch_size,
-        shuffle=False,
-        pin_memory=True,
-        sampler=None,
-        num_workers=0,
-    )
-
-    yolo = YOLO("yolov8s-pose.pt")
-    tracker = BoTSORT(
-        model_weights=Path("osnet_x0_25_msmt17.pt"), device="cuda:0", fp16=True
-    )
-
-    pose_plotter = PosePlotter()
-
-    vid = cv2.VideoCapture(args.source)
-
-    # frame_number = 0
-    #
-    # while True:
-    #     ret, im = vid.read()
-    #
-    #     if not ret :
-    #         break
-    #
-    #     # Increment frame number
-    #     frame_number += 1
-    #     result = model.predict(im, verbose=False, classes=[0], conf=0.15)
-    #     dets = []
-    #     kp_dets = []
-    #     result = result[0]
-    #     # im = result.plot()
-    #
-    #     for k in result.keypoints:
-    #         conf = k.conf
-    #         kp = k.data # x, y, visibility - xy non-normalized
-    #         kp_dets.append(kp.tolist())
-    #
-    #     for box in result.boxes:
-    #         cls = int(box.cls[0].item())
-    #         cords = box.xyxy[0].tolist()
-    #         conf = box.conf[0].item()
-    #         id = box.id
-    #         dets.append([cords[0], cords[1], cords[2], cords[3], conf, cls])
-    #
-    #     dets = np.array(dets)
-    #     kp_dets = np.array(kp_dets)
-    #
-    #     if len(dets) == 0:
-    #         dets = np.empty((0, 6))
-    #
-    #     tracks = tracker.update(dets, im)
-    #     if tracks.shape[0] != 0:
-    #     #     x1 = tracks[0][0]
-    #     #     y1 = tracks[0][1]
-    #     #     x2 = tracks[0][2]
-    #     #     y2 = tracks[0][3]
-    #     #     id = tracks[0][4]
-    #     #     conf = tracks[0][5]
-    #     #     cls = tracks[0][6]
-    #     #     with open(file_name + ".txt", 'a') as f:
-    #     #         f.write(f"{int(id)} {x1} {y1} {x2} {y2} {conf} {int(cls)} {frame_number}\n")
-    #
-    #         inds = tracks[:, 7].astype('int') # float64 to int
-    #         keypoints = kp_dets[inds]
-    #
-    #         pose_plotter.plot_keypoints(image=im, keypoints=keypoints)
-    #         tracker.plot_results(im, show_trajectories=False)
-    #
-    #     cv2.imshow('BoxMOT detection', im)
-    #     key = cv2.waitKey(1) & 0xFF
-    #     if key == ord(' ') or key == ord('q'):
-    #         break
-
-    vid.release()
-    cv2.destroyAllWindows()
     """ 2. Create models """
     model, optimizer, scheduler = build_model(args)
     if args.compile_model:
@@ -194,8 +69,8 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
                     f"profiling_results_{prof.step_num}.pt.trace.json",
                 )
             )
-            torch.profiler.tensorboard_trace_handler(
-                os.path.join(args.checkpoint_path, "log")
+            _ = torch.profiler.tensorboard_trace_handler(
+                dir_name=os.path.join(args.checkpoint_path, "log")
             )
 
         prof = torch.profiler.profile(
@@ -254,17 +129,7 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
                 metrics["hparam/test_accuracy"] = test_acc
                 metrics["hparam/test_f1"] = test_f1
                 metrics["hparam/test_mAcc"] = test_mAcc
-                predict_intent(model, example_loader, args, dset="test")
-                # Visualise specific bbox from specific frame fed into TCN for sanity check
-                visualise_annotations(
-                    os.path.join(ROOT, "yolo_results_data", "1.txt"), 0
-                )
-                visualise_intent(
-                    os.path.join(ROOT, "runs", "track", "exp", "labels"),
-                    os.path.join(os.getcwd(), "test_gt", "test_intent_pred"),
-                    width,
-                    height,
-                )
+
         case "ped_traj":
             train_traj(
                 model,
@@ -335,9 +200,7 @@ def main(args: DefaultArguments) -> tuple[float | np.float_, float]:
     return val_score, test_acc
 
 
-if __name__ == "__main__":
-    args = get_opts()
-    # Task
+def main(args: DefaultArguments):
     args.task_name = args.task_name if args.task_name else "ped_traj"
     args.persist_dataloader = True
 
@@ -452,9 +315,16 @@ if __name__ == "__main__":
 
     n_random_samples = 60
 
-    parameter_samples = list(
-        ParameterSampler(hyperparameter_list, n_iter=n_random_samples)
-    )
+    parameter_samples: list[
+        dict[
+            {
+                "lr": float,
+                "batch_size": int,
+                "epochs": int,
+                "n_layers-kernel_size": tuple[int, int],
+            }
+        ]
+    ] = list(ParameterSampler(hyperparameter_list, n_iter=n_random_samples))
 
     args.val_freq = 1
     args.test_freq = 1
@@ -474,34 +344,29 @@ if __name__ == "__main__":
 
         # Record
         now = datetime.now()
-        if args.comment is None:
-            time_folder = now.strftime("%Y%m%d%H%M%S")
+        if args.comment == "":
+            ckpt_directory = now.strftime("%Y%m%d%H%M%S")
         else:
-            time_folder = args.comment
-        if (
-            args.checkpoint_path == os.path.join(args.dataset_root_path, "ckpts")
-            or args.checkpoint_path == "./ckpts"
-        ) and args.resume == "":
-            args.checkpoint_path = os.path.join(
-                checkpoint_path,
-                args.task_name,
-                args.dataset,
-                args.model_name,
-                time_folder,
-            )
-        elif (
-            args.checkpoint_path == os.path.join(args.dataset_root_path, "ckpts")
-            or args.checkpoint_path == "./ckpts"
-        ):
-            args.checkpoint_path = os.path.dirname(args.resume)
-        elif (
-            args.checkpoint_path != os.path.join(args.dataset_root_path, "ckpts")
-            and args.checkpoint_path != "./ckpts"
-            and args.resume != ""
-        ):
-            assert os.path.abspath(args.checkpoint_path) == os.path.abspath(
-                os.path.dirname(args.resume)
-            ), f"checkpoint path and resume path directories do not match, {os.path.abspath(args.checkpoint_path)}, {os.path.abspath(os.path.dirname(args.resume))}"
+            ckpt_directory = args.comment
+
+        args.checkpoint_path = args.checkpoint_path.rstrip("/")
+        if os.path.split(args.checkpoint_path)[-1] == "ckpts":
+            if args.resume == "":
+                args.checkpoint_path = os.path.join(
+                    checkpoint_path,
+                    args.task_name,
+                    args.dataset,
+                    args.model_name,
+                    ckpt_directory,
+                )
+            else:
+                args.checkpoint_path = os.path.dirname(args.resume)
+        else:
+            full_ckpt_dir = os.path.abspath(args.checkpoint_path)
+            full_resume_parent_dir = os.path.abspath(os.path.dirname(args.resume))
+            assert (
+                full_ckpt_dir == full_resume_parent_dir
+            ), f"checkpoint path and resume path's directory does not match, {full_ckpt_dir}, {full_resume_parent_dir}"
 
         print(f"Checkpoint path: {args.checkpoint_path}")
         # TODO: Move args dumping to after model_opts are created.
@@ -523,7 +388,7 @@ if __name__ == "__main__":
             os.makedirs(result_path)
 
         print("Running with Parameters:", params)  # Print the current parameters
-        val_accuracy, test_accuracy = main(args)
+        val_accuracy, test_accuracy = train(args)
         print("Validation Accuracy:", val_accuracy)
         print("Test Accuracy:", test_accuracy)
 
@@ -533,3 +398,8 @@ if __name__ == "__main__":
 
     print("Best Validation Accuracy:", best_val_accuracy)
     print("Best Hyperparameters:", best_hyperparameters)
+
+
+if __name__ == "__main__":
+    args = get_opts()
+    main(args)

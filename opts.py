@@ -261,65 +261,65 @@ def get_opts() -> argparse.Namespace:
     parser.add_argument(
         "--save", action="store_true", help="save video tracking results"
     )
-    # class 0 is person, 1 is bycicle, 2 is car... 79 is oven
-    parser.add_argument(
-        "--classes",
-        nargs="+",
-        type=int,
-        help="filter by class: --classes 0, or --classes 0 2 3",
-    )
-    parser.add_argument(
-        "--project",
-        default=ROOT / "runs" / "track",
-        help="save results to project/name",
-    )
-    parser.add_argument("--name", default="exp", help="save results to project/name")
-    parser.add_argument(
-        "--exist-ok",
-        action="store_true",
-        help="existing project/name ok, do not increment",
-    )
-    parser.add_argument(
-        "--half", action="store_true", help="use FP16 half-precision inference"
-    )
-    parser.add_argument(
-        "--vid-stride", type=int, default=1, help="video frame-rate stride"
-    )
-    parser.add_argument(
-        "--show-labels", action="store_false", help="either show all or only bboxes"
-    )
-    parser.add_argument(
-        "--show-conf", action="store_false", help="hide confidences when show"
-    )
-    parser.add_argument(
-        "--show-trajectories", action="store_true", help="show confidences"
-    )
-    parser.add_argument(
-        "--save-txt", action="store_false", help="save tracking results in a txt file"
-    )
-    parser.add_argument(
-        "--save-id-crops",
-        action="store_true",
-        help="save each crop to its respective id folder",
-    )
-    parser.add_argument(
-        "--line-width",
-        default=None,
-        type=int,
-        help="The line width of the bounding boxes. If None, it is scaled to the image size.",
-    )
-    parser.add_argument(
-        "--per-class",
-        default=False,
-        action="store_true",
-        help="not mix up classes when tracking",
-    )
-    parser.add_argument(
-        "--verbose", default=True, action="store_true", help="print results per frame"
-    )
-    parser.add_argument(
-        "--agnostic-nms", default=False, action="store_true", help="class-agnostic NMS"
-    )
+    # # class 0 is person, 1 is bycicle, 2 is car... 79 is oven
+    # parser.add_argument(
+    #     "--classes",
+    #     nargs="+",
+    #     type=int,
+    #     help="filter by class: --classes 0, or --classes 0 2 3",
+    # )
+    # parser.add_argument(
+    #     "--project",
+    #     default=ROOT / "runs" / "track",
+    #     help="save results to project/name",
+    # )
+    # parser.add_argument("--name", default="exp", help="save results to project/name")
+    # parser.add_argument(
+    #     "--exist-ok",
+    #     action="store_true",
+    #     help="existing project/name ok, do not increment",
+    # )
+    # parser.add_argument(
+    #     "--half", action="store_true", help="use FP16 half-precision inference"
+    # )
+    # parser.add_argument(
+    #     "--vid-stride", type=int, default=1, help="video frame-rate stride"
+    # )
+    # parser.add_argument(
+    #     "--show-labels", action="store_false", help="either show all or only bboxes"
+    # )
+    # parser.add_argument(
+    #     "--show-conf", action="store_false", help="hide confidences when show"
+    # )
+    # parser.add_argument(
+    #     "--show-trajectories", action="store_true", help="show confidences"
+    # )
+    # parser.add_argument(
+    #     "--save-txt", action="store_false", help="save tracking results in a txt file"
+    # )
+    # parser.add_argument(
+    #     "--save-id-crops",
+    #     action="store_true",
+    #     help="save each crop to its respective id folder",
+    # )
+    # parser.add_argument(
+    #     "--line-width",
+    #     default=None,
+    #     type=int,
+    #     help="The line width of the bounding boxes. If None, it is scaled to the image size.",
+    # )
+    # parser.add_argument(
+    #     "--per-class",
+    #     default=False,
+    #     action="store_true",
+    #     help="not mix up classes when tracking",
+    # )
+    # parser.add_argument(
+    #     "--verbose", default=True, action="store_true", help="print results per frame"
+    # )
+    # parser.add_argument(
+    #     "--agnostic-nms", default=False, action="store_true", help="class-agnostic NMS"
+    # )
 
     _ = parser.add_argument(
         "--profile_execution", action="store_true", help="Record execution metrics"

@@ -1,65 +1,82 @@
-import numpy as np
-import cv2
+import ast
+import json
 import math
-import torch
+import os
+from collections.abc import Sequence
 
+import cv2
+import numpy as np
+import torch
+from cv2 import typing as cvt
 from mediapipe import solutions
 from mediapipe.framework.formats import landmark_pb2
+from numpy import typing as npt
+
 
 class PosePlotter:
+
     def __init__(self):
+        self.pose_palette: npt.NDArray[np.uint8] = np.array(
+            [
+                [255, 128, 0],
+                [255, 153, 51],
+                [255, 178, 102],
+                [230, 230, 0],
+                [255, 153, 255],
+                [153, 204, 255],
+                [255, 102, 255],
+                [255, 51, 255],
+                [102, 178, 255],
+                [51, 153, 255],
+                [255, 153, 153],
+                [255, 102, 102],
+                [255, 51, 51],
+                [153, 255, 153],
+                [102, 255, 102],
+                [51, 255, 51],
+                [0, 255, 0],
+                [0, 0, 255],
+                [255, 0, 0],
+                [255, 255, 255],
+            ],
+            dtype=np.uint8,
+        )
+        self.skeleton: list[tuple[int, int]] = [
+            (16, 14),
+            (14, 12),
+            (17, 15),
+            (15, 13),
+            (12, 13),
+            (6, 12),
+            (7, 13),
+            (6, 7),
+            (6, 8),
+            (7, 9),
+            (8, 10),
+            (9, 11),
+            (2, 3),
+            (1, 2),
+            (1, 3),
+            (2, 4),
+            (3, 5),
+            (4, 6),
+            (5, 7),
+        ]
+        self.limb_color: npt.NDArray[np.uint8] = self.pose_palette[
+            [9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]
+        ]
+        self.kpt_color: npt.NDArray[np.uint8] = self.pose_palette[
+            [16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]
+        ]
 
-        self.pose_palette = np.array(
-                    [
-                        [255, 128, 0],
-                        [255, 153, 51],
-                        [255, 178, 102],
-                        [230, 230, 0],
-                        [255, 153, 255],
-                        [153, 204, 255],
-                        [255, 102, 255],
-                        [255, 51, 255],
-                        [102, 178, 255],
-                        [51, 153, 255],
-                        [255, 153, 153],
-                        [255, 102, 102],
-                        [255, 51, 51],
-                        [153, 255, 153],
-                        [102, 255, 102],
-                        [51, 255, 51],
-                        [0, 255, 0],
-                        [0, 0, 255],
-                        [255, 0, 0],
-                        [255, 255, 255],
-                    ],
-                    dtype=np.uint8,
-                )
-        self.skeleton = [
-                    [16, 14],
-                    [14, 12],
-                    [17, 15],
-                    [15, 13],
-                    [12, 13],
-                    [6, 12],
-                    [7, 13],
-                    [6, 7],
-                    [6, 8],
-                    [7, 9],
-                    [8, 10],
-                    [9, 11],
-                    [2, 3],
-                    [1, 2],
-                    [1, 3],
-                    [2, 4],
-                    [3, 5],
-                    [4, 6],
-                    [5, 7],
-                ]
-        self.limb_color = self.pose_palette[[9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]]
-        self.kpt_color = self.pose_palette[[16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]]
-
-    def plot_keypoints(self, image, keypoints, shape=(640, 640), radius=5):
-        for kpt in keypoints: 
+    def plot_keypoints(
+        self,
+        image: cvt.MatLike,
+        keypoints: npt.NDArray[np.float_],
+        shape: tuple[int, int] = (640, 640),
+        radius: int = 5,
+    ):
+        for kpt in keypoints:
             for point in kpt:
                 for i, p in enumerate(point):
                     color_k = [int(x) for x in self.kpt_color[i]]
@@ -68,11 +85,17 @@ class PosePlotter:
                     conf = p[2]
                     if x_coord % shape[1] != 0 and y_coord % shape[0] != 0:
                         if conf < 0.5:
-                                continue
-                        cv2.circle(image, (x_coord, y_coord), radius=radius, color=color_k, 
-                                    thickness=-1, lineType=cv2.LINE_AA)
+                            continue
+                        _ = cv2.circle(
+                            image,
+                            (x_coord, y_coord),
+                            radius=radius,
+                            color=color_k,
+                            thickness=-1,
+                            lineType=cv2.LINE_AA,
+                        )
 
-        for kpt in keypoints: 
+        for kpt in keypoints:
             for point in kpt:
                 ndim = point.shape[-1]
                 for i, sk in enumerate(self.skeleton):
@@ -83,151 +106,438 @@ class PosePlotter:
                         conf2 = point[(sk[1] - 1), 2]
                         if conf1 < 0.5 or conf2 < 0.5:
                             continue
-                    if pos1[0] % shape[1] == 0 or pos1[1] % shape[0] == 0 or pos1[0] < 0 or pos1[1] < 0:
+                    if (
+                        pos1[0] % shape[1] == 0
+                        or pos1[1] % shape[0] == 0
+                        or pos1[0] < 0
+                        or pos1[1] < 0
+                    ):
                         continue
-                    if pos2[0] % shape[1] == 0 or pos2[1] % shape[0] == 0 or pos2[0] < 0 or pos2[1] < 0:
+                    if (
+                        pos2[0] % shape[1] == 0
+                        or pos2[1] % shape[0] == 0
+                        or pos2[0] < 0
+                        or pos2[1] < 0
+                    ):
                         continue
-                    cv2.line(image, pos1, pos2, [int(x) for x in self.limb_color[i]], thickness=2, 
-                                lineType=cv2.LINE_AA)
-                    
-    def plot_masks(self, image, masks):
+                    _ = cv2.line(
+                        image,
+                        pos1,
+                        pos2,
+                        [int(x) for x in self.limb_color[i]],
+                        thickness=2,
+                        lineType=cv2.LINE_AA,
+                    )
+
+    def plot_masks(self, image: cvt.MatLike, masks):
         for mask in masks:
             contours = np.array(mask, dtype=np.int32)
             contours = contours.reshape((-1, 1, 2))
             cv2.drawContours(image, [contours], -1, (0, 255, 0), cv2.FILLED)
-                          
-def draw_landmarks_on_image(rgb_image, detection_result):
-        pose_landmarks_list = detection_result.pose_landmarks
-        annotated_image = np.copy(rgb_image)
 
-        # Loop through the detected poses to visualize.
-        for idx in range(len(pose_landmarks_list)):
-            pose_landmarks = pose_landmarks_list[idx]
 
-            # Draw the pose landmarks.
-            pose_landmarks_proto = landmark_pb2.NormalizedLandmarkList()
-            pose_landmarks_proto.landmark.extend([
-            landmark_pb2.NormalizedLandmark(x=landmark.x, y=landmark.y, z=landmark.z) for landmark in pose_landmarks
-            ])
-            solutions.drawing_utils.draw_landmarks(
+def draw_landmarks_on_image(rgb_image: cvt.MatLike, detection_result):
+    pose_landmarks_list = detection_result.pose_landmarks
+    annotated_image = np.copy(rgb_image)
+
+    # Loop through the detected poses to visualize.
+    for idx in range(len(pose_landmarks_list)):
+        pose_landmarks = pose_landmarks_list[idx]
+
+        # Draw the pose landmarks.
+        pose_landmarks_proto = landmark_pb2.NormalizedLandmarkList()
+        pose_landmarks_proto.landmark.extend(
+            [
+                landmark_pb2.NormalizedLandmark(
+                    x=landmark.x, y=landmark.y, z=landmark.z
+                )
+                for landmark in pose_landmarks
+            ]
+        )
+        solutions.drawing_utils.draw_landmarks(
             annotated_image,
             pose_landmarks_proto,
             solutions.pose.POSE_CONNECTIONS,
-            solutions.drawing_styles.get_default_pose_landmarks_style())
-        return annotated_image
+            solutions.drawing_styles.get_default_pose_landmarks_style(),
+        )
+    return annotated_image
 
-def region_of_interest(img, vertices): 
-    mask = np.zeros_like(img)        
+
+def region_of_interest(
+    img: cvt.MatLike, vertices: Sequence[cvt.MatLike]
+) -> cvt.MatLike:
+    mask = np.zeros_like(img)
     match_mask_color = 255
     cv2.fillPoly(mask, vertices, match_mask_color)
-    masked_image = cv2.bitwise_and(img, mask) 
+    masked_image = cv2.bitwise_and(img, mask)
     return masked_image
 
-def draw_the_lines(img, lines): 
+
+def draw_the_lines(
+    img: cvt.MatLike,
+    lines: list[list[list[int]]] | npt.NDArray[np.float_] | None,
+) -> cvt.MatLike | None:
     if lines is None:
         return
-    
-    imge = np.copy(img)     
-    blank_image = np.zeros((imge.shape[0], imge.shape[1], 3),
-                            dtype=np.uint8)
-    
-    for line in lines:  
+
+    imge = np.copy(img)
+    blank_image = np.zeros((imge.shape[0], imge.shape[1], 3), dtype=np.uint8)
+
+    for line in lines:
         for x1, y1, x2, y2 in line:
-            cv2.line(blank_image, (x1, y1), (x2, y2), (0, 255, 0), thickness=3)
-            imge = cv2.addWeighted(imge, 0.8, blank_image, 1, 0.0) 
+            _ = cv2.line(blank_image, (x1, y1), (x2, y2), (0, 255, 0), thickness=3)
+            imge = cv2.addWeighted(imge, 0.8, blank_image, 1, 0.0)
     return imge
-    
-def road_lane_detection(orig_image):
+
+
+def road_lane_detection(orig_image: cvt.MatLike) -> cvt.MatLike | None:
     # image = cv2.cvtColor(orig_image, cv2.COLOR_BGR2RGB)
     image = orig_image
-    height= image.shape[0]
-    width= image.shape[1]
-    region_of_interest_coor = [(0, 600), 
-                               (width / 2, height / 2),
-                               (width, 600)]
+    height = image.shape[0]
+    width = image.shape[1]
+    region_of_interest_coor = [(0, 600), (width / 2, height / 2), (width, 600)]
     gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     canny_image = cv2.Canny(gray_image, 100, 200)
 
-    cropped = region_of_interest(canny_image,
-                                 np.array([region_of_interest_coor], np.int32))
+    cropped = region_of_interest(
+        canny_image, np.array([region_of_interest_coor], np.int32)
+    )
 
-    lines = cv2.HoughLinesP(cropped, rho=6, theta=np.pi/60, threshold=160,
-                            lines=np.array([]), minLineLength=40, maxLineGap=25)
+    lines = cv2.HoughLinesP(
+        cropped,
+        rho=6,
+        theta=np.pi / 60,
+        threshold=160,
+        lines=np.array([]),
+        minLineLength=40,
+        maxLineGap=25,
+    )
     left_line_x = []
     left_line_y = []
     right_line_x = []
     right_line_y = []
     print(lines)
     for line in lines:
-        for x1, y1, x2, y2 in line:     
-            slope = (y2 - y1) / (x2 - x1) 
-        if math.fabs(slope) < 0.5: # <-- Only consider extreme slope
+        for x1, y1, x2, y2 in line:
+            slope = (y2 - y1) / (x2 - x1)
+        if math.fabs(slope) < 0.5:  # <-- Only consider extreme slope
             continue
-        if slope <= 0: # <-- If the slope is negative, left group.
+        if slope <= 0:  # <-- If the slope is negative, left group.
             left_line_x.extend([x1, x2])
             left_line_y.extend([y1, y2])
-        else: # <-- Otherwise, right group.
+        else:  # <-- Otherwise, right group.
             right_line_x.extend([x1, x2])
             right_line_y.extend([y1, y2])
 
-    min_y = int(image.shape[0] * (3 / 5)) # <-- Just below the horizon
-    max_y = int(image.shape[0]) # <-- The bottom of the image  
-    if left_line_x == [] or left_line_y == [] or right_line_x == [] or right_line_y == []:
+    min_y = int(image.shape[0] * (3 / 5))  # <-- Just below the horizon
+    max_y = int(image.shape[0])  # <-- The bottom of the image
+    if (
+        left_line_x == []
+        or left_line_y == []
+        or right_line_x == []
+        or right_line_y == []
+    ):
         return orig_image
-    
-    poly_left = np.poly1d(np.polyfit(
-        left_line_y,
-        left_line_x,
-        deg=1
-    ))
+
+    poly_left = np.poly1d(np.polyfit(left_line_y, left_line_x, deg=1))
 
     left_x_start = int(poly_left(max_y))
     left_x_end = int(poly_left(min_y))
-    
-    poly_right = np.poly1d(np.polyfit(
-        right_line_y,
-        right_line_x,
-        deg=1
-    ))
+
+    poly_right = np.poly1d(np.polyfit(right_line_y, right_line_x, deg=1))
 
     right_x_start = int(poly_right(max_y))
     right_x_end = int(poly_right(min_y))
-    
+
     image_with_lines = draw_the_lines(
-        image, 
-        [[
-            [left_x_start, max_y, left_x_end, min_y],
-            [right_x_start, max_y, right_x_end, min_y],
-        ]]
-        ) 
-    
+        image,
+        [
+            [
+                [left_x_start, max_y, left_x_end, min_y],
+                [right_x_start, max_y, right_x_end, min_y],
+            ]
+        ],
+    )
+
     return image_with_lines
 
-def overlay(image, mask, color, alpha, resize=None):
-        """Combines image and its segmentation mask into a single image.
-        
-        Params:
-            image: Training image. np.ndarray,
-            mask: Segmentation mask. np.ndarray,
-            color: Color for segmentation mask rendering.  tuple[int, int, int] = (255, 0, 0)
-            alpha: Segmentation mask's transparency. float = 0.5,
-            resize: If provided, both image and its mask are resized before blending them together.
-            tuple[int, int] = (1024, 1024))
 
-        Returns:
-            image_combined: The combined image. np.ndarray
+def overlay(
+    image: npt.NDArray[np.uint8],
+    mask: npt.NDArray[np.float_ | np.int_],
+    color: tuple[int, int, int],
+    alpha: float = 0.5,
+    resize: tuple[int, int] | None = None,
+) -> cvt.MatLike:
+    """Combines image and its segmentation mask into a single image.
 
-        """
-        # color = color[::-1]
-        colored_mask = np.expand_dims(mask, 0).repeat(3, axis=0)
-        colored_mask = np.moveaxis(colored_mask, 0, -1)
-        masked = np.ma.MaskedArray(image, mask=colored_mask, fill_value=color)
-        image_overlay = masked.filled()
+    :param npt.NDArray[np.uint8] image: Training image.
+    :param npt.NDArray[np.float_ | np.int_] mask: Segmentation mask.
+    :param tuple[int, int, int] color: Color for segmentation mask rendering.
+    :param float alpha: Segmentation mask transparency, defaults to 0.5.
+    :param resize: If provided, both image and its mask are resized before blending them
+    together.
+    :type resize: tuple[int, int] or None
+    :returns: Combined image and masks.
+    :rtype: cvt.MatLike
+    """
+    # color = color[::-1]
+    colored_mask = np.expand_dims(mask, 0).repeat(3, axis=0)
+    colored_mask = np.moveaxis(colored_mask, 0, -1)
+    masked = np.ma.MaskedArray(image, mask=colored_mask, fill_value=color)
+    image_overlay = masked.filled()
 
-        if resize is not None:
-            image = cv2.resize(image.transpose(1, 2, 0), resize)
-            image_overlay = cv2.resize(image_overlay.transpose(1, 2, 0), resize)
+    if resize is not None:
+        image = cv2.resize(image.transpose(1, 2, 0), resize)
+        image_overlay = cv2.resize(image_overlay.transpose(1, 2, 0), resize)
 
-        image_combined = cv2.addWeighted(image, 1 - alpha, image_overlay, alpha, 0)
+    image_combined = cv2.addWeighted(image, 1 - alpha, image_overlay, alpha, 0)
 
-        return image_combined
+    return image_combined
+
+
+def get_video_dimensions(video_path: str) -> tuple[None, None] | tuple[int, int]:
+    """
+    Get height and width of the video
+
+    :param str video_path: Path to the video file.
+    :returns: Tuple of width, height if exists, otherwise None, None.
+    :rtype: tuple[None, None] or tuple[int, int]
+    """
+    # Open the video file
+    cap = cv2.VideoCapture(video_path)
+
+    # Check if the video file was successfully opened
+    if not cap.isOpened():
+        print("Error: Unable to open video file")
+        return None, None
+
+    # Get the video frame dimensions
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    # Release the video capture object
+    cap.release()
+
+    return width, height
+
+
+def consolidate_yolo_data(
+    video_id: int,
+) -> tuple[
+    dict[str, list[tuple[float, float, float, float]]], dict[str, list[str]], int
+]:
+    """
+    Consolidate the output data from YOLO
+
+    :param int video_id: Video file ID.
+    :returns: Tuple of bounding boxes, frames, and video IDs.
+    :rtype: tuple[dict[str, list[tuple[float, float, float, float]]], dict[str, list[str]], int]
+    """
+    bbox_holder: dict[str, list[tuple[float, float, float, float]]] = {}
+    frames_holder: dict[str, list[str]] = {}
+    yolo_data: str = os.path.join(os.getcwd(), video_id + ".txt")
+
+    with open(yolo_data, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+        for line in lines:
+            elements = line.split(" ")
+            track_id = elements[0]
+            x1 = float(elements[1])
+            y1 = float(elements[2])
+            x2 = float(elements[3])
+            y2 = float(elements[4])
+            frame_id = elements[-1].strip()
+
+            if track_id not in bbox_holder:
+                bbox_holder[track_id] = [(x1, y1, x2, y2)]
+            else:
+                bbox_holder[track_id].append((x1, y1, x2, y2))
+            if track_id not in frames_holder:
+                frames_holder[track_id] = [frame_id]
+            else:
+                frames_holder[track_id].append(frame_id)
+            # To prevent error when YOLO gives iffy predictions
+            # try:
+            #     track_id = elements[5].strip()
+            #     track_id = "track_" + track_id
+            #     if track_id not in bbox_holder:
+            #         bbox_holder[track_id] = [[xtl, ytl, xbr, ybr]]
+            #     else:
+            #         bbox_holder[track_id].append([xtl, ytl, xbr, ybr])
+            #     if track_id not in frames_holder:
+            #         frames_holder[track_id] = [frame_id]
+            #     else:
+            #         frames_holder[track_id].append(frame_id)
+            # except:
+            #     pass
+
+    return bbox_holder, frames_holder, video_id
+
+
+# Make folder with the data then create dataset from there
+def save_data_to_txt(
+    bbox_dict: dict[str, list[tuple[float, float, float, float]]],
+    frames_dict: dict[str, list[str]],
+    video_id: int,
+) -> None:
+    """
+    Make folder with the data then create dataset from there
+
+    :param bbox_dict: Dictionary containing the pedestrian ID and the bounding boxes.
+    :type bbox_dict: dict[str, list[tuple[float, float, float, float]]]
+    :param dict[str, list[str]] frames_dict: Dictionary containing the pedestrian ID
+    and the frames.
+    :param int video_id: The video ID.
+    :returns: None
+    """
+    data_folder = os.path.join(os.getcwd(), "yolo_results_data")
+    if not os.path.exists(data_folder):
+        os.makedirs(data_folder, exist_ok=True)
+    file_count = 0
+    for k, v in bbox_dict.items():
+        if len(v) >= 15:
+            for i in range(len(v) - 15 + 1):
+                file_name = os.path.join(data_folder, str(file_count + 1) + ".txt")
+                with open(file_name, "w") as f:
+                    _ = f.write(f"{video_id}\t{k}\t{v[i : i + 15]}")
+                file_count += 1
+    file_count = 0
+    for k, v in frames_dict.items():
+        if len(v) >= 15:
+            for i in range(len(v) - 15 + 1):
+                file_name = os.path.join(data_folder, str(file_count + 1) + ".txt")
+                with open(file_name, "a") as f:
+                    _ = f.write(f"\t{v[i : i + 15]}")
+                file_count += 1
+
+
+def visualise_annotations(annotation_path: str, selected_frame: int) -> None:
+    """
+    Visualise the bounding boxes that are fed into TCN model for sanity check
+
+    :param str annotation_path: Path to text with labels for Pedestrian Intent
+    Prediction.
+    :param int selected_frame: The frame to visualise (0..=14)
+    :returns: None
+    """
+    # Read annotations
+    with open(annotation_path, "r") as f:
+        annotations = f.readlines()
+
+    for ann in annotations:
+        elements = ann.split("\t")
+        vid_id = elements[0]
+        ped_id = elements[1]
+        bboxes: list[tuple[float, float, float, float]] = ast.literal_eval(elements[2])
+        bbox = bboxes[selected_frame]
+        xtl = int(bbox[0])
+        ytl = int(bbox[1])
+        xbr = int(bbox[2])
+        ybr = int(bbox[3])
+        frames = ast.literal_eval(elements[3])
+        frame = str(frames[selected_frame]).zfill(3)
+
+        # Load the image
+        image_path = os.path.join(os.getcwd(), "frames", vid_id, frame + ".jpg")
+        image = cv2.imread(image_path)
+
+        # Draw bounding box
+        _ = cv2.rectangle(image, (xtl, ytl), (xbr, ybr), (255, 0, 0), 2)
+        _ = cv2.putText(
+            img=image,
+            text=ped_id,
+            org=(xbr, ybr),
+            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+            fontScale=0.5,
+            color=(0, 0, 255),
+        )
+
+    # Display the image
+    cv2.imshow("Annotated Image", image)
+    _ = cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+
+def visualise_intent(annotation_path: str, intent_path: str) -> None:
+    """
+    Visualise the pedestrian intent (Bbox is 1 frame behind)
+
+    :param str annotation_path: Path to text with YOLO annotations.
+    :param str intent_path: Path to text with labels for Pedestrian Intent Prediction.
+    :returns: None
+    """
+
+    with open(intent_path, "r") as f:
+        intent_results = f.read()
+
+    # Parse JSON data
+    parsed_data: dict[
+        str,
+        dict[
+            str,
+            dict[
+                str, dict[{"intent": int, "intent_prob": float, "disagreement": float}]
+            ],
+        ],
+    ] = json.loads(intent_results)
+
+    for vid_id, tracks in parsed_data.items():
+        print("Video:", vid_id)
+        for track, frames in tracks.items():
+            print("Track:", track)
+            for frame, details in frames.items():
+                yolo_frame = int(frame)
+                with open(annotation_path, "r") as f:
+                    annotations = f.readlines()
+                for ann in annotations:
+                    element = ann.split(" ")
+
+                    if ("track_" + element[0]) == track and element[
+                        -1
+                    ].strip() == frame:
+                        xtl = float(element[1])
+                        ytl = float(element[2])
+                        xbr = float(element[3])
+                        ybr = float(element[4])
+
+                        frame = frame.zfill(3)
+                        intent = details["intent"]
+                        image_path = os.path.join(
+                            os.getcwd(), "frames", vid_id, frame + ".jpg"
+                        )
+                        image = cv2.imread(image_path)
+                        print(
+                            "GT Frame:",
+                            frame,
+                            "| Intent:",
+                            intent,
+                            "| Bbox Frame:",
+                            yolo_frame,
+                        )
+                        _ = cv2.rectangle(
+                            image,
+                            (int(xtl), int(ytl)),
+                            (int(xbr), int(ybr)),
+                            (255, 0, 0),
+                            2,
+                        )
+                        _ = cv2.putText(
+                            img=image,
+                            text=str(intent),
+                            org=(int(xbr), int(ybr)),
+                            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                            fontScale=1,
+                            color=(0, 0, 255),
+                        )
+                        _ = cv2.putText(
+                            img=image,
+                            text=track,
+                            org=(int(xbr), int(ytl)),
+                            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                            fontScale=1,
+                            color=(0, 0, 255),
+                        )
+                        cv2.imshow("Annotated Image", image)
+                        _ = cv2.waitKey(0)
+                        cv2.destroyAllWindows()

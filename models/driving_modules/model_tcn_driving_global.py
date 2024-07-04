@@ -198,7 +198,10 @@ class ResTCNDrivingGlobal(nn.Module):
                 )
             case "SGD":
                 optimizer = SGD(
-                    param_group, lr=learning_rate, momentum=opt_mom, fused=CUDA
+                    param_group,
+                    lr=learning_rate,
+                    momentum=opt_mom,
+                    # fused=CUDA
                 )
             case _:
                 optimizer = Adam(
