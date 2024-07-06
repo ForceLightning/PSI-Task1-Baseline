@@ -1,19 +1,20 @@
 from __future__ import annotations
-from typing import Any, overload
-from typing_extensions import override
+
 import warnings
+from typing import Any, overload
 
 import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.parametrizations import weight_norm
+from typing_extensions import override
 
 from data.custom_dataset import T_intentBatch
+from models.driving_modules.model_lstm_driving_global import ResCNNEncoder
+from models.model_interfaces import IConstructOptimizer
 from models.TCAN.tcan import TemporalConvAttnNet
 from models.TCN.tcn import TemporalConvNet
-from models.base_model import IConstructOptimizer
-from models.driving_modules.model_lstm_driving_global import ResCNNEncoder
 from utils.args import DefaultArguments, ModelOpts
 from utils.cuda import *
 

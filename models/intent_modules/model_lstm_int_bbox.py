@@ -6,7 +6,7 @@ from torch.optim.lr_scheduler import LRScheduler
 from typing_extensions import override
 
 from data.custom_dataset import T_intentBatch
-from models.base_model import IConstructOptimizer
+from models.model_interfaces import IConstructOptimizer
 from utils.args import DefaultArguments, ModelOpts
 from utils.cuda import *
 

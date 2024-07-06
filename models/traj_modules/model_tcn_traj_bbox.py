@@ -1,14 +1,14 @@
 from typing import Any
-from typing_extensions import overload, override
+
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.parametrizations import weight_norm
+from typing_extensions import overload, override
 
 from data.custom_dataset import T_intentBatch
+from models.model_interfaces import IConstructOptimizer
 from models.TCN.tcn import TemporalConvNet
-
-from models.base_model import IConstructOptimizer
 from utils.args import DefaultArguments, ModelOpts
 from utils.cuda import *
 

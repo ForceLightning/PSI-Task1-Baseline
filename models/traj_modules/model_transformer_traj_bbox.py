@@ -1,9 +1,10 @@
 from __future__ import annotations
+
 from typing import Any, overload
 
 import torch
 from torch import nn
-from torch.optim import Adam, AdamW, Optimizer, SGD
+from torch.optim import SGD, Adam, AdamW, Optimizer
 from torch.optim.lr_scheduler import (
     CosineAnnealingWarmRestarts,
     ExponentialLR,
@@ -20,12 +21,12 @@ from transformers.modeling_outputs import (
 from typing_extensions import override
 
 from data.custom_dataset import T_intentBatch
-from models.base_model import IConstructOptimizer
+from models.model_interfaces import IConstructOptimizer, ITSTransformerWrapper
 from utils.args import DefaultArguments, ModelOpts
 from utils.cuda import *
 
 
-class TransformerTrajBbox(nn.Module, IConstructOptimizer):
+class TransformerTrajBbox(nn.Module, IConstructOptimizer, ITSTransformerWrapper):
     """A transformer-based architecture to predict the trajectory of pedestrians
     from their past bounding boxes.
 
@@ -132,6 +133,8 @@ class TransformerTrajBbox(nn.Module, IConstructOptimizer):
     @overload
     def generate(self, x: tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor: ...
 
+    @override
+    @torch.no_grad()
     def generate(
         self, x: T_intentBatch | tuple[torch.Tensor, torch.Tensor]
     ) -> torch.Tensor:

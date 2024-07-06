@@ -1,13 +1,13 @@
 from typing import Any
-from typing_extensions import overload, override
 
 import numpy as np
 import torch
 from torch import nn
+from typing_extensions import overload, override
 
 from data.custom_dataset import T_intentBatch
+from models.model_interfaces import IConstructOptimizer
 from models.TCAN.tcan import TemporalConvAttnNet
-from models.base_model import IConstructOptimizer
 from utils.args import DefaultArguments, ModelOpts
 from utils.cuda import *
 
