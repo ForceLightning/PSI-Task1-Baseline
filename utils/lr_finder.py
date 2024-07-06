@@ -2,17 +2,19 @@
 """
 
 from __future__ import annotations
-from collections.abc import Iterable
+
 import copy
 import os
+from collections.abc import Iterable
 from typing import Any
 
 import matplotlib.pyplot as plt
-from matplotlib.axes import Axes
 import numpy as np
-from packaging import version
 import torch
-from torch import GradScaler, nn
+from matplotlib.axes import Axes
+from packaging import version
+from torch import nn
+from torch.cuda.amp import GradScaler
 from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader
 from tqdm.autonotebook import tqdm

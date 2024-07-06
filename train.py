@@ -1,6 +1,6 @@
 import collections
-from collections.abc import Mapping
 import gc
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -386,13 +386,17 @@ def train_traj_epoch(
                     traj_pred = torch.zeros_like(traj_gt).type(FloatTensor)
                 else:
                     traj_pred = (
-                        out / args.image_shape[0]
-                    )  # Rescales bounding box coordinates to [0.0..1.0]
+                        out
+                        # / args.image_shape[0]
+                        # Rescales bounding box coordinates to [0.0..1.0]
+                    )
                     traj_gt = (
                         data["bboxes"][:, args.observe_length :, :]
                         .type(FloatTensor)
                         .to(DEVICE)
-                    ) / args.image_shape[0]
+                        # / args.image_shape[0]
+                    )
+
                     if "bbox_l1" in args.traj_loss:
                         loss_bbox_l1 = (
                             criterions["L1Loss"](traj_pred, traj_gt)
@@ -473,15 +477,19 @@ def train_traj_epoch(
                 traj_pred = torch.zeros_like(traj_gt).type(FloatTensor)
             else:
                 traj_pred = (
-                    out / args.image_shape[0]
-                )  # Rescales bounding box coordinates to [0.0..1.0]
+                    out
+                    # / args.image_shape[0]
+                    # Rescales bounding box coordinates to [0.0..1.0]
+                )
 
                 # intent_pred: sigmoid output, (0, 1), bs
                 # traj_pred: logit, bs x ts x 4
 
                 traj_gt = (
-                    data["bboxes"][:, args.observe_length :, :].type(FloatTensor)
-                    / args.image_shape[0]
+                    data["bboxes"][:, args.observe_length :, :]
+                    .type(FloatTensor)
+                    .to(DEVICE)
+                    # / args.image_shape[0]
                 )
                 # center: bs x ts x 2
                 # traj_center_gt = torch.cat((((traj_gt[:, :, 0] + traj_gt[:, :, 2]) / 2).unsqueeze(-1),
@@ -551,8 +559,8 @@ def train_traj_epoch(
         recorder.train_traj_batch_update(
             itern,
             data,
-            traj_gt.type(FloatTensor).detach().cpu().numpy() * args.image_shape[0],
-            traj_pred.type(FloatTensor).detach().cpu().numpy() * args.image_shape[0],
+            traj_gt.type(FloatTensor).detach().cpu().numpy(),
+            traj_pred.type(FloatTensor).detach().cpu().numpy(),
             loss.item(),
             loss_traj.item(),
         )

@@ -91,7 +91,7 @@ def infer(
     p: torch.profiler.profile,
 ) -> None:
     _ = model.eval()
-    for i in tqdm(range(10), desc="Inference batches", position=2, leave=False):
+    for i in tqdm(range(10), desc="Inference batches", leave=False):
         if "transformer" in args.model_name:
             _ = model.generate(data)  # type: ignore[reportAny]
         else:
@@ -124,7 +124,7 @@ def main(args: DefaultArguments):
         else:
             args.predict_length = 45
 
-        model_list_iter = tqdm(model_list, desc="Models", position=1, leave=False)
+        model_list_iter = tqdm(model_list, desc="Models", leave=False)
         for model_name in model_list_iter:
             args.model_name = model_name
             model_list_iter.set_postfix({"Model": model_name})

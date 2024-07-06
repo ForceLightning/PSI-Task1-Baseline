@@ -37,7 +37,7 @@ def plot_pose_from_video(
     vid = cv2.VideoCapture(video_path)
     frame_number = 0
 
-    with tqdm(total=vid.get(cv2.CAP_PROP_FRAME_COUNT), position=0, leave=True) as pbar:
+    with tqdm(total=vid.get(cv2.CAP_PROP_FRAME_COUNT), leave=True) as pbar:
         while True:
             _ = pbar.update(1)
             ret, im = vid.read()

@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import json
 import os
 from typing import Any
@@ -75,14 +76,12 @@ def get_intent_gt(
 
 
 def get_test_driving_gt(
-    model: nn.Module,
     dataloader: DataLoader[Any],
     args: DefaultArguments,
     dset: str = "test",
 ) -> None:
     """Gets the ground truth driving decision.
 
-    :param torch.nn.Module model: The model (unused).
     :param torch.utils.data.DataLoader dataloader: The dataloader.
     :param DefaultArguments args: The training arguments.
     :param str dset: The dataset.
@@ -111,7 +110,9 @@ def get_test_driving_gt(
 
         # if itern >= 10:
         #     break
-    with open(os.path.join(f"./test_gt/{dset}_driving_gt.json"), "w") as f:
+    with open(
+        os.path.join(args.dataset_root_path, f"/test_gt/{dset}_driving_gt.json"), "w"
+    ) as f:
         json.dump(dt, f)
 
 

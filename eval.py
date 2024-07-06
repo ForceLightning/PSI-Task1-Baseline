@@ -1,5 +1,7 @@
 import json
 import os
+import warnings
+from argparse import ArgumentParser, Namespace
 from math import ceil
 from typing import Any
 
@@ -12,7 +14,12 @@ from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm.auto import tqdm
 from typing_extensions import Literal
 
+from data.prepare_data import get_dataloader
+from database.create_database import create_database
+from models.build_model import build_model
+from models.model_interfaces import ITSTransformerWrapper
 from models.traj_modules.model_transformer_traj_bbox import TransformerTrajBbox
+from utils import get_test_intent_gt
 from utils.args import DefaultArguments
 from utils.cuda import *
 from utils.log import RecordResults
@@ -127,14 +134,15 @@ def predict_intent(
     model: nn.Module,
     dataloader: DataLoader[Any],
     args: DefaultArguments,
-    dset: str = "test",
+    dset: Literal["train", "val", "test"] = "test",
 ) -> None:
     """Predict and save prediction of intention for each sample in the dataset.
 
     :param nn.Module model: Model to predict intention.
     :param DataLoader[Any] dataloader: DataLoader for the dataset.
     :param DefaultArguments args: Arguments for the model.
-    :param str dset: Dataset to predict intention.
+    :param dset: Dataset to predict intention.
+    :type dset: Literal["train", "val", "test"]
 
     :return: None
     """
@@ -166,7 +174,7 @@ def predict_intent(
             dt[vid][pid][fid]["intent_prob"] = int_prob
 
     with open(
-        os.path.join(args.checkpoint_path, "results", f"{dset}_intent_pred"), "w"
+        os.path.join(args.checkpoint_path, "results", f"{dset}_intent_pred.json"), "w"
     ) as f:
         json.dump(dt, f)
 
@@ -213,16 +221,12 @@ def validate_traj(
             old_num_parallel_samples = inner_model.config.num_parallel_samples
             inner_model.config.num_parallel_samples = 1
             traj_pred = inner_model.generate(data)
-            val_loss = criterion(
-                traj_pred / args.image_shape[0], traj_gt / args.image_shape[0]
-            ).item()
+            val_loss = criterion(traj_pred, traj_gt).item()
             inner_model.config.num_parallel_samples = old_num_parallel_samples
         else:
-            traj_pred = model(data) / args.image_shape[0]
+            traj_pred = model(data)
             val_loss = (
-                criterion(
-                    traj_pred / args.image_shape[0], traj_gt / args.image_shape[0]
-                ).item()
+                criterion(traj_pred, traj_gt).item()
                 # / 4
                 # / args.observe_length
             )
@@ -277,7 +281,7 @@ def predict_traj(
         # return a tuple and we have no error handling :)
         inner_model = getattr(model, "module", model)
         traj_pred: torch.Tensor
-        if isinstance(inner_model, TransformerTrajBbox):
+        if isinstance(inner_model, ITSTransformerWrapper):
             old_num_parallel_samples = inner_model.config.num_parallel_samples
             inner_model.config.num_parallel_samples = 1
             traj_pred = inner_model.generate(data)
@@ -308,21 +312,18 @@ def predict_traj(
 
 
 def get_test_traj_gt(
-    model: nn.Module,
     dataloader: DataLoader[Any],
     args: DefaultArguments,
     dset: str = "test",
 ) -> None:
     """Get ground truth trajectory for each sample in the dataset.
 
-    :param nn.Module model: Model to predict driving decision.
     :param DataLoader[Any] dataloader: DataLoader for the dataset.
     :param DefaultArguments args: Arguments for the model.
     :param str dset: Dataset to predict driving decision.
 
     :return: None
     """
-    _ = model.eval()
     gt = {}
     for data in dataloader:
         # traj_pred: torch.Tensor = model(data)
@@ -421,14 +422,15 @@ def predict_driving(
     model: nn.Module,
     dataloader: DataLoader[Any],
     args: DefaultArguments,
-    dset: str = "test",
+    dset: Literal["train", "val", "test"] = "test",
 ) -> None:
     """Predict and save prediction of driving decision for each sample in the dataset.
 
     :param nn.Module model: Model to predict driving decision.
     :param DataLoader[Any] dataloader: DataLoader for the dataset.
     :param DefaultArguments args: Arguments for the model.
-    :param str dset: Dataset to predict driving decision.
+    :param dset: Dataset to predict driving decision.
+    :type dset: Literal["train", "val", "test"]
 
     :return: None
     """
@@ -466,3 +468,191 @@ def predict_driving(
         os.path.join(args.checkpoint_path, "results", f"{dset}_driving_pred.json"), "w"
     ) as f:
         json.dump(dt, f)
+
+
+def load_args(dataset_root_path: str, ckpt_path: str) -> DefaultArguments:
+    ckpt_path = os.path.normpath(ckpt_path)
+
+    def _load_args(args: DefaultArguments, args_path: str) -> DefaultArguments:
+        if os.path.exists(args_path):
+            with open(args_path, "r", encoding="utf-8") as f:
+                args_dict: dict[str, Any] = json.load(f)
+                attr_bar = tqdm(args_dict.items(), desc="Attributes", leave=False)
+                for k, v in attr_bar:
+                    if hasattr(args, k):
+                        attr_bar.set_description(f"Attribute: {k}")
+                        if k in ["video_splits"]:
+                            path: str = os.path.normpath(v)
+                            if path.split(os.sep)[0] != os.path.normpath(
+                                dataset_root_path
+                            ):
+                                setattr(args, k, os.path.join(dataset_root_path, path))
+                            else:
+                                setattr(args, k, path)
+                        else:
+                            setattr(args, k, v)
+                    else:
+                        warnings.warn(f"Attribute {k} not found in DefaultArguments.")
+        else:
+            raise FileNotFoundError(f"File not found: {args_path}")
+        return args
+
+    args: DefaultArguments = DefaultArguments()
+
+    for args_fn in ["args.json", "args.txt", "args"]:
+        args_path: str = os.path.join(ckpt_path, args_fn)
+        try:
+            args = _load_args(args, args_path)
+            return args
+        except FileNotFoundError as e:
+            continue
+
+    args.checkpoint_path = ckpt_path
+
+    warnings.warn("Using default arguments.")
+    return args
+
+
+def load_model_state_dict(ckpt_path: str, model: nn.Module) -> nn.Module:
+    if os.path.exists(model_ckpt := os.path.join(ckpt_path, "latest.pth")):
+        incomp_keys = model.load_state_dict(torch.load(model_ckpt))
+        if incomp_keys.unexpected_keys or incomp_keys.missing_keys:
+            warnings.warn(str(incomp_keys))
+
+    return model
+
+
+def predict(
+    dataset_root_path: str, ckpt_path: str, test_loader: DataLoader[Any] | None = None
+) -> tuple[DataLoader[Any], DefaultArguments]:
+    args = load_args(dataset_root_path, ckpt_path)
+
+    # NOTE: This is a stupid hack for the `lag_sequence` parameter in transformer
+    # configs.
+    if "transformer" in args.model_name:
+        args.observe_length += 1
+        args.max_track_size += 1
+
+    # Load models
+    model, _, _ = build_model(args)
+    if args.compile_model:
+        model = torch.compile(
+            model, options={"triton.cudagraphs": True}, fullgraph=True
+        )
+    model = nn.DataParallel(model)
+
+    model = load_model_state_dict(ckpt_path, model)
+
+    # Load pickled DB
+    # NOTE: The hack continues
+    if test_loader is None or "transformer" in args.model_name:
+        if not os.path.exists(os.path.join(args.database_path, args.database_file)):
+            create_database(args)
+        else:
+            print("Database exists!")
+
+        _, _, test_loader = get_dataloader(args, load_test=True)
+        assert test_loader is not None, "Cannot perform tests without test dataloader!"
+
+    # Create results dir
+    if not os.path.exists(os.path.join(args.checkpoint_path, "results")):
+        os.makedirs(os.path.join(args.checkpoint_path, "results"))
+
+    match args.task_name:
+        case "ped_intent":
+            predict_intent(model, test_loader, args, dset="test")
+        case "ped_traj":
+            predict_traj(model, test_loader, args, dset="test")
+        case "driving_decision":
+            predict_driving(model, test_loader, args, "test")
+
+    return test_loader, args
+
+
+def main(args: Namespace):
+    # NOTE: Now this one is a silly way to create a single test loader for all models.
+    test_loader: DataLoader[Any] | None = None
+
+    mbar = tqdm(args.model_checkpoints, desc="Model checkpoints", leave=False)
+    for ckpt_path in mbar:
+        if os.path.exists(full_ckpt_path := os.path.join(args.task_path, ckpt_path)):
+            model_name = os.path.normpath(ckpt_path).split(os.sep)[-2]
+            mbar.set_description(f"Model checkpoint: {model_name}")
+
+            try:
+                test_loader, former_args = predict(
+                    args.dataset_root_path,
+                    os.path.normpath(full_ckpt_path),
+                    test_loader,
+                )
+
+                test_gt_file = ""
+                if "ped_intent" in args.task_path:
+                    test_gt_file = os.path.join(
+                        args.dataset_root_path, "test_gt", "test_intent_gt.json"
+                    )
+                    if not os.path.exists(test_gt_file):
+                        get_test_intent_gt.get_intent_gt(
+                            test_loader, test_gt_file, former_args
+                        )
+                        mbar.write(f"Saved test intent ground truth to {test_gt_file}")
+                    else:
+                        mbar.write(f"Test intent ground truth exists at {test_gt_file}")
+                elif "ped_traj" in args.task_path:
+                    test_gt_file = os.path.join(
+                        args.dataset_root_path, "test_gt", "test_traj_gt.json"
+                    )
+                    if not os.path.exists(test_gt_file):
+                        get_test_traj_gt(test_loader, former_args, dset="test")
+                        mbar.write(f"Saved test intent ground truth to {test_gt_file}")
+                    else:
+                        mbar.write(f"Test intent ground truth exists at {test_gt_file}")
+                elif "driving_decision" in args.task_path:
+                    test_gt_file = os.path.join(
+                        args.dataset_root_path, "test_gt", "test_driving_gt.json"
+                    )
+                    if not os.path.exists(test_gt_file):
+                        get_test_intent_gt.get_test_driving_gt(
+                            test_loader, former_args, dset="test"
+                        )
+                        mbar.write(f"Saved test intent ground truth to {test_gt_file}")
+                    else:
+                        mbar.write(f"Test intent ground truth exists at {test_gt_file}")
+
+            except Exception as e:
+                warnings.warn(f"Model: {model_name}, Error: {e}")
+                continue
+        else:
+            warnings.warn(f"Checkpoint path {ckpt_path} does not exist!")
+            continue
+
+
+if __name__ == "__main__":
+    argparser = ArgumentParser()
+
+    _ = argparser.add_argument(
+        "-r",
+        "--dataset_root_path",
+        type=str,
+        default="../",
+        help="Path to the [r]oot of the dataset",
+    )
+    _ = argparser.add_argument(
+        "-t",
+        "--task_path",
+        type=str,
+        help="Path to the root [t]ask checkpoint directory",
+        default="../ckpts/ped_intent/PSI2.0/",
+        required=True,
+    )
+    _ = argparser.add_argument(
+        "-m",
+        "--model_checkpoints",
+        type=str,
+        nargs="+",
+        help="[M]odel checkpoint paths from the root task checkpoint directory, e.g. if the full path is `../ckpts/ped_intent/PSI2.0/lstm_int_bbox/20240124135257/`, and the task path is `../ckpts/ped_intent/PSI2.0/`, then the model checkpoint paths are `lstm_int_bbox/20240124135257/`",
+        required=True,
+    )
+
+    args = argparser.parse_args()
+    main(args)

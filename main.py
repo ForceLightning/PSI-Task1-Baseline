@@ -106,7 +106,7 @@ def train(args: DefaultArguments) -> tuple[float | np.floating[Any], float]:
             if not os.path.exists(val_gt_file):
                 get_intent_gt(val_loader, val_gt_file, args)
             predict_intent(model, val_loader, args, dset="val")
-            val_score, val_f1, val_mAcc = evaluate_intent(
+            val_score, val_f1, val_mAcc, _ = evaluate_intent(
                 val_gt_file, args.checkpoint_path + "/results/val_intent_pred", args
             )
             metrics = {
@@ -121,7 +121,7 @@ def train(args: DefaultArguments) -> tuple[float | np.floating[Any], float]:
                 if not os.path.exists(test_gt_file):
                     get_intent_gt(test_loader, test_gt_file, args)
                 predict_intent(model, test_loader, args, dset="test")
-                test_acc, test_f1, test_mAcc = evaluate_intent(
+                test_acc, test_f1, test_mAcc, _ = evaluate_intent(
                     test_gt_file,
                     args.checkpoint_path + "/results/test_intent_pred",
                     args,
@@ -146,7 +146,7 @@ def train(args: DefaultArguments) -> tuple[float | np.floating[Any], float]:
                 args.dataset_root_path, "test_gt/val_traj_gt.json"
             )
             if not os.path.exists(val_gt_file):
-                get_test_traj_gt(model, val_loader, args, dset="val")
+                get_test_traj_gt(val_loader, args, dset="val")
             predict_traj(model, val_loader, args, dset="val")
             val_score = evaluate_traj(
                 val_gt_file,
@@ -172,7 +172,7 @@ def train(args: DefaultArguments) -> tuple[float | np.floating[Any], float]:
                 args.dataset_root_path, "test_gt/val_driving_gt.json"
             )
             if not os.path.exists(val_gt_file):
-                get_test_driving_gt(model, val_loader, args, dset="val")
+                get_test_driving_gt(val_loader, args, dset="val")
             predict_driving(model, val_loader, args, dset="val")
             val_score = evaluate_driving(
                 val_gt_file,
@@ -234,33 +234,37 @@ def main(args: DefaultArguments):
             args.database_file = "traj_database_train.pkl"
             args.intent_model = False  # if (or not) use intent prediction module to support trajectory prediction
             args.traj_model = True
-            args.traj_loss = ["nll"]
+            # args.traj_loss = ["nll"]
             # args.traj_loss = ["bbox_huber"]
+            args.traj_loss = ["bbox_l2"]
+            # args.traj_loss = ["bbox_l1"]
             # args.batch_size = [256]
             # args.batch_size = [64]
             args.batch_size = [256]
             args.predict_length = 45
-            # args.model_name = "tcn_traj_bbox"
+            # args.model_name = "lstm_traj_bbox"
+            args.model_name = "tcn_traj_bbox"
             # args.model_name = "tcn_traj_bbox_int"
             # args.model_name = "tcn_traj_global"
             # args.model_name = "tcan_traj_bbox"
             # args.model_name = "tcan_traj_bbox_int"
             # args.model_name = "tcan_traj_global"
             # args.model_name = "transformer_traj_bbox"
-            args.model_name = "transformer_traj_bbox_pose"
+            # args.model_name = "transformer_traj_bbox_pose"
             args.loss_weights = {
                 "loss_intent": 0.0,
                 "loss_traj": 1.0,
                 "loss_driving": 0.0,
             }
             args.load_image = False
-            # args.backbone = ""
-            # args.freeze_backbone = False
+            args.backbone = ""
+            args.freeze_backbone = False
             # args.load_image = True
-            args.backbone = "resnet50"
-            args.freeze_backbone = True
+            # args.backbone = "resnet50"
+            # args.freeze_backbone = True
             args.seq_overlap_rate = 1  # overlap rate for train/val set
             args.test_seq_overlap_rate = 1  # overlap for test set. if == 1, means overlap is one frame, following PIE
+            args.normalize_bbox = "divide_image_size"
 
         case "driving_decision":
             args.database_file = "driving_database_train.pkl"
@@ -285,9 +289,6 @@ def main(args: DefaultArguments):
     args.observe_length = 15
     args.max_track_size = args.observe_length + args.predict_length
     args.crop_mode = "enlarge"
-    args.normalize_bbox = None
-    # 'subtract_first_frame' #here use None, so the traj bboxes output loss is based on origianl coordinates
-    # [None (paper results) | center | L2 | subtract_first_frame (good for evidential) | divide_image_size]
 
     # if args.load_image:
     # args.backbone = "resnet"
@@ -307,9 +308,11 @@ def main(args: DefaultArguments):
     hyperparameter_list = {
         # "lr": [3e-2],
         # "lr": [3e-3],
-        "lr": [3e-3],
+        "lr": [1e-1],
+        # "lr": [1e-2],
+        # "lr": [1e-5],
         "batch_size": args.batch_size,
-        "epochs": [4],
+        "epochs": [50],
         "n_layers-kernel_size": [(4, 2)],
     }
 

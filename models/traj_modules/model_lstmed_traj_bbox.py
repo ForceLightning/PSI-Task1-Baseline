@@ -108,6 +108,13 @@ class LSTMedTrajBbox(nn.Module, IConstructOptimizer):
         bbox: torch.Tensor = data["bboxes"][:, : self.args.observe_length, :].type(
             FloatTensor
         )
+
+        # Scale up bboxes (only for standardised evaluation)
+        # bbox[:, 0] *= self.args.image_shape[0]
+        # bbox[:, 2] *= self.args.image_shape[0]
+        # bbox[:, 1] *= self.args.image_shape[1]
+        # bbox[:, 3] *= self.args.image_shape[1]
+
         # enc_input/dec_input_emb: bs x ts x enc_input_dim/dec_emb_input_dim
         enc_input = bbox
 
@@ -149,6 +156,12 @@ class LSTMedTrajBbox(nn.Module, IConstructOptimizer):
         traj_pred = torch.stack(traj_pred_list, dim=0).transpose(
             1, 0
         )  # ts x bs x 4 --> bs x ts x 4
+
+        # Scale down bboxes (only for standardised evaluation)
+        # traj_pred[:, :, 0] /= self.args.image_shape[0]
+        # traj_pred[:, :, 2] /= self.args.image_shape[0]
+        # traj_pred[:, :, 1] /= self.args.image_shape[1]
+        # traj_pred[:, :, 3] /= self.args.image_shape[1]
 
         return traj_pred
 

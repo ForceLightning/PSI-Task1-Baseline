@@ -54,7 +54,7 @@ def build_model(
             model = get_lstm_intent_bbox(args).to(DEVICE)
         case "tcn_int_bbox":
             model = get_tcn_intent_bbox(args).to(DEVICE)
-        case "lstm_traj_bbox":
+        case "lstm_traj_bbox" | "lstmed_traj_bbox":
             model = get_lstmed_traj_bbox(args).to(DEVICE)
         case "tcn_traj_bbox":
             model = get_tcn_traj_bbox(args).to(DEVICE)

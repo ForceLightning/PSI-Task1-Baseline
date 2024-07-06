@@ -189,7 +189,7 @@ def get_dataloader(
                 sampler=None,
                 drop_last=False,
                 num_workers=8,
-                persistent_workers=False,
+                persistent_workers=True,
             )
 
     return train_loader, val_loader, test_loader

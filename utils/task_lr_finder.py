@@ -3,12 +3,13 @@
 """
 
 from __future__ import annotations
+
 import os
 from typing import Any
-from typing_extensions import override
 
 import numpy as np
 from torch import nn
+from typing_extensions import override
 
 from data.custom_dataset import T_drivingBatch, T_intentBatch
 from data.prepare_data import get_dataloader
@@ -31,12 +32,11 @@ class TrainIterBbox(TrainDataLoaderIter):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         return (
             batch_data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
-            / self.args.image_shape[0]
-        ), batch_data["bboxes"][:, self.args.observe_length :, :].type(
-            FloatTensor
-        ) / self.args.image_shape[
-            0
-        ]
+            # / self.args.image_shape[0]
+        ), batch_data["bboxes"][:, self.args.observe_length :, :].type(FloatTensor)
+        # / self.args.image_shape[
+        #     0
+        # ]
 
 
 class TrainIterGlobalIntent(TrainDataLoaderIter):
@@ -47,24 +47,18 @@ class TrainIterGlobalIntent(TrainDataLoaderIter):
     @override
     def inputs_labels_from_batch(
         self,
-        batch_data: dict[
-            {
-                "global_featmaps": list[Any] | torch.Tensor,
-                "image": list[Any] | torch.Tensor,
-                "bboxes": torch.Tensor,
-            }
-        ],
+        batch_data: T_intentBatch,
     ) -> tuple[tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         out: torch.Tensor = (
             batch_data["bboxes"][:, self.args.observe_length :, :].type(FloatTensor)
-            / self.args.image_shape[0]
+            # / self.args.image_shape[0]
         )
         bbox: torch.Tensor
         if self.args.freeze_backbone:
             visual_embeddings: torch.Tensor = batch_data["global_featmaps"]
             bbox = (
                 batch_data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
-                / self.args.image_shape[0]
+                # / self.args.image_shape[0]
             )
             return (visual_embeddings, bbox), out
 
@@ -73,7 +67,7 @@ class TrainIterGlobalIntent(TrainDataLoaderIter):
         ].type(FloatTensor)
         bbox = (
             batch_data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
-            / self.args.image_shape[0]
+            # / self.args.image_shape[0]
         )
 
         return (images, bbox), out
@@ -213,7 +207,7 @@ def main(args: DefaultArguments):
         amp_config=amp_config,
         grad_scaler=grad_scaler,
     )
-    lr_finder.range_test(train_data_iter, start_lr=1e-6, end_lr=0.1, num_iter=300)
+    lr_finder.range_test(train_data_iter, start_lr=1e-6, end_lr=10.0, num_iter=300)
     _ = lr_finder.plot()
 
 
@@ -254,6 +248,8 @@ if __name__ == "__main__":
             args.traj_model = True
             # args.traj_loss = ["bbox_huber"]
             args.traj_loss = ["bbox_l2"]
+            # args.traj_loss = ["nll"]
+            # args.traj_loss = ["bbox_l1"]
             # args.batch_size = [256]
             # args.batch_size = 64
             args.batch_size = 256
@@ -263,8 +259,9 @@ if __name__ == "__main__":
             # args.model_name = "tcn_traj_global"
             # args.model_name = "tcan_traj_bbox"
             # args.model_name = "tcan_traj_bbox_int"
-            # args.model_name = "tcan_traj_global"
-            args.model_name = "transformer_traj_bbox_pose"
+            args.model_name = "tcan_traj_global"
+            # args.model_name = "transformer_traj_bbox"
+            # args.model_name = "transformer_traj_bbox_pose"
             # args.model_name = "transformer_traj_intent_bbox_pose"
             args.loss_weights = {
                 "loss_intent": 0.0,
@@ -272,15 +269,16 @@ if __name__ == "__main__":
                 "loss_driving": 0.0,
             }
             args.load_image = False
-            args.backbone = ""
-            args.freeze_backbone = False
+            # args.backbone = ""
+            # args.freeze_backbone = False
             # args.load_image = True
-            # args.backbone = "resnet50"
-            # args.freeze_backbone = True
+            args.backbone = "resnet50"
+            args.freeze_backbone = True
             args.seq_overlap_rate = 1  # overlap rate for train/val set
             args.test_seq_overlap_rate = 1  # overlap for test set. if == 1, means overlap is one frame, following PIE
             args.n_layers = 4
             args.kernel_size = 2
+            args.normalize_bbox = "divide_image_size"
 
         case "driving_decision":
             args.database_file = "driving_database_train.pkl"
@@ -303,6 +301,5 @@ if __name__ == "__main__":
     args.observe_length = 15
     args.max_track_size = args.observe_length + args.predict_length
     args.crop_mode = "enlarge"
-    args.normalize_bbox = None
 
     main(args)

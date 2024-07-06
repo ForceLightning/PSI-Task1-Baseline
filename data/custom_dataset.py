@@ -656,6 +656,7 @@ class PedestrianIntentDataset(VideoDataset):
             global_featmaps, local_featmaps = [], []
         # reason_features = self.load_reason_features(video_ids, ped_ids, frame_list)
 
+        # Why is this here?
         for frame in range(len(frame_list)):
             bbox = bboxes[frame]
             xtl, ytl, xrb, yrb = bbox  # xtl: x top left, xrb: x right bottom
@@ -663,13 +664,19 @@ class PedestrianIntentDataset(VideoDataset):
             if self.args.task_name == "ped_intent" or self.args.task_name == "ped_traj":
                 bboxes[frame] = [xtl, ytl, xrb, yrb]
 
-        original_bboxes = bboxes
+        original_bboxes = deepcopy(bboxes)
 
         match (self.args.normalize_bbox):
             case "L2":
                 raise NotImplementedError("L2 normalization not implemented yet")
             case "subtract_first_frame":
                 bboxes = bboxes - bboxes[:1, :]
+            case "divide_image_size":
+                bboxes[:, 0] /= self.args.image_shape[0]
+                bboxes[:, 2] /= self.args.image_shape[0]
+                bboxes[:, 1] /= self.args.image_shape[1]
+                bboxes[:, 3] /= self.args.image_shape[1]
+                assert bboxes.max() <= 1 and bboxes.min() >= 0, "bbox not in [0, 1]"
             case _:
                 pass
 

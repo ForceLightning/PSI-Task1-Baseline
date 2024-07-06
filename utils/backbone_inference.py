@@ -1,24 +1,24 @@
 """Saves the embeddings of the backbone model for each frame in a video.
 """
 
-from math import ceil
 import os
+from math import ceil
 from typing import Any
-from typing_extensions import override
 
 import numpy as np
 import torch
-from PIL import Image
 from fastprogress.fastprogress import master_bar, progress_bar
+from PIL import Image
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
-from torchvision.models import resnet50, ResNet50_Weights, vgg16, VGG16_Weights
+from torchvision.models import ResNet50_Weights, VGG16_Weights, resnet50, vgg16
 from torchvision.models.detection import (
-    fasterrcnn_resnet50_fpn_v2,
     FasterRCNN_ResNet50_FPN_V2_Weights,
+    fasterrcnn_resnet50_fpn_v2,
 )
 from torchvision.transforms import v2
 from tqdm.auto import tqdm
+from typing_extensions import override
 
 from data.prepare_data import get_dataloader
 from database.create_database import create_database
@@ -104,16 +104,13 @@ def infer(
     """
     _ = model.eval()
     iters: int = ceil(len(dl.dataset) / args.batch_size)
-    dl_iterator = tqdm(
-        enumerate(dl), total=iters, desc="Batches", position=0, leave=True
-    )
+    dl_iterator = tqdm(enumerate(dl), total=iters, desc="Batches", leave=True)
     for data in dl_iterator:
         embeddings: torch.Tensor = model(torch.squeeze(data["image"]).to(DEVICE))
         embeddings = embeddings.detach().cpu().numpy()
         for i, fid in tqdm(
             enumerate(data["frames"]),
             desc="Frames",
-            position=1,
             leave=False,
         ):
             embedding = embeddings[i]

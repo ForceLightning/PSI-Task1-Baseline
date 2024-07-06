@@ -115,6 +115,17 @@ class DefaultArguments:
     :type n_layers: int
     :param kernel_size: Kernel size for TCN, defaults to 4.
     :type kernel_size: int
+
+    :param classes: Classes for YOLO prediction, defaults to 0.
+    :type classes: int or list[int]
+    :param source: Source for YOLO prediction, defaults to '../PSI2.0_Test/videos/video_0147.mp4'.
+    :type source: str or Path
+    :param list[int] imgsz: Image size for YOLO prediction, defaults to [640].
+    :param float conf: Confidence for YOLO prediction, defaults to 0.5.
+    :param float iou: Intersection over union for YOLO prediction, defaults to 0.5.
+    :param str device: Device for YOLO prediction, defaults to 'cpu'.
+    :param bool show: Whether to show YOLO prediction, defaults to False.
+    :param bool save: Whether to save YOLO prediction, defaults to False.
     """
 
     dataset: Literal["PSI2.0", "PSI1.0"] = "PSI2.0"
@@ -170,7 +181,7 @@ class DefaultArguments:
     ignore_uncertain: bool = False
     intent_positive_weight: float = 1.0
     traj_loss: list[str] = field(default_factory=lambda: ["mse"])
-    steps_per_epoch: int = 0
+    steps_per_epoch: int = 1
     comment: str = ""
     driving_loss: list[str] = field(default_factory=lambda: ["cross_entropy"])
 
@@ -187,6 +198,12 @@ class DefaultArguments:
     # YOLO
     classes: int | list[int] = 0
     source: str | Path = "../PSI2.0_Test/videos/video_0147.mp4"
+    imgsz: list[int] = field(default_factory=lambda: [640])
+    conf: float = 0.5
+    iou: float = 0.5
+    device: str = "cpu"
+    show: bool = False
+    save: bool = False
 
 
 class ModelOpts(TypedDict):

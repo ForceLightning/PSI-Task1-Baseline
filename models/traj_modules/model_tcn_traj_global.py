@@ -214,15 +214,15 @@ class TCNTrajGlobal(nn.Module, IConstructOptimizer):
 
         # WARNING: Breaking change: optimizer to use a one cycle learning rate policy instead.
         #
-        # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
-        scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            optimizer,
-            learning_rate,
-            epochs=args.epochs,
-            steps_per_epoch=args.steps_per_epoch,
-            div_factor=10,
-            pct_start=0.2,
-        )
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+        # scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        #     optimizer,
+        #     learning_rate,
+        #     epochs=args.epochs,
+        #     steps_per_epoch=args.steps_per_epoch,
+        #     div_factor=10,
+        #     pct_start=0.2,
+        # )
         # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         #     optimizer, mode="min", factor=10**0.5 * 0.1, threshold=1e-2
         # )
