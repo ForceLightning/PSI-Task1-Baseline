@@ -1,0 +1,6 @@
+visdom
+pandas
+tqdm
+matplotlib
+opencv-python
+boxmot

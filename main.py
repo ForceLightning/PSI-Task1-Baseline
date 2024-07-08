@@ -22,73 +22,101 @@ from utils.evaluate_results import (evaluate_driving, evaluate_intent,
 from utils.get_test_intent_gt import get_intent_gt, get_test_driving_gt
 from utils.log import RecordResults
 
+from alphapose.preprocess import prep_image
+from alphapose.dataloader import crop_from_dets, Mscoco
+from alphapose.img import im_to_torch
+from alphapose.SPPE.src.main_fast_inference import *
+from alphapose.SPPE.src.utils.eval import getPrediction
+from alphapose.pPose_nms import pose_nms
+from alphapose.visualization import draw_bboxes, vis_frame_fast
+from datetime import datetime
 
+# TODO: Integrate tracking functionality using Boxmot
 def main(args):
-    writer = SummaryWriter(args.checkpoint_path)
-    recorder = RecordResults(args)
-    ''' 1. Load database '''
-    if not os.path.exists(os.path.join(args.database_path, args.database_file)):
-        create_database(args)
+
+    print("Preparing model...")
+    args.source = os.path.join(os.getcwd(), "frames", "video_0131")
+    args.inp_dim = 608
+
+    args.inputResH = 320
+    args.inputResW = 256
+    args.outputResH = 80
+    args.outputResW = 64
+
+    yolo_model = YOLO('yolov8s.pt')
+    yolo_detections = []
+
+    pose_dataset = Mscoco(args.inputResH, args.inputResW, args.outputResH, args.outputResW)
+    pose_model = InferenNet_fast(4 * 1 + 1, pose_dataset)
+    pose_model.cuda()
+    pose_model.eval()
+
+    print("Beginning inference...")
+    for count, file in enumerate(os.listdir(args.source)):
+
+        start_time = datetime.now()
+
+        img_name = os.path.join(args.source, file)
+
+        _, orig_img_k, _ = prep_image(img_name, args.inp_dim)
+
+        detections = yolo_model.predict(orig_img_k, classes=[0], verbose=False, conf=0.2)
+        yolo_dets = {"bboxes": [], "conf": []}
+
+        for box in detections[0].boxes:
+            cls = int(box.cls[0].item())
+            coords = box.xyxy[0].tolist()
+            conf = box.conf[0].item()
+
+            yolo_dets["bboxes"].append(coords)
+            yolo_dets["conf"].append([conf])
+
+        yolo_dets["bboxes"] = torch.tensor(yolo_dets["bboxes"])
+        yolo_dets["conf"] = torch.tensor(yolo_dets["conf"])
+
+        inps_yolo = torch.zeros(yolo_dets["bboxes"].size(0), 3, args.inputResH, args.inputResW) if yolo_dets["bboxes"] is not None else None
+        pt1_yolo = torch.zeros(yolo_dets["bboxes"].size(0), 2) if yolo_dets["bboxes"] is not None else None
+        pt2_yolo = torch.zeros(yolo_dets["bboxes"].size(0), 2) if yolo_dets["bboxes"] is not None else None
+
+        inp_yolo = im_to_torch(cv2.cvtColor(orig_img_k, cv2.COLOR_BGR2RGB))
+        inps_yolo, pt1_yolo, pt2_yolo = crop_from_dets(inp_yolo, yolo_dets["bboxes"], inps_yolo, pt1_yolo, pt2_yolo, args.inputResH, args.inputResW)
+
+        pose_output = pose_model(inps_yolo.cuda())
+        pose_output = pose_output.cpu()
+        _, preds_img, preds_scores = getPrediction(
+                            pose_output, pt1_yolo, pt2_yolo, args.inputResH, args.inputResW, args.outputResH, args.outputResW)
+        
+        result = pose_nms(yolo_dets["bboxes"], yolo_dets["conf"], preds_img, preds_scores.detach())
+        keypoints = [item["keypoints"] for item in result]
+
+        output_image = vis_frame_fast(orig_img_k, result)
+        output_image = draw_bboxes(output_image, yolo_dets["bboxes"])
+
+        end_time = datetime.now()
+        print(f"Frame {count+1} inference time: {(end_time - start_time).total_seconds()*1000}ms")
+
+        cv2.imshow(f'frame', output_image)
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord(' ') or key == ord('q'):
+            break
+
     else:
-        print("Database exists!")
-    train_loader, val_loader, test_loader = get_dataloader(args)
-    val_dataset = get_dataset(args, 'val')    
-    model = YOLO('yolov8s.pt')
-    frames, labels = val_dataset[50]
+        print("Exiting...")
 
-    bboxes = []
-    print(frames.shape)
-    results = []
-    for frame in frames:
-        # to plot the image
-        # plt.imshow(frame.numpy().transpose(1,2,0))
-        # plt.show()
-        np_frame = cv2.cvtColor(frame.numpy().transpose(1,2,0), cv2.COLOR_RGB2BGR)
-        np_frame = (np_frame * 255).astype(np.uint8)
-        result = model.track(np_frame, persist=True, half=True, device='cuda:0', classes=[0])
-        # to plot the resultant annotated image
-        res = result[0].plot()
-        cv2.imshow('frame', res)
-        cv2.waitKey(0)
-        results.append(result[0])
-    for result in results:
+    cv2.destroyAllWindows()
+    # writer = SummaryWriter(args.checkpoint_path)
+    # recorder = RecordResults(args)
+    # ''' 1. Load database '''
+    # if not os.path.exists(os.path.join(args.database_path, args.database_file)):
+    #     create_database(args)
+    # else:
+    #     print("Database exists!")
+    # train_loader, val_loader, test_loader = get_dataloader(args)
+    # val_dataset = get_dataset(args, 'val')    
+    # model = YOLO('yolov8s.pt')
+    # frames, labels = val_dataset[130]
 
-        # Print number of bounding boxes
-        print("Length:", len(result.boxes))
-
-        # print(result.names)
-
-        for box in result.boxes:
-            label = int(box.cls[0].item())
-            cords =  box.xyxyn[0].tolist()
-            # Only care about the bounding boxes of pedestrian
-            if label == 0:
-                bboxes.append(cords)
-            prob = box.conf[0].item()
-            print("Object type :", label)
-            print("Coordinates :", cords)
-            print("Probability : ", prob)
-            print("---")
-
-        # Visualise the predictions
-        # img = Image.fromarray(result.plot()[:,:,::-1])
-
-        # print(result.plot().shape)  
-        # plt.imshow(img)
-        # plt.show()
-
-    yolo_bbox = torch.tensor(bboxes)
-    yolo_bbox = torch.unsqueeze(yolo_bbox, dim=0)
-    print(yolo_bbox.shape)
-    yolo_frames = torch.tensor(labels['frames'])
-    yolo_frames = torch.unsqueeze(yolo_frames, dim=0)
-    yolo_data = {
-        'bboxes': yolo_bbox,
-        'frames': yolo_frames,
-        'video_id': labels['video_id'], 
-        'ped_id': labels['ped_id'],
-    }
-    sys.exit() # TODO(jiayu): remove this when you are done with YOLO inferencing
+    sys.exit()
 
     ''' 2. Create models '''
     model, optimizer, scheduler = build_model(args)

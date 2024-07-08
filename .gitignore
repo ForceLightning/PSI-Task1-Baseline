@@ -1,1 +1,11 @@
 **/__pycache__
+PSI_Videos/
+PSI1.0/
+PSI2.0_Test/
+PSI2.0_TrainVal/
+PSI-Intent-Prediction/
+frames/
+ckpts/
+
+*.pth
+*.pt
