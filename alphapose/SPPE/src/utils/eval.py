@@ -110,7 +110,7 @@ def postprocess(output):
     return p
 
 
-def getPrediction(hms, pt1, pt2, inpH, inpW, outputResW, outputResH):
+def getPrediction(hms, pt1, pt2, inpH, inpW, resH, resW):
     '''
     Get keypoint location from heatmaps
     '''
@@ -134,7 +134,7 @@ def getPrediction(hms, pt1, pt2, inpH, inpW, outputResW, outputResH):
         for j in range(preds.size(1)):
             hm = hms[i][j]
             pX, pY = int(round(float(preds[i][j][0]))), int(round(float(preds[i][j][1])))
-            if 0 < pX < outputResW - 1 and 0 < pY < outputResH - 1:
+            if 0 < pX < resW - 1 and 0 < pY < resH - 1:
                 diff = torch.Tensor(
                     (hm[pY][pX + 1] - hm[pY][pX - 1], hm[pY + 1][pX] - hm[pY - 1][pX]))
                 preds[i][j] += diff.sign() * 0.25
@@ -142,9 +142,10 @@ def getPrediction(hms, pt1, pt2, inpH, inpW, outputResW, outputResH):
 
     preds_tf = torch.zeros(preds.size())
 
-    preds_tf = transformBoxInvert_batch(preds, pt1, pt2, inpH, inpW, outputResH, outputResW)
+    preds_tf = transformBoxInvert_batch(preds, pt1, pt2, inpH, inpW, resH, resW)
 
     return preds, preds_tf, maxval
+
 
 
 def getMultiPeakPrediction(hms, pt1, pt2, inpH, inpW, resH, resW):

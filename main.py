@@ -108,11 +108,12 @@ def main(args):
         inps_yolo, pt1_yolo, pt2_yolo = crop_from_dets(inp_yolo, yolo_dets["bboxes"], inps_yolo, pt1_yolo, pt2_yolo, args.inputResH, args.inputResW)
 
         pose_output = pose_model(inps_yolo.cuda())
-        pose_output = pose_output.cpu()
+        pose_output = pose_output.cpu().detach()
         _, preds_img, preds_scores = getPrediction(
                             pose_output, pt1_yolo, pt2_yolo, args.inputResH, args.inputResW, args.outputResH, args.outputResW)
         
         result = pose_nms(yolo_dets["bboxes"], yolo_dets["conf"], preds_img, preds_scores.detach())
+
 
         output_image = vis_frame_fast(orig_img_k, result)
         output_image = draw_bboxes(output_image, yolo_dets["bboxes"])
