@@ -31,10 +31,16 @@ from alphapose.pPose_nms import pose_nms
 from alphapose.visualization import draw_bboxes, vis_frame_fast
 from datetime import datetime
 
-# TODO: Integrate tracking functionality using Boxmot
+from boxmot import DeepOCSORT, BYTETracker, BoTSORT
+from pathlib import Path
+
 def main(args):
 
     print("Preparing model...")
+
+    args.enable_tracking = False # Change to true to enable tracking
+    args.tracking_model = "DeepOCSort" # "DeepOCSort" / "ByteTracker" / "BotSort"
+
     args.source = os.path.join(os.getcwd(), "frames", "video_0131")
     args.inp_dim = 608
 
@@ -44,7 +50,15 @@ def main(args):
     args.outputResW = 64
 
     yolo_model = YOLO('yolov8s.pt')
-    yolo_detections = []
+
+    if args.enable_tracking:
+        tracker_dets = []
+        if args.tracking_model == "DeepOCSort":
+            tracker = DeepOCSORT(model_weights=Path('osnet_x0_25_msmt17.pt'), device='cuda:0', fp16=False)
+        elif args.tracking_model == "ByteTracker":
+            tracker = BYTETracker()
+        elif args.tracking_model == "BotSort":
+            tracker = BoTSORT(model_weights=Path('osnet_x0_25_msmt17.pt'), device='cuda:0', fp16=False)
 
     pose_dataset = Mscoco(args.inputResH, args.inputResW, args.outputResH, args.outputResW)
     pose_model = InferenNet_fast(4 * 1 + 1, pose_dataset)
@@ -68,11 +82,23 @@ def main(args):
             coords = box.xyxy[0].tolist()
             conf = box.conf[0].item()
 
+            if args.enable_tracking:
+                tracker_dets.append([coords[0], coords[1], coords[2], coords[3], conf, cls])
+
             yolo_dets["bboxes"].append(coords)
             yolo_dets["conf"].append([conf])
 
-        yolo_dets["bboxes"] = torch.tensor(yolo_dets["bboxes"])
-        yolo_dets["conf"] = torch.tensor(yolo_dets["conf"])
+        if args.enable_tracking:
+            track_results = tracker.update(np.array(tracker_dets), orig_img_k)
+            if len(track_results) > 0:
+                yolo_dets["bboxes"] = torch.tensor(track_results[:, :4])
+                yolo_dets["conf"] = torch.tensor(track_results[:, 5])
+            else:
+                yolo_dets["bboxes"] = None
+                yolo_dets["conf"] = None
+        else:
+            yolo_dets["bboxes"] = torch.tensor(yolo_dets["bboxes"])
+            yolo_dets["conf"] = torch.tensor(yolo_dets["conf"])
 
         inps_yolo = torch.zeros(yolo_dets["bboxes"].size(0), 3, args.inputResH, args.inputResW) if yolo_dets["bboxes"] is not None else None
         pt1_yolo = torch.zeros(yolo_dets["bboxes"].size(0), 2) if yolo_dets["bboxes"] is not None else None
@@ -87,7 +113,8 @@ def main(args):
                             pose_output, pt1_yolo, pt2_yolo, args.inputResH, args.inputResW, args.outputResH, args.outputResW)
         
         result = pose_nms(yolo_dets["bboxes"], yolo_dets["conf"], preds_img, preds_scores.detach())
-        keypoints = [item["keypoints"] for item in result]
+        print(result)
+        break
 
         output_image = vis_frame_fast(orig_img_k, result)
         output_image = draw_bboxes(output_image, yolo_dets["bboxes"])
