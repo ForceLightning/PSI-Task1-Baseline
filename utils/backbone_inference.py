@@ -162,11 +162,11 @@ def main(backbone: str, args: DefaultArguments) -> None:
         # case "vgg16":
         # model = vgg16(weights=VGG16_Weights.DEFAULT).to(DEVICE)
         # del model._modules["classifier"]
-        # case "faster_rcnn":
-        # model = fasterrcnn_resnet50_fpn_v2(
-        # weights=FasterRCNN_ResNet50_FPN_V2_Weights.DEFAULT
-        # ).to(DEVICE)
-        # del model._modules["roi_heads"]._modules["box_predictor"]
+        case "faster_rcnn":
+            model = fasterrcnn_resnet50_fpn_v2(
+                weights=FasterRCNN_ResNet50_FPN_V2_Weights.DEFAULT
+            ).to(DEVICE)
+            del model._modules["roi_heads"]._modules["box_predictor"]
         case str(x):
             raise NotImplementedError(f"{x} not implemented as a backbone yet")
 

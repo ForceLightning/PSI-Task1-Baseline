@@ -5,25 +5,30 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal, Sequence, TypeAlias
 
 import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy import typing as npt
 from sklearn.metrics import (
     accuracy_score,
     auc,
     average_precision_score,
+    balanced_accuracy_score,
     classification_report,
     confusion_matrix,
     f1_score,
     mean_squared_error,
     precision_recall_curve,
+    roc_auc_score,
 )
 from sklearn.metrics import roc_curve as sk_roc_curve
+from sklearn.preprocessing import LabelBinarizer
+from sklearn.utils.multiclass import type_of_target
 from tqdm.auto import tqdm
 
 from utils.args import DefaultArguments
@@ -148,7 +153,18 @@ A dictionary with the following structure:
 """
 
 T_drivingPredGT: TypeAlias = dict[
-    str, dict[str, dict[{"speed": int, "direction": int}]]
+    str,
+    dict[
+        str,
+        dict[
+            {
+                "speed": int,
+                "speed_proba": list[float],
+                "direction": int,
+                "direction_proba": list[float],
+            }
+        ],
+    ],
 ]
 """Driving ground truth and prediction type alias.
 
@@ -157,7 +173,9 @@ A dictionary with the following structure:
     "Video ID": {
         "Frame ID": {
             "speed": int,
+            "speed_proba": list[float],
             "direction": int
+            "direction_proba": list[float]
         }
     }
 }
@@ -306,7 +324,8 @@ def auc_charts(
     gts: list[npt.NDArray[np.int_]],
     probas: list[npt.NDArray[np.float_]],
     labels: list[str] | None,
-    task_name: Literal["ped_intent", "ped_traj", "driving_decision"] = "ped_intent",
+    task_name: str = "ped_intent",
+    average: Literal["macro", "weighted", "micro"] | None = None,
 ) -> Figure:
     """Generates ROC and PRC charts as a comparison amongst various model results.
 
@@ -316,7 +335,7 @@ def auc_charts(
     :type probas: list[npt.NDArray[np.float_]]
     :param list[str] labels: Names of the models.
     :param task_name: Name of the task, defaults to "ped_intent".
-    :type task_name: Literal["ped_intent", "ped_traj", "driving_decision"]
+    :type task_name: str
 
     :return: Figure with ROC and PRC charts.
     :rtype: Figure
@@ -327,25 +346,15 @@ def auc_charts(
     labels = [f"model_{i}" for i in range(len(gts))] if labels is None else labels
 
     for gt, proba, label in zip(gts, probas, labels):
-        fpr, tpr, _ = sk_roc_curve(gt, proba)
-        auroc = auc(fpr, tpr)
-
-        prec, rec, _ = precision_recall_curve(gt, proba)
-        auprc = average_precision_score(gt, proba)
-
-        ax[0].plot(fpr, tpr, label=f"{label} AUROC: {auroc:.3f}", lw=2, alpha=0.8)
-        ax[0].set_xlabel("False Positive Rate")
-        ax[0].set_ylabel("True Positive Rate")
-        ax[0].set_title("Receiver Operating Characteristics")
-        ax[0].set_ylim(-0.1, 1.1)
-        ax[0].legend(loc="lower right")
-
-        ax[1].plot(rec, prec, label=f"{label} AUPRC: {auprc:.3f}", lw=2, alpha=0.8)
-        ax[1].set_xlabel("Recall")
-        ax[1].set_ylabel("Precision")
-        ax[1].set_title("Precision Recall Curve")
-        ax[1].set_ylim(-0.1, 1.1)
-        ax[1].legend(loc="lower right")
+        # ascertain target type
+        y_type = type_of_target(gt)
+        if y_type == "binary":
+            _binary_auc_charts(fig, ax, gt, proba, label)
+        if y_type == "multiclass":
+            average = average if average else "macro"
+            _multiclass_auc_charts(fig, ax, gt, proba, label, average)
+        else:
+            raise ValueError(f"Target type ({y_type}) not supported")
 
     title = (
         f"ROC and PRC Curves for {task_name}"
@@ -355,6 +364,106 @@ def auc_charts(
     fig.suptitle(title)
 
     return fig
+
+
+def _binary_auc_charts(
+    fig: Figure,
+    ax: Sequence[Axes],
+    gt: npt.NDArray[np.int_],
+    proba: npt.NDArray[np.float_],
+    label: str,
+) -> None:
+    fpr, tpr, _ = sk_roc_curve(gt, proba)
+    auroc = auc(fpr, tpr)
+
+    prec, rec, _ = precision_recall_curve(gt, proba)
+    auprc = average_precision_score(gt, proba)
+
+    ax[0].plot(fpr, tpr, label=f"{label} AUROC: {auroc:.4f}", lw=2, alpha=0.8)
+    ax[0].set_xlabel("False Positive Rate")
+    ax[0].set_ylabel("True Positive Rate")
+    ax[0].set_title("Receiver Operating Characteristics")
+    ax[0].set_ylim(-0.1, 1.1)
+    ax[0].legend(loc="lower right")
+
+    ax[1].plot(rec, prec, label=f"{label} AUPRC: {auprc:.4f}", lw=2, alpha=0.8)
+    ax[1].set_xlabel("Recall")
+    ax[1].set_ylabel("Precision")
+    ax[1].set_title("Precision Recall Curve")
+    ax[1].set_ylim(-0.1, 1.1)
+    ax[1].legend(loc="lower right")
+
+
+def _multiclass_auc_charts(
+    fig: Figure,
+    ax: Sequence[Axes],
+    gt: npt.NDArray[np.int_],
+    proba: npt.NDArray[np.float_],
+    label: str,
+    average: Literal["macro", "weighted", "micro"] = "macro",
+) -> None:
+    roc_label_binarizer = LabelBinarizer().fit(gt)
+    gt = roc_label_binarizer.transform(gt)
+    num_classes = roc_label_binarizer.classes_.shape[0]
+
+    intermediate_tprs, intermediate_tpr_threshes = [], []
+    intermediate_precs, intermediate_recall_threshes = [], []
+
+    recall_mean = np.linspace(0, 1, 1000)
+    fpr_mean = np.linspace(0, 1, 1000)
+
+    for i in range(num_classes):
+        if np.sum(gt, axis=0)[i] == 0:
+            continue
+
+        fpr, tpr, tpr_thresh = sk_roc_curve(gt[:, i], proba[:, i])
+        intermediate_tpr_threshes.append(tpr_thresh[np.argmin(np.abs(tpr - fpr))])
+        tpr_interp = np.interp(fpr_mean, fpr, tpr)
+        tpr_interp[0] = 0.0
+        intermediate_tprs.append(tpr_interp)
+
+        prec, rec, recall_thresh = precision_recall_curve(gt[:, i], proba[:, i])
+        prec_interp = np.interp(recall_mean, rec[::-1], prec[::-1])
+        intermediate_precs.append(prec_interp)
+        intermediate_recall_threshes.append(
+            recall_thresh[np.argmin(np.abs(prec - rec))]
+        )
+
+    auroc = roc_auc_score(gt, proba, average=average)
+    auprc = average_precision_score(gt, proba, average=average)
+
+    match average:
+        case "macro":
+            tpr = np.mean(intermediate_tprs, axis=0)
+            tpr_thresh = np.mean(intermediate_tpr_threshes)
+            prec = np.mean(intermediate_precs, axis=0)
+            recall_thresh = np.mean(intermediate_recall_threshes)
+        case "weighted":
+            class_distribution = np.sum(gt, axis=0)
+            if len(class_distribution) < num_classes:
+                class_distribution = np.append(
+                    class_distribution, [0] * (num_classes - len(class_distribution))
+                )
+
+            class_distribution = class_distribution / np.sum(class_distribution)
+            tpr = np.array(intermediate_tprs).T @ class_distribution
+            prec = np.array(intermediate_precs).T @ class_distribution
+        case _:
+            raise NotImplementedError(f"Average type {average} not supported")
+
+    ax[0].plot(fpr_mean, tpr, label=f"{label} AUROC: {auroc:.4f}", lw=2, alpha=0.8)
+    ax[0].set_xlabel("False Positive Rate")
+    ax[0].set_ylabel("True Positive Rate")
+    ax[0].set_title("Receiver Operating Characteristics")
+    ax[0].set_ylim(-0.1, 1.1)
+    ax[0].legend(loc="lower right")
+
+    ax[1].plot(recall_mean, prec, label=f"{label} AUPRC: {auprc:.4f}", lw=2, alpha=0.8)
+    ax[1].set_xlabel("Recall")
+    ax[1].set_ylabel("Precision")
+    ax[1].set_title("Precision Recall Curve")
+    ax[1].set_ylim(-0.1, 1.1)
+    ax[1].legend(loc="lower right")
 
 
 def measure_intent_prediction(
@@ -670,10 +779,121 @@ def evaluate_drivings(
     gen_auc_charts: bool = False,
     auc_chart_labels: list[str] | None = None,
 ):
-    # TODO(chris): Implement this.
-    raise NotImplementedError(
-        "Evaluation of driving decision prediction is not implemented."
-    )
+    gts_speeds: list[npt.NDArray[np.int_]] = []
+    gts_dirs: list[npt.NDArray[np.int_]] = []
+    preds_speeds: list[npt.NDArray[np.int_]] = []
+    preds_dir: list[npt.NDArray[np.int_]] = []
+    probas_speeds: list[npt.NDArray[np.float_]] = []
+    probas_dir: list[npt.NDArray[np.float_]] = []
+
+    results: list[T_drivingEval] = []
+
+    if auc_chart_labels is None:
+        auc_chart_labels = [f"model_{i}" for i in range(len(paths))]
+
+    path_iter = tqdm(zip(paths, auc_chart_labels))
+    for (gt_path, pred_path), model_name in path_iter:
+        path_iter.set_postfix_str("Model: " + model_name)
+
+        gt_speed: list[int] = []
+        gt_dir: list[int] = []
+        pred_speed: list[int] = []
+        pred_dir: list[int] = []
+        proba_speed: list[list[float]] = []
+        proba_dir: list[list[float]] = []
+
+        with open(gt_path, "r", encoding="utf-8") as f:
+            gt_driving: T_drivingPredGT = json.load(f)
+
+        with open(pred_path, "r", encoding="utf-8") as f:
+            pred_driving: T_drivingPredGT = json.load(f)
+
+        for vid in pred_driving:
+            for fid in pred_driving[vid]:
+                pred_speed.append(pred_driving[vid][fid]["speed"])
+                pred_dir.append(pred_driving[vid][fid]["direction"])
+                proba_speed.append(pred_driving[vid][fid]["speed_proba"])
+                proba_dir.append(pred_driving[vid][fid]["direction_proba"])
+                gt_speed.append(gt_driving[vid][fid]["speed"])
+                gt_dir.append(gt_driving[vid][fid]["direction"])
+
+        np_gt_speed = np.array(gt_speed)
+        np_gt_dir = np.array(gt_dir)
+        np_pred_speed = np.array(pred_speed)
+        np_pred_dir = np.array(pred_dir)
+        np_proba_speed = np.array(proba_speed)
+        np_proba_dir = np.array(proba_dir)
+
+        res = measure_driving_prediction(
+            np_gt_speed,
+            np_gt_dir,
+            np_pred_speed,
+            np_pred_dir,
+            DefaultArguments(),
+            verbose=False,
+        )
+        speed_bal_acc = balanced_accuracy_score(
+            np_gt_speed,
+            np_pred_speed,
+            # adjusted=True
+        )
+        dir_bal_acc = balanced_accuracy_score(
+            np_gt_dir,
+            np_pred_dir,
+            # adjusted=True
+        )
+
+        speed_classi_report = classification_report(
+            np_gt_speed,
+            np_pred_speed,
+            target_names=["maintainSpeed", "decreaseSpeed", "increaseSpeed"],
+            output_dict=True,
+        )
+
+        dir_classi_report = classification_report(
+            np_gt_dir,
+            np_pred_dir,
+            target_names=["goStraight", "turnLeft", "turnRight"],
+            output_dict=True,
+        )
+
+        with pd.option_context("display.max_rows", None, "display.max_columns", None):
+            path_iter.write(f"Model: {model_name}")
+            path_iter.write("Speed classification report: ")
+            path_iter.write(str(pd.DataFrame(speed_classi_report)))
+            path_iter.write(f"Speed Balanced Accuracy: {speed_bal_acc:.4f}")
+            path_iter.write("Speed confusion matrix: ")
+            path_iter.write(str(pd.DataFrame(res["speed_confusion_matrix"])))
+
+            path_iter.write("Direction classification report: ")
+            path_iter.write(str(pd.DataFrame(dir_classi_report)))
+            path_iter.write(f"Direction Balanced Accuracy: {dir_bal_acc:.4f}")
+            path_iter.write("Direction confusion matrix: ")
+            path_iter.write(str(pd.DataFrame(res["dir_confusion_matrix"])))
+
+        results.append(res)
+
+        gts_speeds.append(np_gt_speed)
+        gts_dirs.append(np_gt_dir)
+        preds_speeds.append(np_pred_speed)
+        preds_dir.append(np_pred_dir)
+        probas_speeds.append(np_proba_speed)
+        probas_dir.append(np_proba_dir)
+
+    if gen_auc_charts:
+        fig_speed = auc_charts(
+            gts_speeds,
+            probas_speeds,
+            auc_chart_labels,
+            "driving_decision (speed)",
+            "weighted",
+        )
+        fig_dir = auc_charts(
+            gts_dirs, probas_dir, auc_chart_labels, "driving_decision (dir)", "weighted"
+        )
+        return results, fig_speed, fig_dir
+
+    return results
 
 
 def measure_driving_prediction(
@@ -682,6 +902,7 @@ def measure_driving_prediction(
     speed_pred: npt.NDArray[np.int_],
     dir_pred: npt.NDArray[np.int_],
     args: DefaultArguments,
+    verbose: bool = True,
 ) -> T_drivingEval:
     """Evaluates driving predictions from ground truth and prediction json files
         loaded from :py:func:`evaluate_driving`.
@@ -704,13 +925,15 @@ def measure_driving_prediction(
         "direction_mAcc": 0.0,
         "dir_confusion_matrix": None,
     }
-    print("Evaluating Driving Decision Prediction ...")
+    if verbose:
+        print("Evaluating Driving Decision Prediction ...")
 
     results["speed_Acc"] = accuracy_score(gt_speed, speed_pred)
     results["direction_Acc"] = accuracy_score(gt_dir, dir_pred)
 
     speed_matrix = confusion_matrix(gt_speed, speed_pred)
-    print("Speed matrix: ", speed_matrix)
+    if verbose:
+        print("Speed matrix: ", speed_matrix)
     results["speed_confusion_matrix"] = speed_matrix
     sum_cnt = speed_matrix.sum(axis=1)
     sum_cnt = np.array([max(1, i) for i in sum_cnt])
@@ -718,7 +941,8 @@ def measure_driving_prediction(
     results["speed_mAcc"] = np.mean(speed_cls_wise_acc)
 
     dir_matrix = confusion_matrix(gt_dir, dir_pred)
-    print("Dir matrix: ", dir_matrix)
+    if verbose:
+        print("Dir matrix: ", dir_matrix)
     results["dir_confusion_matrix"] = dir_matrix
     sum_cnt = dir_matrix.sum(axis=1)
     sum_cnt = np.array([max(1, i) for i in sum_cnt])

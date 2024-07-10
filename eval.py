@@ -1,5 +1,6 @@
 import json
 import os
+import traceback
 import warnings
 from argparse import ArgumentParser, Namespace
 from math import ceil
@@ -455,7 +456,13 @@ def predict_driving(
             if fid not in dt[vid]:
                 dt[vid][fid] = {}
             dt[vid][fid]["speed"] = torch.argmax(pred_speed_logit[i]).item()
+            dt[vid][fid]["speed_proba"] = (
+                pred_speed_logit[i].detach().cpu().numpy().tolist()
+            )
             dt[vid][fid]["direction"] = torch.argmax(pred_dir_logit[i]).item()
+            dt[vid][fid]["direction_proba"] = (
+                pred_dir_logit[i].detach().cpu().numpy().tolist()
+            )
 
         if itern % args.print_freq == 10:
             print(f"Predicting driving decision of Batch {itern}/{niters}")
@@ -503,11 +510,14 @@ def load_args(dataset_root_path: str, ckpt_path: str) -> DefaultArguments:
         args_path: str = os.path.join(ckpt_path, args_fn)
         try:
             args = _load_args(args, args_path)
+            args.checkpoint_path = ckpt_path
+            args.dataset_root_path = dataset_root_path
             return args
         except FileNotFoundError as e:
             continue
 
     args.checkpoint_path = ckpt_path
+    args.dataset_root_path = dataset_root_path
 
     warnings.warn("Using default arguments.")
     return args
@@ -613,14 +623,16 @@ def main(args: Namespace):
                     )
                     if not os.path.exists(test_gt_file):
                         get_test_intent_gt.get_test_driving_gt(
-                            test_loader, former_args, dset="test"
+                            test_loader, test_gt_file, former_args
                         )
                         mbar.write(f"Saved test intent ground truth to {test_gt_file}")
                     else:
                         mbar.write(f"Test intent ground truth exists at {test_gt_file}")
 
             except Exception as e:
-                warnings.warn(f"Model: {model_name}, Error: {e}")
+                warnings.warn(
+                    f"Model: {model_name}, Error: {e}, traceback: {traceback.format_exc()}"
+                )
                 continue
         else:
             warnings.warn(f"Checkpoint path {ckpt_path} does not exist!")

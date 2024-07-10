@@ -1,9 +1,10 @@
 from __future__ import annotations
-from collections.abc import Sequence
+
 import json
 import os
 import pickle
 import time
+from collections.abc import Sequence
 from typing import Any, NamedTuple
 
 from tqdm.auto import tqdm
@@ -110,9 +111,7 @@ def add_ped_case(
             # [vid_uid_pair: {'intent': [], 'description': [], 'key_frame': []}]
         },
     }
-    for vid_uid in tqdm(
-        nlp_vid_uid_pairs, desc="Annotator pairs", position=3, leave=False
-    ):
+    for vid_uid in tqdm(nlp_vid_uid_pairs, desc="Annotator pairs", leave=False):
         db[video_name][ped_name]["nlp_annotations"][vid_uid] = {
             "intent": [],
             "description": [],
@@ -149,9 +148,7 @@ def add_case(
     nlp_vid_uid_pairs = list(
         cog_annotation["frames"]["frame_0"]["cognitive_annotation"].keys()
     )
-    for vid_uid in tqdm(
-        nlp_vid_uid_pairs, desc="Cognitive Annotations", position=1, leave=False
-    ):
+    for vid_uid in tqdm(nlp_vid_uid_pairs, desc="Cognitive Annotations", leave=False):
         db[video_name]["nlp_annotations"][vid_uid] = {
             "driving_speed": [],
             "driving_direction": [],
@@ -163,12 +160,8 @@ def add_case(
 
     first_ann_idx = len(frame_list) - 1
     last_ann_idx = -1
-    for i, fname in tqdm(
-        enumerate(frame_list), description="Frames", position=1, leave=False
-    ):
-        for vid_uid in tqdm(
-            nlp_vid_uid_pairs, description="Annotator", position=2, leave=False
-        ):
+    for i, fname in tqdm(enumerate(frame_list), desc="Frames", leave=False):
+        for vid_uid in tqdm(nlp_vid_uid_pairs, desc="Annotator", leave=False):
             db[video_name]["nlp_annotations"][vid_uid]["driving_speed"].append(
                 cog_annotation["frames"][fname]["cognitive_annotation"][vid_uid][
                     "driving_decision_speed"
@@ -215,9 +208,7 @@ def add_case(
     ]
     db[video_name]["speed"] = db[video_name]["speed"][first_ann_idx : last_ann_idx + 1]
     db[video_name]["gps"] = db[video_name]["gps"][first_ann_idx : last_ann_idx + 1]
-    for vid_uid in tqdm(
-        nlp_vid_uid_pairs, desc="Annotator pairs", position=1, leave=False
-    ):
+    for vid_uid in tqdm(nlp_vid_uid_pairs, desc="Annotator pairs", leave=False):
         db[video_name]["nlp_annotations"][vid_uid]["driving_speed"] = db[video_name][
             "nlp_annotations"
         ][vid_uid]["driving_speed"][first_ann_idx : last_ann_idx + 1]
@@ -248,9 +239,7 @@ def init_db(
     else:
         raise NotImplementedError("Dataset not supported")
 
-    for video_name in tqdm(
-        sorted(video_list), desc="Loading annotations", position=0, leave=False
-    ):
+    for video_name in tqdm(sorted(video_list), desc="Loading annotations", leave=False):
         if args.task_name == "driving_decision":
             try:
                 with open(
@@ -307,7 +296,6 @@ def init_db(
             for ped in tqdm(
                 annotation["pedestrians"].keys(),
                 desc="Pedestrians",
-                position=1,
                 leave=False,
             ):
                 cog_ann = annotation["pedestrians"][ped]["cognitive_annotations"]
@@ -450,7 +438,7 @@ def update_db_annotations(
 
     video_list = sorted(db.keys())
     for video_name in tqdm(
-        video_list, desc="Preprocessing Video Annotations", position=0, leave=False
+        video_list, desc="Preprocessing Video Annotations", leave=False
     ):
         ped_list: list[str] = list(db[video_name].keys())
         tracks: list[str] = list(db[video_name].keys())
@@ -469,7 +457,7 @@ def update_db_annotations(
                 )
             continue
 
-        for ped_id in tqdm(ped_list, desc="Pedestrians", position=1, leave=False):
+        for ped_id in tqdm(ped_list, desc="Pedestrians", leave=False):
             ped_track = annotation["pedestrians"][ped_id]
             observed_frames = ped_track["observed_frames"]
             observed_bboxes = ped_track["cv_annotations"]["bboxes"]
@@ -559,7 +547,6 @@ def update_db_annotations(
                     for i in tqdm(
                         range(len(cv_frame_list)),
                         desc="CV Ann frame list",
-                        position=2,
                         leave=False,
                     ):
                         ped_splitId = ped_id + "-" + str(i)

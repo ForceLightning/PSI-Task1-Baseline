@@ -77,8 +77,8 @@ def get_intent_gt(
 
 def get_test_driving_gt(
     dataloader: DataLoader[Any],
+    output_path: str,
     args: DefaultArguments,
-    dset: str = "test",
 ) -> None:
     """Gets the ground truth driving decision.
 
@@ -108,10 +108,10 @@ def get_test_driving_gt(
         if itern % args.print_freq == 0:
             print(f"Get gt driving decision of Batch {itern}/{niters}")
 
-        # if itern >= 10:
-        #     break
     with open(
-        os.path.join(args.dataset_root_path, f"/test_gt/{dset}_driving_gt.json"), "w"
+        output_path,
+        "w",
+        encoding="utf-8",
     ) as f:
         json.dump(dt, f)
 

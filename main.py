@@ -172,7 +172,7 @@ def train(args: DefaultArguments) -> tuple[float | np.floating[Any], float]:
                 args.dataset_root_path, "test_gt/val_driving_gt.json"
             )
             if not os.path.exists(val_gt_file):
-                get_test_driving_gt(val_loader, args, dset="val")
+                get_test_driving_gt(val_loader, val_gt_file, args)
             predict_driving(model, val_loader, args, dset="val")
             val_score = evaluate_driving(
                 val_gt_file,

@@ -9,7 +9,6 @@ from utils.evaluate_results import evaluate_drivings, evaluate_intents, evaluate
 
 
 def main(opts: argparse.Namespace) -> None:
-
     sns.set_theme("paper", "whitegrid")
     pred_fn: str = ""
     test_gt_fn: str = opts.gt_dir
@@ -34,7 +33,7 @@ def main(opts: argparse.Namespace) -> None:
     for checkpoint_path in opts.checkpoint_path:
         pred_paths.append(os.path.join(checkpoint_path, pred_fn))
         model_names.append(
-            os.path.split(os.path.normpath(checkpoint_path))[-2]
+            os.path.normpath(checkpoint_path).split(os.sep)[-2]
         )  # get the model name from the checkpoint path
 
     paths = list(zip(gt_paths, pred_paths))
@@ -52,12 +51,9 @@ def main(opts: argparse.Namespace) -> None:
                 "display.max_rows", None, "display.max_columns", None
             ):
                 print(results)
-            pass
         case "driving_decision":
-            # TODO(chris): implement this
-            results, fig = evaluate_drivings(paths, True, model_names)
+            results, fig_speed, fig_dir = evaluate_drivings(paths, True, model_names)
             plt.show()
-            pass
 
 
 if __name__ == "__main__":
