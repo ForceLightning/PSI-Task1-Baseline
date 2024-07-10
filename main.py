@@ -113,8 +113,6 @@ def main(args):
                             pose_output, pt1_yolo, pt2_yolo, args.inputResH, args.inputResW, args.outputResH, args.outputResW)
         
         result = pose_nms(yolo_dets["bboxes"], yolo_dets["conf"], preds_img, preds_scores.detach())
-        print(result)
-        break
 
         output_image = vis_frame_fast(orig_img_k, result)
         output_image = draw_bboxes(output_image, yolo_dets["bboxes"])
