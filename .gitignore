@@ -1,2 +1,14 @@
+# Cache
 **/__pycache__
+**/.pytest_cache
 *.pt
+
+# DCPose
+/demo/input/
+/demo/output/
+.idea
+
+# Deform Conv build files
+**/build/
+*.pyd
+
