@@ -1,91 +1,70 @@
-# Pose Estimation with HRNET in PyTorch
+# DCPose
 
 # Requirements
 Directory format:
 ```
 .
-├── datasets                    datasets - for training only
-├── losses                      loss functions
-├── misc                        misc
-  └── nms                       CUDA nms module - for training only
-├── models                      Pytorch models
-|   └── detectors               Yolov3 & Yolov5 Models
-      └── yolo                  Pytorch Yolov3 Repo
-        └── weights             Yolov3 weights
-├── scripts                     scripts
-├── testing                     Code for testing
-├── training                    Code for training
-├── weights                     HRnet weights
-├── SimpleHRNET.py              
-├── SimpleHRNET_notebook.ipynb  
+├── datasets                    
+├── demo                        code for video.py as well as input and output video
+├── docs
+├── DCPose_SUPP_DIR            Pretrained models and supplementary                      
+├── engine                      
+├── object detector             Pytorch models
+|   └── YOLOv3                  Yolov3 Models and configurations
+├── posetimation                
+├── thirdparty                   
+|   └── deform_conv              DCN                             
+├── tools                   
+├── utils                    
+├── visualization                Code for Bounding box and Skeleton visualization             
+├── .gitignore  
 ├── README.md                   
-└── requirements.txt            Dependencies in requirements.txt form
+└── DCPose_requirements.txt      Dependencies in DCPose_requirements.txt form
 ```
 
-# Installation
+## Development Environment
+1. [CUDA Toolkit 12.4](https://developer.nvidia.com/cuda-12-4-0-download-archive) with an appropriately up-to-date Nvidia GPU.
+2. [cuDNN v8.9.7](https://developer.nvidia.com/rdp/cudnn-archive) download the corresponding cuDNN version according to the CUDA Tooklit version installed
+3. Python 3.6.12
 
+# Installation for DCPose
 1. Install python module dependencies with any of the following:
 - Pip
 ```bash
-pip install -r requirements.txt
+pip install -r DCPOSE_requirements.txt
 ```
-- Pipenv with `requirements.txt`
+- Pipenv with `DCPOSE_requirements.txt`
 ```bash
-pipenv install -r requirements.txt
+pipenv install -r DCPOSE_requirements.txt
 ```
 - Pipenv with `Pipfile`
 ```bash
 pipenv install
 ```
-
-2. Download the following pretrained weights:
-- COCO w48 384x288 (more accurate, but slower) - Used as default in live_demo.py and the other scripts
-[pose_hrnet_w48_384x288.pth](https://drive.google.com/file/d/1UoJhTtjHNByZSm96W3yFTfU5upJnsKiS/view)
-- COCO w32 256x192 (less accurate, but faster)
-[pose_hrnet_w32_256x192.pth](https://drive.google.com/file/d/1zYC7go9EV0XaSlSBjMaiyE_4TcHc_S38/view)
-- MPII w32 256x256 (MPII human joints)
-[pose_hrnet_w32_256x256.pth](https://drive.google.com/file/d/1_wn2ifmoQprBrFvUCDedjPON4Y6jsN-v/view)
-
-Note: Create a weights folder to saved the 3 downloaded pretrained weights
-
-3. Install YOLOv3 required packages with any of the following:
-The requirement files can be found in the models_/detectors/yolo
-
+2. Upgrade the setuptools wheels
 - Pip
 ```bash
-pip install -r requirements.txt
+pip install -r --upgrade setuptools wheel
 ```
-- Pipenv with `requirements.txt`
+
+3. Install DCN
 ```bash
-pipenv install -r requirements.txt
+cd thirdparty/deform_conv
+python setup.py develop
 ```
-- Pipenv with `Pipfile`
-```bash
-pipenv install
-```
-4.  Download the Yolov3 pretrained weights by running the script download_weights.sh from the models_/detectors/yolo/weights folder
+
+4. Download the [pretrained models](https://drive.google.com/drive/folders/1VPcwo9jVhnJpf5GVwR2-za1PFE6bCOXE) and put in the directory DcPose_supp_files
+
+Note that if a different CUDA Toolkit version is installed, modify the source for PyTorch wheels based on the CUDA Toolkit version.
 
 # Usage
-
-## Run the live demo
-Run `live-demo.py`
+## Run video.py
+1. Create an input directory to put our videos 
 ```bash
-python ./scripts/live-demo.py --filename video_0066.mp4 --save_video --yolo_version v3 --use_tiny_yolo
+cd demo/
+mkdir input/
 ```
+2. Run `video.py`
 ```bash
-python ./scripts/live-demo.py --filename video_0066.mp4 --save_video --yolo_version v5 --use_tiny_yolo
-```
-```bash
-python ./scripts/live-demo.py --filename video_0066.mp4 --save_video --yolo_version v8 --use_tiny_yolo
-```
-## Run the extract-keypoints to extract the keypoints in either Json or CSV format
-Run `extract-keypoints.py`
-```bash
-python ./scripts/extract-keypoints.py --filename video_0066.mp4 --format json --yolo_version v3 --use_tiny_yolo
-```
-```bash
-python ./scripts/extract-keypoints.py --filename video_0066.mp4 --format json --yolo_version v5 --use_tiny_yolo
-```
-```bash
-python ./scripts/extract-keypoints.py --filename video_0066.mp4 --format json --yolo_version v8 --use_tiny_yolo
+python video.py
 ```
