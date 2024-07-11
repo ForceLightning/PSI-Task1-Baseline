@@ -11,4 +11,9 @@
 # Deform Conv build files
 **/build/
 *.pyd
+thirdparty/deform_conv/deform_conv.egg-info/
+
+# Demo
+weights/
+*.avi
 
