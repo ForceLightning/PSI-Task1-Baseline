@@ -161,7 +161,7 @@ def get_opts() -> argparse.Namespace:
         "--epochs", type=int, default=1000, help="Total number of training epochs"
     )
     _ = parser.add_argument(
-        "--batch_size", type=float, default=128, help="Batch size of dataloader"
+        "--batch_size", type=int, default=128, help="Batch size of dataloader"
     )
     _ = parser.add_argument(
         "--lr", type=float, default=1e-3, help="General learning rate, default as 1e-3"

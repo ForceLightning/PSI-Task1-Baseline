@@ -154,6 +154,10 @@ def main(args: DefaultArguments):
                 prof.export_chrome_trace(
                     os.path.join(export_path, f"profiling_results.pt.trace.json")
                 )
+                mbar.write(f"Model: {model_name}")
+                mbar.write(
+                    str(prof.key_averages().table(sort_by="self_cpu_time_total"))
+                )
                 return torch.profiler.tensorboard_trace_handler(export_path)
 
             with torch.profiler.profile(

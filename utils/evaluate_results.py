@@ -286,7 +286,13 @@ def evaluate_intents(
 
     results: list[tuple[float, float, float, npt.NDArray[np.int_ | np.float_]]] = []
 
-    for gt_path, pred_path in paths:
+    if auc_chart_labels is None:
+        auc_chart_labels = [f"model_{i}" for i in range(len(paths))]
+
+    paths_iter = tqdm(zip(paths, auc_chart_labels), desc="Evaluating Intent")
+    for (gt_path, pred_path), model_name in paths_iter:
+        paths_iter.set_postfix_str(f"Model: {model_name}")
+
         gt: list[int] = []
         pred: list[int] = []
         proba: list[float] = []
@@ -306,6 +312,29 @@ def evaluate_intents(
 
         np_gt = np.array(gt)
         np_pred = np.array(pred)
+
+        # GUARD
+        assert (
+            np_gt.shape == np_pred.shape
+        ), f"Ground truth and prediction shapes {np_gt.shape} != {np_pred.shape} mismatch"
+
+        bal_acc = balanced_accuracy_score(np_gt, np_pred)
+
+        classi_report = classification_report(
+            np_gt, np_pred, target_names=["not cross", "cross"], output_dict=True
+        )
+
+        with pd.option_context(
+            "display.max_rows",
+            None,
+            "display.max_columns",
+            None,
+            "display.expand_frame_repr",
+            False,
+        ):
+            paths_iter.write(f"Model: {model_name}")
+            paths_iter.write(str(pd.DataFrame(classi_report)))
+            paths_iter.write(f"Balanced Accuracy: {bal_acc:.4f}")
 
         res = measure_intent_prediction(np_gt, np_pred)
 
@@ -350,7 +379,7 @@ def auc_charts(
         y_type = type_of_target(gt)
         if y_type == "binary":
             _binary_auc_charts(fig, ax, gt, proba, label)
-        if y_type == "multiclass":
+        elif y_type == "multiclass":
             average = average if average else "macro"
             _multiclass_auc_charts(fig, ax, gt, proba, label, average)
         else:
@@ -379,19 +408,19 @@ def _binary_auc_charts(
     prec, rec, _ = precision_recall_curve(gt, proba)
     auprc = average_precision_score(gt, proba)
 
-    ax[0].plot(fpr, tpr, label=f"{label} AUROC: {auroc:.4f}", lw=2, alpha=0.8)
-    ax[0].set_xlabel("False Positive Rate")
-    ax[0].set_ylabel("True Positive Rate")
-    ax[0].set_title("Receiver Operating Characteristics")
-    ax[0].set_ylim(-0.1, 1.1)
-    ax[0].legend(loc="lower right")
+    _ = ax[0].plot(fpr, tpr, label=f"{label} AUROC: {auroc:.4f}", lw=2, alpha=0.8)
+    _ = ax[0].set_xlabel("False Positive Rate")
+    _ = ax[0].set_ylabel("True Positive Rate")
+    _ = ax[0].set_title("Receiver Operating Characteristics")
+    _ = ax[0].set_ylim(-0.1, 1.1)
+    _ = ax[0].legend(loc="lower right")
 
-    ax[1].plot(rec, prec, label=f"{label} AUPRC: {auprc:.4f}", lw=2, alpha=0.8)
-    ax[1].set_xlabel("Recall")
-    ax[1].set_ylabel("Precision")
-    ax[1].set_title("Precision Recall Curve")
-    ax[1].set_ylim(-0.1, 1.1)
-    ax[1].legend(loc="lower right")
+    _ = ax[1].plot(rec, prec, label=f"{label} AUPRC: {auprc:.4f}", lw=2, alpha=0.8)
+    _ = ax[1].set_xlabel("Recall")
+    _ = ax[1].set_ylabel("Precision")
+    _ = ax[1].set_title("Precision Recall Curve")
+    _ = ax[1].set_ylim(-0.1, 1.1)
+    _ = ax[1].legend(loc="lower right")
 
 
 def _multiclass_auc_charts(
@@ -451,19 +480,21 @@ def _multiclass_auc_charts(
         case _:
             raise NotImplementedError(f"Average type {average} not supported")
 
-    ax[0].plot(fpr_mean, tpr, label=f"{label} AUROC: {auroc:.4f}", lw=2, alpha=0.8)
-    ax[0].set_xlabel("False Positive Rate")
-    ax[0].set_ylabel("True Positive Rate")
-    ax[0].set_title("Receiver Operating Characteristics")
-    ax[0].set_ylim(-0.1, 1.1)
-    ax[0].legend(loc="lower right")
+    _ = ax[0].plot(fpr_mean, tpr, label=f"{label} AUROC: {auroc:.4f}", lw=2, alpha=0.8)
+    _ = ax[0].set_xlabel("False Positive Rate")
+    _ = ax[0].set_ylabel("True Positive Rate")
+    _ = ax[0].set_title("Receiver Operating Characteristics")
+    _ = ax[0].set_ylim(-0.1, 1.1)
+    _ = ax[0].legend(loc="lower right")
 
-    ax[1].plot(recall_mean, prec, label=f"{label} AUPRC: {auprc:.4f}", lw=2, alpha=0.8)
-    ax[1].set_xlabel("Recall")
-    ax[1].set_ylabel("Precision")
-    ax[1].set_title("Precision Recall Curve")
-    ax[1].set_ylim(-0.1, 1.1)
-    ax[1].legend(loc="lower right")
+    _ = ax[1].plot(
+        recall_mean, prec, label=f"{label} AUPRC: {auprc:.4f}", lw=2, alpha=0.8
+    )
+    _ = ax[1].set_xlabel("Recall")
+    _ = ax[1].set_ylabel("Precision")
+    _ = ax[1].set_title("Precision Recall Curve")
+    _ = ax[1].set_ylim(-0.1, 1.1)
+    _ = ax[1].legend(loc="lower right")
 
 
 def measure_intent_prediction(
@@ -557,10 +588,6 @@ def evaluate_traj(
 
 
 def evaluate_trajs(paths: list[tuple[str, str]]) -> pd.DataFrame:
-    # TODO(chris): Implement this.
-    gts: list[npt.NDArray[np.float_]] = []
-    preds: list[npt.NDArray[np.float_]] = []
-
     results: dict[str, list[float] | list[str]] = {
         "model_name": [],
         "ADE_0.5": [],
@@ -857,7 +884,14 @@ def evaluate_drivings(
             output_dict=True,
         )
 
-        with pd.option_context("display.max_rows", None, "display.max_columns", None):
+        with pd.option_context(
+            "display.max_rows",
+            None,
+            "display.max_columns",
+            None,
+            "display.expand_frame_repr",
+            False,
+        ):
             path_iter.write(f"Model: {model_name}")
             path_iter.write("Speed classification report: ")
             path_iter.write(str(pd.DataFrame(speed_classi_report)))

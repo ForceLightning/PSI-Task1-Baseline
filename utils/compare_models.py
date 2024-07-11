@@ -48,7 +48,12 @@ def main(opts: argparse.Namespace) -> None:
         case "ped_traj":
             results = evaluate_trajs(paths)
             with pd.option_context(
-                "display.max_rows", None, "display.max_columns", None
+                "display.max_rows",
+                None,
+                "display.max_columns",
+                None,
+                "display.expand_frame_repr",
+                False,
             ):
                 print(results)
         case "driving_decision":
