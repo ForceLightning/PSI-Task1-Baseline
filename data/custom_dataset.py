@@ -11,7 +11,9 @@ from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.dataloader import _BaseDataLoaderIter
 from torchvision.transforms import v2
-
+from torchvision.io import read_image
+from .pose_dataset_utils import get_labels, get_boxes, get_keypoints
+from torchvision.transforms import transforms as T
 
 class VideoDataset(Dataset):
     def __init__(self, data: dict, args: dict, stage="train") -> None:
@@ -552,31 +554,78 @@ class _RepeatSampler:
             yield from iter(self.sampler)
 
 class YoloDataset(Dataset):
-        def __init__(self, dataset_path):
-            self.dataset_path = dataset_path
-            file_list = os.listdir(dataset_path)
-            self.yolo_results = sorted(file_list, key=lambda x: int(x.split('_')[-1].split('.')[0]))
+    def __init__(self, dataset_path):
+        self.dataset_path = dataset_path
+        file_list = os.listdir(dataset_path)
+        self.yolo_results = sorted(file_list, key=lambda x: int(x.split('_')[-1].split('.')[0]))
 
-        def __len__(self):
-            return len(os.listdir(self.dataset_path))  
+    def __len__(self):
+        return len(os.listdir(self.dataset_path))  
 
-        def __getitem__(self, idx):
-            result_file = os.path.join(self.dataset_path, self.yolo_results[idx])
-            with open(result_file, "r") as f:
-                lines = f.readlines()
-            for line in lines:
-                elements = line.split("\t")
-                vid_id = elements[0]
-                ped_id = "track_" + elements[1]
-                bbox = ast.literal_eval(elements[2])
-                bbox = torch.tensor(bbox)
-                frames = ast.literal_eval(elements[3])
-                frames = torch.tensor([int(frame) for frame in frames])
-            
-            data = {
-                'video_id': vid_id,
-                'ped_id': ped_id,
-                'bboxes': bbox,
-                'frames': frames
-            }
-            return data
+    def __getitem__(self, idx):
+        result_file = os.path.join(self.dataset_path, self.yolo_results[idx])
+        with open(result_file, "r") as f:
+            lines = f.readlines()
+        for line in lines:
+            elements = line.split("\t")
+            vid_id = elements[0]
+            ped_id = "track_" + elements[1]
+            bbox = ast.literal_eval(elements[2])
+            bbox = torch.tensor(bbox)
+            frames = ast.literal_eval(elements[3])
+            frames = torch.tensor([int(frame) for frame in frames])
+        
+        data = {
+            'video_id': vid_id,
+            'ped_id': ped_id,
+            'bboxes': bbox,
+            'frames': frames
+        }
+        return data
+        
+class PoseDataset(Dataset):
+    def __init__(self, dataset_path):
+        self.dataset_path = dataset_path
+        self.label_folder = os.path.join(self.dataset_path, "labels")
+        self.img_folder = os.path.join(self.dataset_path, "frames")
+        self.label = os.listdir(self.label_folder)
+        self.img = os.listdir(self.img_folder)
+
+    def __len__(self):
+        return len(os.listdir(self.img_folder))
+    
+    def __getitem__(self, idx):
+        img_path = os.path.join(self.img_folder, self.img[idx])
+        img = read_image(img_path)
+
+        label_path = os.path.join(self.label_folder, self.label[idx])
+        labels = get_labels(label_path)
+        labels = torch.tensor(labels, dtype=torch.int64)
+
+        boxes = get_boxes(label_path)
+        boxes = torch.tensor(boxes, dtype=torch.float32)
+        
+        area = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+        
+        keypoints = get_keypoints(label_path)
+        keypoints = torch.tensor(keypoints, dtype=torch.float32)
+
+        # suppose all instances are not crowd
+        iscrowd = torch.zeros((len(labels),), dtype=torch.bool)
+        
+        targetdic = {
+            'image_id': idx,
+            'iscrowd': iscrowd,
+            'boxes': boxes,
+            'labels': labels,
+            'area': area,
+            'keypoints': keypoints
+        }
+
+        transforms = T.Compose([
+            T.ToPILImage(),
+            T.Resize((640,640)),
+            T.ToTensor()
+        ])
+        
+        return transforms(img), targetdic

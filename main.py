@@ -22,11 +22,12 @@ from pathlib import Path
 from ultralytics import YOLO
 
 from boxmot import DeepOCSORT, BYTETracker, BoTSORT
-from data.custom_dataset import YoloDataset
+from data.custom_dataset import YoloDataset, PoseDataset
 from utils.plotting import PosePlotter, draw_landmarks_on_image, road_lane_detection, overlay
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+import coco_eval, coco_utils
 
 def main(args):
     # writer = SummaryWriter(args.checkpoint_path)
@@ -48,108 +49,74 @@ def main(args):
     args.source = os.path.join(os.getcwd(), "PSI_Videos", "videos", "video_0131.mp4")
     file_name = args.source.split("\\")[-1].split(".")[0]
     
-    model = YOLO("yolov8s-seg.pt")
+    model = YOLO("yolov8s-pose.pt")
     # tracker = DeepOCSORT(
     # model_weights=Path('osnet_x0_25_msmt17.pt'), # which ReID model to use
     # device='cuda:0',
     # fp16=False,
     # )
-    tracker = BYTETracker()
+    # tracker = BYTETracker()
     # tracker = BoTSORT(
     # model_weights=Path('osnet_x0_25_msmt17.pt'), # which ReID model to use
     # device='cuda:0',
     # fp16=True,
     # )
-    pose_plotter = PosePlotter()
-
-    """
-    Segmentation
-    """
+    
+    """Using YOLO POSE"""
     vid = cv2.VideoCapture(args.source)
-
-    frame_number = 0
-
-    while True:
-        ret, im = vid.read()
-
-        if not ret :
-            break
+    # vid = cv2.VideoCapture(os.path.join(os.getcwd(), "VID_025 - Trim.mp4"))
+    ds = PoseDataset(os.path.join(os.getcwd(), "video_0131_gt"))
+    cocoAnnotation = coco_utils.get_coco_api_from_dataset(ds)
+    coco_evaluator2 = coco_eval.CocoEvaluator( cocoAnnotation , iou_types = ['keypoints'])
+    
+    for img, target in ds:
+        image = img.to(torch.float)
+        image = torch.unsqueeze(image, dim=0)
         
-        # Increment frame number
-        frame_number += 1
+        result = model.predict(image, verbose=False, classes=[0])
+    
+        result = result[0]
+
+        if not result.boxes:
+            predsdic = {}
+
+        if len(result.boxes) == 1:
+            predsdic = { 
+                "image_id": target["image_id"],    
+                "labels": result.boxes.cls,
+                'scores': result.boxes.conf,
+                'boxes': result.boxes.xyxy,
+                'keypoints': result.keypoints.data
+                }
         
-        h, w, _ = im.shape
-        results = model.predict(im, verbose=False, classes=[0], conf=0.45)
-        # annotated_frame = result[0].plot()
-        # cv2.imshow("YOLO", annotated_frame)
-        # key = cv2.waitKey(1) & 0xFF
-        # if key == ord(' ') or key == ord('q'):
-        #     break
-        dets = []
-        masks_det = []
-        for r in results:
-            boxes = r.boxes 
-            masks = r.masks 
-        
-        if masks is not None:
-            masks = masks.data.cpu()
-            for seg in masks.data.cpu().numpy():
-                seg = cv2.resize(seg, (w, h))
-                masks_det.append(seg)
-            
-            for box in boxes:
-                cls = int(box.cls[0].item())
-                cords = box.xyxy[0].tolist()
-                conf = box.conf[0].item()
-                id = box.id
-                dets.append([cords[0], cords[1], cords[2], cords[3], conf, cls])
-                
-        dets = np.array(dets)
-        masks_det = np.array(masks_det)
+            res = { target["image_id"]: predsdic}
+            coco_evaluator2.update(res)
 
-        if len(dets) == 0:
-            dets = np.empty((0, 6))
+        elif len(result.boxes) > 1: 
+            labels = torch.Tensor(size=(0,)).to( result.boxes[0].xyxy.device)
+            scores = torch.Tensor(size=(0,)).to( result.boxes[0].xyxy.device)         
+            boxes = torch.Tensor(size=(0,4)).to( result.boxes[0].xyxy.device)
+            keypoints = torch.Tensor(size=(0,17,3)).to( result.boxes[0].xyxy.device)
             
-        tracks = tracker.update(dets, im) 
-        if tracks.shape[0] != 0:
-        #     x1 = tracks[0][0]
-        #     y1 = tracks[0][1]
-        #     x2 = tracks[0][2]
-        #     y2 = tracks[0][3]
-        #     id = tracks[0][4]
-        #     conf = tracks[0][5]
-        #     cls = tracks[0][6]
-        #     with open(file_name + ".txt", 'a') as f:
-        #         f.write(f"{int(id)} {x1} {y1} {x2} {y2} {conf} {int(cls)} {frame_number}\n")
+            for i in range(len(result.boxes)):
+                labels = torch.cat( (labels, result.boxes[i].cls ), dim=0) 
+                scores = torch.cat( (scores, result.boxes[i].conf ), dim=0) 
+                boxes = torch.cat( (boxes, result.boxes[i].xyxy), dim=0) 
+                keypoints = torch.cat( (keypoints, result.keypoints[i].data), dim=0) 
+                          
+            predsdic = { 
+                "image_id": target["image_id"],    
+                "labels": labels,
+                'scores': scores,
+                'boxes': boxes,
+                'keypoints': keypoints
+                }
 
-            inds = tracks[:, 7].astype('int') # float64 to int
+            res = { target["image_id"]: predsdic}
+            coco_evaluator2.update(res)
             
-            masks = masks_det[inds]  
-            
-            for i, j in zip(tracks, masks):
-                x1 = i[0]
-                y1 = i[1]
-                x2 = i[2]
-                y2 = i[3]
-                id = i[4]
-                conf = i[5]
-                cls = i[6]
-                mask = j 
-                
-                with open(file_name + ".txt", 'a') as f:
-                    f.write(f"{int(id)} {x1} {y1} {x2} {y2} {conf} {int(cls)} {mask} {frame_number}\n")
-
-            for m in masks:
-                seg = cv2.resize(m, (w, h))     
-                im = overlay(im, seg, (0, 0, 255), 0.4)
-           
-            tracker.plot_results(im, show_trajectories=False)
-            
-        # break on pressing q or space
-        cv2.imshow('BoxMOT detection', im)     
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord(' ') or key == ord('q'):
-            break
+    coco_evaluator2.accumulate()
+    coco_evaluator2.summarize()
 
     vid.release()
     cv2.destroyAllWindows()
