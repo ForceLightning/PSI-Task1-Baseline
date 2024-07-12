@@ -76,8 +76,11 @@ class PosePlotter:
         shape: tuple[int, int] = (640, 640),
         radius: int = 5,
     ):
-        for kpt in keypoints:
-            for point in kpt:
+        assert (
+            keypoints.ndim == 4
+        ), f"Expected 3D array, got {keypoints.ndim}D array of shape {keypoints.shape}"
+        for kpt in keypoints:  # tracks
+            for point in kpt:  # individual keypoints
                 for i, p in enumerate(point):
                     color_k = [int(x) for x in self.kpt_color[i]]
                     x_coord = int(p[0])
