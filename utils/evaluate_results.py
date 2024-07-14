@@ -344,7 +344,7 @@ def evaluate_intents(
         results.append((res["acc"], res["f1"], res["mAcc"], res["confusion_matrix"]))
 
     if gen_auc_charts:
-        fig = auc_charts(gts, probas, auc_chart_labels, "ped_intent")
+        fig = auc_charts(gts, probas, auc_chart_labels, "ped_intent", True)
         return results, fig
     return results
 
@@ -355,6 +355,7 @@ def auc_charts(
     labels: list[str] | None,
     task_name: str = "ped_intent",
     average: Literal["macro", "weighted", "micro"] | None = None,
+    horizontal: bool = False,
 ) -> Figure:
     """Generates ROC and PRC charts as a comparison amongst various model results.
 
@@ -365,12 +366,16 @@ def auc_charts(
     :param list[str] labels: Names of the models.
     :param task_name: Name of the task, defaults to "ped_intent".
     :type task_name: str
+    :param bool horizontal: Whether to display the charts horizontally, defaults to False.
 
     :return: Figure with ROC and PRC charts.
     :rtype: Figure
     """
     sns.set_theme("paper", "whitegrid")
-    fig, ax = plt.subplots(nrows=2, ncols=1, figsize=(8.27, 11.69), dpi=100)
+    if horizontal:
+        fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(11.69, 5.15), dpi=100)
+    else:
+        fig, ax = plt.subplots(nrows=2, ncols=1, figsize=(8.27, 11.69), dpi=100)
 
     labels = [f"model_{i}" for i in range(len(gts))] if labels is None else labels
 
@@ -921,9 +926,15 @@ def evaluate_drivings(
             auc_chart_labels,
             "driving_decision (speed)",
             "weighted",
+            True,
         )
         fig_dir = auc_charts(
-            gts_dirs, probas_dir, auc_chart_labels, "driving_decision (dir)", "weighted"
+            gts_dirs,
+            probas_dir,
+            auc_chart_labels,
+            "driving_decision (dir)",
+            "weighted",
+            True,
         )
         return results, fig_speed, fig_dir
 

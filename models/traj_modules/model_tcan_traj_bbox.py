@@ -1,6 +1,5 @@
 from typing import Any
 
-import numpy as np
 import torch
 from torch import nn
 from typing_extensions import overload, override
@@ -208,11 +207,7 @@ class TCANTrajBboxInt(TCANTrajBbox):
         # bs x ts x 5
         enc_input = torch.cat([bbox, intent], dim=2)
 
-        tcan_output: torch.Tensor
-        if self.temp_attn:
-            tcan_output, _ = self.tcan(enc_input)
-        else:
-            tcan_output = self.tcan(enc_input)
+        tcan_output: torch.Tensor = self.tcan(enc_input)
 
         tcan_output = tcan_output.transpose(1, 2)
         tcan_output = tcan_output.reshape(

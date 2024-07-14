@@ -44,6 +44,7 @@ def main(opts: argparse.Namespace) -> None:
                 True,
                 model_names,
             )
+            _ = fig.savefig("intent_results.png", transparent=True)
             plt.show()
         case "ped_traj":
             results = evaluate_trajs(paths)
@@ -58,6 +59,8 @@ def main(opts: argparse.Namespace) -> None:
                 print(results)
         case "driving_decision":
             results, fig_speed, fig_dir = evaluate_drivings(paths, True, model_names)
+            _ = fig_speed.savefig("speed_results.png", transparent=True)
+            _ = fig_dir.savefig("dir_results.png", transparent=True)
             plt.show()
 
 

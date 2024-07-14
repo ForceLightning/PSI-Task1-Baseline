@@ -64,14 +64,16 @@ def build_model(
             model = get_tcn_traj_bbox_global(args).to(DEVICE)
         case "tcan_traj_bbox":
             model = get_tcan_traj_bbox(args).to(DEVICE)
+        case "tcan_traj_bbox_int":
+            model = get_tcan_traj_bbox_int(args).to(DEVICE)
+        case "tcan_traj_global":
+            model = get_tcan_traj_bbox_global(args).to(DEVICE)
         case "transformer_traj_bbox":
             model = get_transformer_traj_bbox(args).to(DEVICE)
         case "transformer_traj_bbox_pose":
             model = get_transformer_traj_bbox_pose(args).to(DEVICE)
         case "transformer_traj_intent_bbox_pose":
             model = get_transformer_traj_intent_bbox_pose(args).to(DEVICE)
-        case "tcan_traj_global":
-            model = get_tcan_traj_bbox_global(args).to(DEVICE)
         case "reslstm_driving_global":
             model = get_lstm_driving_global(args).to(DEVICE)
         case "restcn_driving_global":
@@ -235,9 +237,9 @@ def get_tcan_traj_bbox_int(args: DefaultArguments) -> TCANTrajBboxInt:
     model_configs = {}
     model_configs["traj_model_opts"] = {
         "enc_in_dim": 5,
-        "enc_out_dim": 64,
+        "enc_out_dim": 80,
         "dec_in_emb_dim": 0,
-        "dec_out_dim": 64,
+        "dec_out_dim": 80,
         "output_dim": 4,
         "n_layers": args.n_layers,
         "dropout": 0.125,
@@ -246,6 +248,7 @@ def get_tcan_traj_bbox_int(args: DefaultArguments) -> TCANTrajBboxInt:
         "predict_length": args.predict_length,
         "return_sequence": True,
         "output_activation": "None",
+        "num_heads": 5,
     }
     args.model_configs = model_configs
     model = TCANTrajBboxInt(args, model_configs["traj_model_opts"])

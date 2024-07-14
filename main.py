@@ -243,11 +243,11 @@ def main(args: DefaultArguments):
             args.batch_size = [256]
             args.predict_length = 45
             # args.model_name = "lstm_traj_bbox"
-            args.model_name = "tcn_traj_bbox"
+            # args.model_name = "tcn_traj_bbox"
             # args.model_name = "tcn_traj_bbox_int"
             # args.model_name = "tcn_traj_global"
             # args.model_name = "tcan_traj_bbox"
-            # args.model_name = "tcan_traj_bbox_int"
+            args.model_name = "tcan_traj_bbox_int"
             # args.model_name = "tcan_traj_global"
             # args.model_name = "transformer_traj_bbox"
             # args.model_name = "transformer_traj_bbox_pose"
@@ -307,8 +307,8 @@ def main(args: DefaultArguments):
 
     hyperparameter_list = {
         # "lr": [3e-2],
-        # "lr": [3e-3],
-        "lr": [1e-1],
+        "lr": [3e-3],
+        # "lr": [1e-1],
         # "lr": [1e-2],
         # "lr": [1e-5],
         "batch_size": args.batch_size,
