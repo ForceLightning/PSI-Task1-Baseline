@@ -33,6 +33,8 @@ from utils.args import DefaultArguments
 from utils.cuda import *
 from utils.plotting import PosePlotter
 
+SAVE_VIDEO = True
+
 
 def plot_past_future_traj(
     args: DefaultArguments,
@@ -143,6 +145,8 @@ def infer(
     pipeline_model: YOLOTrackerPipelineModel,
     source: str | Path,
     transform: v2.Compose | None,
+    save_video: bool = SAVE_VIDEO,
+    save_path: str | Path = "yolo_pipeline.avi",
 ):
     _ = pipeline_model.eval()
 
@@ -153,13 +157,28 @@ def infer(
     buffer: deque[cvt.MatLike | torch.Tensor] = deque(maxlen=args.observe_length)
     pose_plotter = PosePlotter()
 
+    video_writer: cv2.VideoWriter | None = None
+
+    if save_video:
+        fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+
     with tqdm(total=vid.get(cv2.CAP_PROP_FRAME_COUNT), leave=True) as pbar:
         while True:
             _ = pbar.update(1)
             ret, im = vid.read()
+
             if not ret:
                 pbar.write(f"EOF at frame {frame_number:04d}")
                 break
+
+            if save_video and video_writer is None:
+                video_writer = cv2.VideoWriter(
+                    save_path,
+                    fourcc,
+                    30,
+                    (im.shape[1], im.shape[0]),
+                )
+
             try:
                 frame_number += 1
                 if transform is not None:
@@ -257,9 +276,16 @@ def infer(
                 continue
             finally:
                 cv2.imshow("YOLO Tracker", im)
+
+                if save_video and video_writer:
+                    video_writer.write(im)
+
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord(" ") or key == ord("q"):
                     break
+
+    if save_video and video_writer:
+        video_writer.release()
 
     vid.release()
     cv2.destroyAllWindows()
@@ -271,7 +297,7 @@ def main(args: DefaultArguments):
     args.intent_model = False
     args.traj_model = True
     args.traj_loss = ["bbox_l2"]
-    args.model_name = "tcn_traj_bbox"
+    args.model_name = "tcan_traj_bbox"
     args.loss_weights = {
         "loss_intent": 0.0,
         "loss_traj": 1.0,

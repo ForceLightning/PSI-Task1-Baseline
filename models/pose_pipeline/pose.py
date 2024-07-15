@@ -138,6 +138,7 @@ class YOLOWithTracker:
                 print(f"{i:02d}: No keypoints detected.")
             #     continue
 
+            # TODO(chris): Propagate the confidence score out of this method.
             if (boxes := result.boxes) is not None:
                 for box in boxes:
                     box_cls = int(box.cls[0].item())
