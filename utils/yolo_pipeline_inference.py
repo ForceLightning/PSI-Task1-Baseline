@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import traceback
 from collections import deque
 from copy import deepcopy
 from pathlib import Path
@@ -108,10 +109,8 @@ def scale_bboxes_up(
     if isinstance(bboxes, torch.Tensor):
         bboxes = bboxes.detach().cpu().numpy()
 
-    bboxes[:, 0] = bboxes[:, 0] * scale_x
-    bboxes[:, 1] = bboxes[:, 1] * scale_y
-    bboxes[:, 2] = bboxes[:, 2] * scale_x
-    bboxes[:, 3] = bboxes[:, 3] * scale_y
+    bboxes[:, 0::2] = bboxes[:, 0::2] * scale_x
+    bboxes[:, 1::2] = bboxes[:, 1::2] * scale_y
 
     return bboxes
 
@@ -236,7 +235,7 @@ def infer(
                 for track_id, (bboxes, bbox_conf, poses) in enumerate(
                     zip(results.bboxes, results.bbox_conf, results.poses)
                 ):
-                    if torch.all(bboxes[args.observe_length] == 0.0):
+                    if torch.count_nonzero(bboxes) < 50 * 4:
                         continue
                     rescaled_bboxes = scale_bboxes_up(
                         bboxes.detach().cpu().numpy(), args.image_shape
@@ -278,8 +277,11 @@ def infer(
                     last_poses, (640, 640), args.image_shape
                 )
                 pose_plotter.plot_keypoints(im, last_poses)
-            except:
+            except ValueError:
                 continue
+            except Exception as e:
+                pbar.write(f"Error: {e}, {frame_number:04d}, {traceback.format_exc()}")
+                break
             finally:
                 cv2.imshow("YOLO Tracker", im)
 
@@ -338,14 +340,14 @@ def main(args: DefaultArguments):
         model_weights=Path("osnet_x0_25_msmt17.pt"), device="cuda:0", fp16=True
     )
 
-    yolo_tracker = YOLOWithTracker(yolo_model, tracker)
+    yolo_tracker = YOLOWithTracker(args, yolo_model, tracker, persistent_tracker=True)
     pipeline_model = YOLOTrackerPipelineModel(
         args,
         model,
         yolo_tracker,
         return_dict=True,
         return_pose=True,
-        persistent_tracker=False,
+        persistent_tracker=True,
     )
 
     transform = v2.Compose(
