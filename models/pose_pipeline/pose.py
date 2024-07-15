@@ -77,7 +77,7 @@ class YOLOWithTracker:
 
     @overload
     def __call__(
-        self, images: list[npt.NDArray[np.uint8] | cvt.MatLike]
+        self, images: list[npt.NDArray[np.uint8]] | list[cvt.MatLike]
     ) -> dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]: ...
 
     @overload
@@ -89,7 +89,8 @@ class YOLOWithTracker:
         self,
         images: (
             torch.Tensor
-            | list[npt.NDArray[np.uint8] | cvt.MatLike]
+            | list[npt.NDArray[np.uint8]]
+            | list[cvt.MatLike]
             | npt.NDArray[np.uint8]
             | cvt.MatLike
         ),
@@ -97,8 +98,8 @@ class YOLOWithTracker:
         """Performs pose estimation and tracking on a batch of images or a single image.
 
         :param images: Batch of images of shape B x C x H x W
-        :type images: torch.Tensor or list[npt.NDArray[np.uint8] or cvt.MatLike] or
-        npt.NDArray[np.uint8] or cvt.MatLike
+        :type images: torch.Tensor or list[npt.NDArray[np.uint8]] or list[cvt.MatLike]
+        or npt.NDArray[np.uint8] or cvt.MatLike
         :return: Dictionary of track IDs and tuple of (bounding boxes, keypoints,
         keypoint observation mask, bbox confidence).
         :rtype: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]
@@ -239,6 +240,7 @@ class YOLOTrackerPipelineModel(nn.Module):
         yolo_tracker: YOLOWithTracker,
         return_dict: bool = False,
         return_pose: bool = False,
+        persistent_tracker: bool = False,
     ):
         super().__init__()
         self.args = args
@@ -250,6 +252,7 @@ class YOLOTrackerPipelineModel(nn.Module):
             raise ValueError(
                 "return_pose is only valid when return_dict is set to True."
             )
+        self.persistent_tracker = persistent_tracker
 
     def _tracker_infer_intent_batch(self, x: T_intentBatch) -> tuple[
         torch.Tensor,
@@ -262,32 +265,35 @@ class YOLOTrackerPipelineModel(nn.Module):
             imgs.dim() == 4
         ), f"input dimensionality must be 4, but is of shape {imgs.shape}"
 
-        self.yolo_tracker.reset_tracker()
-        tracks: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor] = (
-            self.yolo_tracker(imgs)
-        )
+        if not self.persistent_tracker:
+            self.yolo_tracker.reset_tracker()
+        tracks: dict[
+            int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        ] = self.yolo_tracker(imgs)
         return imgs, tracks
 
     def _tracker_infer_intent_ndarray(self, x: npt.NDArray[np.uint8]) -> tuple[
         npt.NDArray[np.uint8],
         dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
     ]:
-        self.yolo_tracker.reset_tracker()
-        im: list[npt.NDArray[np.uint8]] = [i for i in x]
-        tracks: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor] = (
-            self.yolo_tracker(im)
-        )
+        if not self.persistent_tracker:
+            self.yolo_tracker.reset_tracker()
+        im: list[npt.NDArray[np.uint8]] = list(x)  # equivalent to [i for i in x]
+        tracks: dict[
+            int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        ] = self.yolo_tracker(im)
         return x, tracks
 
     def _tracker_infer_intent_deque(self, x: deque[cvt.MatLike]) -> tuple[
         npt.NDArray[np.uint8],
         dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
     ]:
-        self.yolo_tracker.reset_tracker()
-        im: list[npt.NDArray[np.uint8]] = [np.asarray(i) for i in x]
-        tracks: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor] = (
-            self.yolo_tracker(im)
-        )
+        if not self.persistent_tracker:
+            self.yolo_tracker.reset_tracker()
+        im: list[cvt.MatLike] = list(x)  # equivalent to [i for i in x]
+        tracks: dict[
+            int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        ] = self.yolo_tracker(im)
         return np.asarray(im), tracks
 
     @override
@@ -362,7 +368,7 @@ def main(args: DefaultArguments):
     args.intent_model = False
     args.traj_model = True
     args.traj_loss = ["nll"]
-    args.model_name = "tcn_traj_bbox"
+    args.model_name = "transformer_bbox_traj"
     args.loss_weights = {
         "loss_intent": 0.0,
         "loss_traj": 1.0,

@@ -236,6 +236,8 @@ def infer(
                 for track_id, (bboxes, bbox_conf, poses) in enumerate(
                     zip(results.bboxes, results.bbox_conf, results.poses)
                 ):
+                    if torch.all(bboxes[args.observe_length] == 0.0):
+                        continue
                     rescaled_bboxes = scale_bboxes_up(
                         bboxes.detach().cpu().numpy(), args.image_shape
                     )
@@ -338,7 +340,12 @@ def main(args: DefaultArguments):
 
     yolo_tracker = YOLOWithTracker(yolo_model, tracker)
     pipeline_model = YOLOTrackerPipelineModel(
-        args, model, yolo_tracker, return_dict=True, return_pose=True
+        args,
+        model,
+        yolo_tracker,
+        return_dict=True,
+        return_pose=True,
+        persistent_tracker=False,
     )
 
     transform = v2.Compose(
