@@ -344,7 +344,7 @@ def evaluate_intents(
         results.append((res["acc"], res["f1"], res["mAcc"], res["confusion_matrix"]))
 
     if gen_auc_charts:
-        fig = auc_charts(gts, probas, auc_chart_labels, "ped_intent", True)
+        fig = auc_charts(gts, probas, auc_chart_labels, "ped_intent", None, True)
         return results, fig
     return results
 
