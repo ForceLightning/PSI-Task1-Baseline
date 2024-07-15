@@ -73,17 +73,17 @@ class YOLOWithTracker:
     @overload
     def __call__(
         self, images: torch.Tensor
-    ) -> dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]: ...
+    ) -> dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]: ...
 
     @overload
     def __call__(
         self, images: list[npt.NDArray[np.uint8] | cvt.MatLike]
-    ) -> dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]: ...
+    ) -> dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]: ...
 
     @overload
     def __call__(
         self, images: npt.NDArray[np.uint8] | cvt.MatLike
-    ) -> dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]: ...
+    ) -> dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]: ...
 
     def __call__(
         self,
@@ -93,15 +93,15 @@ class YOLOWithTracker:
             | npt.NDArray[np.uint8]
             | cvt.MatLike
         ),
-    ) -> dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+    ) -> dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
         """Performs pose estimation and tracking on a batch of images or a single image.
 
         :param images: Batch of images of shape B x C x H x W
         :type images: torch.Tensor or list[npt.NDArray[np.uint8] or cvt.MatLike] or
         npt.NDArray[np.uint8] or cvt.MatLike
         :return: Dictionary of track IDs and tuple of (bounding boxes, keypoints,
-        keypoint observation mask).
-        :rtype: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]
+        keypoint observation mask, bbox confidence).
+        :rtype: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]
         """
         # Reshape numpy images back to cv2 RGB format B x H x W x C
         results: list[Results] = []
@@ -138,7 +138,6 @@ class YOLOWithTracker:
                 print(f"{i:02d}: No keypoints detected.")
             #     continue
 
-            # TODO(chris): Propagate the confidence score out of this method.
             if (boxes := result.boxes) is not None:
                 for box in boxes:
                     box_cls = int(box.cls[0].item())
@@ -169,8 +168,10 @@ class YOLOWithTracker:
                     else:
                         tracked_map[trk_id] = {i: det_ind}
 
-        ret: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
-        """Format is track_id: (bboxes, poses, pose masks)
+        ret: dict[
+            int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        ] = {}
+        """Format is track_id: (bboxes, poses, pose masks, bbox confidence)
         """
 
         for trk_id, det_inds in tracked_map.items():
@@ -185,6 +186,9 @@ class YOLOWithTracker:
             trk_kp_dets_mask_base: torch.Tensor = (
                 torch.zeros((ts, 17)).type(LongTensor).to(DEVICE)
             )
+            trk_dets_conf_base: torch.Tensor = (
+                torch.zeros((ts, 1)).type(FloatTensor).to(DEVICE)
+            )
 
             for frame_id in range(ts):
                 if (det_ind := det_inds.get(frame_id)) is not None:
@@ -197,6 +201,9 @@ class YOLOWithTracker:
                     trk_dets_base[frame_id, :] = (
                         results[frame_id].boxes[det_ind].xyxyn[0]
                     )
+                    trk_dets_conf_base[frame_id, :] = (
+                        results[frame_id].boxes[det_ind].conf[0]
+                    )
                     trk_kp_dets_base[frame_id, :, :] = (
                         results[frame_id].keypoints[det_ind].xy
                     )
@@ -206,6 +213,7 @@ class YOLOWithTracker:
                 trk_dets_base,
                 trk_kp_dets_base,
                 trk_kp_dets_mask_base.bool(),
+                trk_dets_conf_base,
             )
 
         return ret
@@ -219,6 +227,7 @@ class YOLOWithTracker:
 @dataclass
 class YOLOPipelineResults:
     bboxes: torch.Tensor
+    bbox_conf: torch.Tensor | npt.NDArray[np.float_] | None
     poses: torch.Tensor | None
 
 
@@ -242,10 +251,9 @@ class YOLOTrackerPipelineModel(nn.Module):
                 "return_pose is only valid when return_dict is set to True."
             )
 
-    def _tracker_infer_intent_batch(
-        self, x: T_intentBatch
-    ) -> tuple[
-        torch.Tensor, dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]
+    def _tracker_infer_intent_batch(self, x: T_intentBatch) -> tuple[
+        torch.Tensor,
+        dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
     ]:
         imgs = x["image"]
         assert isinstance(imgs, torch.Tensor), "input images must not be an empty list"
@@ -255,30 +263,38 @@ class YOLOTrackerPipelineModel(nn.Module):
         ), f"input dimensionality must be 4, but is of shape {imgs.shape}"
 
         self.yolo_tracker.reset_tracker()
-        tracks = self.yolo_tracker(imgs)
+        tracks: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor] = (
+            self.yolo_tracker(imgs)
+        )
         return imgs, tracks
 
     def _tracker_infer_intent_ndarray(self, x: npt.NDArray[np.uint8]) -> tuple[
         npt.NDArray[np.uint8],
-        dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
+        dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
     ]:
         self.yolo_tracker.reset_tracker()
         im: list[npt.NDArray[np.uint8]] = [i for i in x]
-        tracks = self.yolo_tracker(im)
+        tracks: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor] = (
+            self.yolo_tracker(im)
+        )
         return x, tracks
 
     def _tracker_infer_intent_deque(self, x: deque[cvt.MatLike]) -> tuple[
         npt.NDArray[np.uint8],
-        dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
+        dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
     ]:
         self.yolo_tracker.reset_tracker()
         im: list[npt.NDArray[np.uint8]] = [np.asarray(i) for i in x]
-        tracks = self.yolo_tracker(im)
+        tracks: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor] = (
+            self.yolo_tracker(im)
+        )
         return np.asarray(im), tracks
 
     @override
     def forward(self, x: T_intentBatch) -> torch.Tensor | YOLOPipelineResults:
-        tracks: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
+        tracks: dict[
+            int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        ] = {}
         imgs, tracks = self._tracker_infer_intent_batch(x)
 
         ts = imgs.shape[0]
@@ -286,7 +302,7 @@ class YOLOTrackerPipelineModel(nn.Module):
         if len(tracks.keys()) == 0:
             preds = torch.zeros((1, self.args.max_track_size, 4), dtype=torch.float16)
             if self.return_dict:
-                return YOLOPipelineResults(preds, None)
+                return YOLOPipelineResults(preds, None, None)
             return preds
 
         samples: list[T_intentSample] = []
@@ -294,7 +310,7 @@ class YOLOTrackerPipelineModel(nn.Module):
         # inner prediction model can parse.
 
         # construct the batch for input to the prediction head.
-        for track_id, (boxes, poses, pose_masks) in tracks.items():
+        for track_id, (boxes, poses, pose_masks, box_confs) in tracks.items():
             sample: T_intentSample = {
                 "image": imgs,
                 "pose": poses,
@@ -310,6 +326,7 @@ class YOLOTrackerPipelineModel(nn.Module):
                 "disagree_score": np.zeros((ts), dtype=np.float_),
                 "global_featmaps": x["global_featmaps"],
                 "original_bboxes": boxes,
+                "bbox_conf": box_confs,
             }
             samples.append(sample)
 
@@ -327,10 +344,14 @@ class YOLOTrackerPipelineModel(nn.Module):
             (batch_tensor["bboxes"], preds), dim=1
         )
 
+        box_confs: torch.Tensor = batch_tensor["bbox_conf"]
+
         if self.return_dict:
             if self.return_pose:
-                return YOLOPipelineResults(past_future_boxes, batch_tensor["pose"])
-            return YOLOPipelineResults(past_future_boxes, None)
+                return YOLOPipelineResults(
+                    past_future_boxes, box_confs, batch_tensor["pose"]
+                )
+            return YOLOPipelineResults(past_future_boxes, box_confs, None)
 
         return preds
 

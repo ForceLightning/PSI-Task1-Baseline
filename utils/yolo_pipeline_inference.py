@@ -33,7 +33,7 @@ from utils.args import DefaultArguments
 from utils.cuda import *
 from utils.plotting import PosePlotter
 
-SAVE_VIDEO = True
+SAVE_VIDEO = False
 
 
 def plot_past_future_traj(
@@ -224,24 +224,28 @@ def infer(
                 if torch.all(results.bboxes == 0.0):
                     raise ValueError("No bounding boxes detected.")
 
+                assert (
+                    results.bbox_conf is not None
+                ), "Confidence levels are not detected."
+
                 assert results.poses is not None, "Poses are not detected."
                 assert (
                     results.poses.ndim == 4
                 ), f"Bounding boxes must be of shape (n_dets, 15, 17, 2) but is of shape {results.bboxes.shape} instead."
 
-                for track_id, (bboxes, poses) in enumerate(
-                    zip(results.bboxes, results.poses)
+                for track_id, (bboxes, bbox_conf, poses) in enumerate(
+                    zip(results.bboxes, results.bbox_conf, results.poses)
                 ):
                     rescaled_bboxes = scale_bboxes_up(
                         bboxes.detach().cpu().numpy(), args.image_shape
                     )
                     bbox = rescaled_bboxes[args.observe_length - 1, :].reshape((4))
                     im = pipeline_model.yolo_tracker.tracker.plot_box_on_img(
-                        im, bbox, 1.0, 0, track_id
+                        im, bbox, bbox_conf.max().item(), 0, track_id
                     )
                     future_bbox = rescaled_bboxes[-1, :].reshape((4))
                     im = pipeline_model.yolo_tracker.tracker.plot_box_on_img(
-                        im, future_bbox, 1.0, 0, track_id
+                        im, future_bbox, bbox_conf.max().item(), 0, track_id
                     )
                     im = plot_past_future_traj(
                         args,
