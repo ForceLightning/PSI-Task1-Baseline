@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import colorsys
+import hashlib
 import os
 import traceback
 from collections import deque
@@ -25,9 +27,13 @@ from data.custom_dataset import T_intentBatch, T_intentSample
 from eval import load_args, load_model_state_dict
 from models.build_model import build_model
 from models.pose_pipeline.pose import (
-    YOLOPipelineResults,
-    YOLOTrackerPipelineModel,
-    YOLOWithTracker,
+    HRNetPipelineModelWrapper,
+    HRNetTrackerWrapper,
+    PipelineResults,
+    PipelineWrapper,
+    TrackerWrapper,
+    YOLOPipelinModelWrapper,
+    YOLOTrackerWrapper,
 )
 from opts import get_opts
 from utils.args import DefaultArguments
@@ -37,11 +43,91 @@ from utils.plotting import PosePlotter
 SAVE_VIDEO = False
 
 
+def plot_box_on_img(
+    img: npt.NDArray[np.uint8] | cvt.MatLike,
+    box: tuple[float, float, float, float],
+    conf: float,
+    cls: int,
+    id: int,
+) -> npt.NDArray[np.uint8] | cvt.MatLike:
+    """Draws a bounding box with ID, confidence, and class information
+
+    :param img: The image array to draw on.
+    :type img: npt.NDArray[np.uint8] or cvt.MatLike
+    :param box: The bounding box coordinates as (x1, y1, x2, y2).
+    :type box: tuple[float, float, float, float]
+    :param float conf: Confidence score of the detection.
+    :param int cls: Class ID of the detection.
+    :param int id: Unique identifier for the detection.
+    :return: The image array with the bounding box drawn on it.
+    :rtype: npt.NDArray[np.uint8] or cvt.MatLike
+    """
+    thickness = 2
+    fontscale = 0.5
+
+    img = cv2.rectangle(
+        img,
+        (int(box[0]), int(box[1])),
+        (int(box[2]), int(box[3])),
+        id_to_color(id),
+        thickness,
+    )
+
+    img = cv2.putText(
+        img,
+        f"id: {int(id)}, conf: {conf:.2f}, c: {int(cls)}",
+        (int(box[0]), int(box[1]) - 10),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        fontscale,
+        id_to_color(id),
+        thickness,
+    )
+
+    return img
+
+
+def id_to_color(
+    id: int, saturation: float = 0.75, value: float = 0.95
+) -> tuple[int, int, int]:
+    """Generates a consistent unique BGR color for a given ID using hashing.
+
+    :param int id: Unique identifier for which to generate a color.
+    :param float saturation: Saturation value for the color in HSV space, defaults to
+    0.75.
+    :param float value: Value (brightness) for the color in HSV space, defaults to 0.95.
+    :return: A tuple representing the BGR color.
+    :rtype: tuple[int, int, int]
+    """
+
+    # Hash the ID to get a consistent unique value
+    hash_object = hashlib.sha256(str(id).encode())
+    hash_digest = hash_object.hexdigest()
+
+    # Convert the first few characters of the hash to an integer
+    # and map it to a value between 0 and 1 for the hue
+    hue = int(hash_digest[:8], 16) / 0xFFFFFFFF
+
+    # Convert HSV to RGB
+    rgb = colorsys.hsv_to_rgb(hue, saturation, value)
+
+    # Convert RGB from 0-1 range to 0-255 range and format as hexadecimal
+    rgb_255 = tuple(int(component * 255) for component in rgb)
+    hex_color = "#%02x%02x%02x" % rgb_255
+    # Strip the '#' character and convert the string to RGB integers
+    rgb = tuple(int(hex_color.strip("#")[i : i + 2], 16) for i in (0, 2, 4))
+
+    # Convert RGB to BGR for OpenCV
+    bgr = rgb[::-1]
+
+    assert len(bgr) == 3, f"Invalid BGR color: {bgr}"
+
+    return bgr
+
+
 def plot_past_future_traj(
     args: DefaultArguments,
     im: npt.NDArray[np.uint8] | cvt.MatLike,
     boxes: list[npt.NDArray[np.float32]],
-    tracker: BaseTracker,
     track_id: int,
 ) -> cvt.MatLike | npt.NDArray[np.uint8]:
     """Plots past and future trajectories of all detected pedestrians.
@@ -73,7 +159,7 @@ def plot_past_future_traj(
             im,
             centre,
             2,
-            color=tracker.id_to_color(track_id),
+            color=id_to_color(track_id),
             thickness=trajectory_thickness,
         )
     return im
@@ -139,9 +225,13 @@ def unscale_then_rescale_poses(
     return poses
 
 
+class DirtyGotoException(Exception):
+    pass
+
+
 def infer(
     args: DefaultArguments,
-    pipeline_model: YOLOTrackerPipelineModel,
+    pipeline_model: PipelineWrapper,
     source: str | Path,
     transform: v2.Compose | None,
     save_video: bool = SAVE_VIDEO,
@@ -188,7 +278,7 @@ def infer(
                 # NOTE: This is a silly way to create a GOTO statement with the
                 # `finally` clause of a try-except block.
                 if len(buffer) < args.observe_length:
-                    raise ValueError("Buffer is not full yet.")
+                    raise DirtyGotoException("Buffer is not full yet.")
 
                 sample: T_intentSample = {
                     "image": torch.stack(tuple(buffer)).to(DEVICE),
@@ -214,45 +304,45 @@ def infer(
 
                 batch_tensor: T_intentBatch = default_collate([sample])
 
-                results: YOLOPipelineResults = pipeline_model(batch_tensor)
+                results: PipelineResults = pipeline_model(batch_tensor)
                 _ = buffer.popleft()
 
                 assert (
                     results.bboxes.ndim == 3
                 ), f"Bounding boxes must be of shape (n_dets, 60, 4) but is of shape {results.bboxes.shape} instead."
                 if torch.all(results.bboxes == 0.0):
-                    raise ValueError("No bounding boxes detected.")
+                    raise DirtyGotoException("No bounding boxes detected.")
 
                 assert (
                     results.bbox_conf is not None
                 ), "Confidence levels are not detected."
 
                 assert results.poses is not None, "Poses are not detected."
-                assert (
-                    results.poses.ndim == 4
-                ), f"Bounding boxes must be of shape (n_dets, 15, 17, 2) but is of shape {results.bboxes.shape} instead."
+                assert results.poses.ndim == 4 and results.poses.shape[1:] == (
+                    15,
+                    17,
+                    2,
+                ), f"Poses must be of shape (n_dets, 15, 17, 2) but is of shape {results.poses.shape} instead."
 
                 for track_id, (bboxes, bbox_conf, poses) in enumerate(
                     zip(results.bboxes, results.bbox_conf, results.poses)
                 ):
-                    if torch.count_nonzero(bboxes) < 50 * 4:
-                        continue
                     rescaled_bboxes = scale_bboxes_up(
                         bboxes.detach().cpu().numpy(), args.image_shape
                     )
-                    bbox = rescaled_bboxes[args.observe_length - 1, :].reshape((4))
-                    im = pipeline_model.yolo_tracker.tracker.plot_box_on_img(
-                        im, bbox, bbox_conf.max().item(), 0, track_id
-                    )
-                    future_bbox = rescaled_bboxes[-1, :].reshape((4))
-                    im = pipeline_model.yolo_tracker.tracker.plot_box_on_img(
-                        im, future_bbox, bbox_conf.max().item(), 0, track_id
-                    )
+                    if torch.count_nonzero(bboxes) > 15 * 4:
+                        bbox = rescaled_bboxes[args.observe_length - 1, :].reshape((4))
+                        im = plot_box_on_img(
+                            im, bbox, bbox_conf.max().item(), 0, track_id
+                        )
+                        future_bbox = rescaled_bboxes[-1, :].reshape((4))
+                        im = plot_box_on_img(
+                            im, future_bbox, bbox_conf.max().item(), 0, track_id
+                        )
                     im = plot_past_future_traj(
                         args,
                         im,
                         rescaled_bboxes,
-                        pipeline_model.yolo_tracker.tracker,
                         track_id,
                     )
                 last_poses = (
@@ -277,7 +367,7 @@ def infer(
                     last_poses, (640, 640), args.image_shape
                 )
                 pose_plotter.plot_keypoints(im, last_poses)
-            except ValueError:
+            except DirtyGotoException:
                 continue
             except Exception as e:
                 pbar.write(f"Error: {e}, {frame_number:04d}, {traceback.format_exc()}")
@@ -301,6 +391,11 @@ def infer(
 
 def main(args: DefaultArguments):
     source = args.source
+    yolo_pipeline_weights = args.yolo_pipeline_weights
+    boxmot_tracker_weights = args.boxmot_tracker_weights
+    tracker_type = args.tracker
+    hrnet_yolo_ver = args.hrnet_yolo_ver
+
     args.batch_size = 1
     args.intent_model = False
     args.traj_model = True
@@ -335,20 +430,55 @@ def main(args: DefaultArguments):
         args = load_args(args.dataset_root_path, args.checkpoint_path)
         model = load_model_state_dict(args.checkpoint_path, model)
 
-    yolo_model = YOLO("yolov8s-pose.pt")
-    tracker: BaseTracker = DeepOCSORT(
-        model_weights=Path("osnet_x0_25_msmt17.pt"), device="cuda:0", fp16=True
-    )
+    tracker_wrapper: TrackerWrapper
+    pipeline_wrapper: PipelineWrapper
 
-    yolo_tracker = YOLOWithTracker(args, yolo_model, tracker, persistent_tracker=True)
-    pipeline_model = YOLOTrackerPipelineModel(
-        args,
-        model,
-        yolo_tracker,
-        return_dict=True,
-        return_pose=True,
-        persistent_tracker=True,
-    )
+    if tracker_type in ["botsort", "byte", "deepocsort"]:
+        yolo_model = YOLO(yolo_pipeline_weights)
+        tracker: BaseTracker
+        match args.tracker:
+            case "botsort":
+                tracker = BoTSORT(
+                    model_weights=boxmot_tracker_weights,
+                    device="cuda:0",
+                    fp16=True,
+                )
+            case "byte":
+                tracker = BYTETracker()
+            case "deepocsort":
+                tracker = DeepOCSORT(
+                    model_weights=boxmot_tracker_weights,
+                    device="cuda:0",
+                    fp16=True,
+                )
+            case _:
+                raise ValueError(
+                    f"Invalid tracker: {tracker_type}. This really shouldn't be possible."
+                )
+        tracker_wrapper = YOLOTrackerWrapper(
+            args, yolo_model, tracker, persistent_tracker=True
+        )
+        pipeline_wrapper = YOLOPipelinModelWrapper(
+            args,
+            model,
+            tracker_wrapper,
+            return_dict=True,
+            return_pose=True,
+            persistent_tracker=True,
+        )
+    elif tracker_type == "hrnet":
+        tracker_wrapper = HRNetTrackerWrapper(
+            args, yolo_version=hrnet_yolo_ver, device=DEVICE
+        )
+        pipeline_wrapper = HRNetPipelineModelWrapper(
+            args,
+            model,
+            tracker_wrapper,
+            return_dict=True,
+            return_pose=True,
+        )
+    else:
+        raise ValueError(f"Invalid tracker type: {tracker_type}")
 
     transform = v2.Compose(
         [
@@ -359,7 +489,7 @@ def main(args: DefaultArguments):
         ]
     )
 
-    infer(args, pipeline_model, source, transform)
+    infer(args, pipeline_wrapper, source, transform)
 
 
 if __name__ == "__main__":

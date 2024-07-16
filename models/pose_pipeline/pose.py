@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import abc
+import ast
 import os
-from collections import deque, namedtuple
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import torch
@@ -13,22 +16,99 @@ from cv2 import typing as cvt
 from numpy import typing as npt
 from torch import nn
 from torch.utils.data import default_collate
+from torch.utils.data._utils import pin_memory
 from tqdm.auto import tqdm
-from typing_extensions import Sequence, overload, override
+from typing_extensions import override
 from ultralytics import YOLO
 from ultralytics.engine.results import Results
 
 from data.custom_dataset import T_intentBatch, T_intentSample
 from data.prepare_data import get_dataloader
 from database.create_database import create_database
+from misc.utils import find_person_id_associations
 from models.build_model import build_model
+from models.model_interfaces import ITSTransformerWrapper
 from models.traj_modules.model_transformer_traj_bbox import TransformerTrajBbox
 from opts import get_opts
+from SimpleHRNet import SimpleHRNet
 from utils.args import DefaultArguments
 from utils.cuda import *
 
 
-class YOLOWithTracker:
+class TrackerWrapper(metaclass=abc.ABCMeta):
+
+    @abc.abstractmethod
+    def __call__(
+        self, image: torch.Tensor | npt.NDArray[np.uint8] | cvt.MatLike
+    ) -> dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
+        """Predicts bounding boxes and pose keypoints on an image and tracks them.
+
+        :param image: Singular frame to predict on.
+        :type image: torch.Tensor | npt.NDArray[np.uint8] | cvt.MatLike
+        :return: Dictionary of track id: (bboxes, poses, pose masks, bbox confidence)
+        :rtype: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]
+        """
+        pass
+
+    @abc.abstractmethod
+    def reset_tracker(self) -> None:
+        """Resets the tracker to its initial state."""
+        pass
+
+
+class PipelineWrapper(metaclass=abc.ABCMeta):
+    model: nn.Module
+    tracker: TrackerWrapper
+    return_dict: bool = False
+    return_pose: bool = False
+
+    @abc.abstractmethod
+    def _tracker_infer_intent_batch(self, x: T_intentBatch) -> tuple[
+        torch.Tensor,
+        dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
+    ]:
+        """Infers from a batch of T_intentBatch data.
+
+        :param T_intentBatch x: Batch of data to infer from.
+        :return: tuple of images and tracks in format {track_id: (bboxes, poses, pose
+        masks, bbox conf)}
+        :rtype: tuple[torch.Tensor, dict[int, tuple[torch.Tensor, torch.Tensor,
+        torch.Tensor, torch.Tensor]]]
+        """
+        pass
+
+    @abc.abstractmethod
+    def _tracker_infer_intent_ndarray(self, x: npt.NDArray[np.uint8]) -> tuple[
+        npt.NDArray[np.uint8],
+        dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
+    ]:
+        """Infers from a single frame of data.
+
+        :param npt.NDArray[np.uint8] x: Single frame of data to infer from.
+        :return: tuple of images and tracks in format {track_id: (bboxes, poses, pose
+        masks, bbox conf)}
+        :rtype: tuple[npt.NDArray[np.uint8], dict[int, tuple[torch.Tensor, torch.Tensor,
+        torch.Tensor, torch.Tensor]]]
+        """
+        pass
+
+    @abc.abstractmethod
+    def _tracker_infer_intent_deque(self, x: deque[cvt.MatLike]) -> tuple[
+        npt.NDArray[np.uint8],
+        dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
+    ]:
+        """Infers from a deque of frames.
+
+        :param deque[cvt.MatLike] x: Deque of frames to infer from.
+        :return: tuple of images and tracks in format {track_id: (bboxes, poses, pose
+        masks, bbox conf)}
+        :rtype: tuple[npt.NDArray[np.uint8], dict[int, tuple[torch.Tensor, torch.Tensor,
+        torch.Tensor, torch.Tensor]]]
+        """
+        pass
+
+
+class YOLOTrackerWrapper(TrackerWrapper):
     """Class that wraps a YOLO model and a tracker together.
 
     :param YOLO yolo_model: Instantiated YOLO model.
@@ -189,17 +269,11 @@ class YOLOWithTracker:
 
         return ret
 
+    @override
     def __call__(
         self,
         image: torch.Tensor | npt.NDArray[np.uint8] | cvt.MatLike,
     ) -> dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
-        """Predicts bounding boxes and pose keypoints on an image and tracks them.
-
-        :param image: Singular frame to predict on.
-        :type image: torch.Tensor | npt.NDArray[np.uint8] | cvt.MatLike
-        :return: Dictionary of track id: (bboxes, poses, pose masks, bbox confidence)
-        :rtype: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]
-        """
         np_image: npt.NDArray[np.uint8]
         if isinstance(image, torch.Tensor):
             assert image.ndim == 4, "Input must be a 4D tensor."
@@ -227,18 +301,18 @@ class YOLOWithTracker:
 
 
 @dataclass
-class YOLOPipelineResults:
+class PipelineResults:
     bboxes: torch.Tensor
     bbox_conf: torch.Tensor | npt.NDArray[np.float_] | None
     poses: torch.Tensor | None
 
 
-class YOLOTrackerPipelineModel(nn.Module):
+class YOLOPipelinModelWrapper(nn.Module, PipelineWrapper):
     def __init__(
         self,
         args: DefaultArguments,
         model: nn.Module,
-        yolo_tracker: YOLOWithTracker,
+        yolo_tracker: YOLOTrackerWrapper,
         return_dict: bool = False,
         return_pose: bool = False,
         persistent_tracker: bool = False,
@@ -258,6 +332,7 @@ class YOLOTrackerPipelineModel(nn.Module):
             deque(maxlen=args.observe_length)
         )
 
+    @override
     def _tracker_infer_intent_batch(self, x: T_intentBatch) -> tuple[
         torch.Tensor,
         dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
@@ -272,6 +347,7 @@ class YOLOTrackerPipelineModel(nn.Module):
         tracks = self.yolo_tracker(imgs[-1].unsqueeze(0))
         return imgs, tracks
 
+    @override
     def _tracker_infer_intent_ndarray(self, x: npt.NDArray[np.uint8]) -> tuple[
         npt.NDArray[np.uint8],
         dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
@@ -284,6 +360,7 @@ class YOLOTrackerPipelineModel(nn.Module):
         ] = self.yolo_tracker(x[-1])
         return x, tracks
 
+    @override
     def _tracker_infer_intent_deque(self, x: deque[cvt.MatLike]) -> tuple[
         npt.NDArray[np.uint8],
         dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
@@ -297,7 +374,7 @@ class YOLOTrackerPipelineModel(nn.Module):
         return np.asarray(im), tracks
 
     @override
-    def forward(self, x: T_intentBatch) -> torch.Tensor | YOLOPipelineResults:
+    def forward(self, x: T_intentBatch) -> torch.Tensor | PipelineResults:
         tracks: dict[
             int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
         ] = {}
@@ -311,7 +388,7 @@ class YOLOTrackerPipelineModel(nn.Module):
         ):
             preds = torch.zeros((1, self.args.max_track_size, 4), dtype=torch.float16)
             if self.return_dict:
-                return YOLOPipelineResults(preds, None, None)
+                return PipelineResults(preds, None, None)
             return preds
 
         samples: list[T_intentSample] = []
@@ -357,10 +434,376 @@ class YOLOTrackerPipelineModel(nn.Module):
 
         if self.return_dict:
             if self.return_pose:
-                return YOLOPipelineResults(
+                return PipelineResults(
                     past_future_boxes, box_confs, batch_tensor["pose"]
                 )
-            return YOLOPipelineResults(past_future_boxes, box_confs, None)
+            return PipelineResults(past_future_boxes, box_confs, None)
+
+        return preds
+
+
+class HRNetTrackerWrapper(TrackerWrapper):
+    def __init__(
+        self,
+        args: DefaultArguments,
+        hrnet_m: str = "HRNet",
+        hrnet_c: int = 48,
+        hrnet_j: int = 17,
+        hrnet_weights: str = "./weights/pose_hrnet_w48_384x288.pth",
+        hrnet_joints_set: Literal["coco", "mpii"] = "coco",
+        image_resolution: tuple[int, int] | str = (384, 288),
+        single_person: bool = False,
+        yolo_version: Literal["v3", "v5", "v8"] = "v8",
+        use_tiny_yolo: bool = False,
+        disable_tracking: bool = False,
+        max_batch_size: int = 16,
+        video_framerate: float = 30,
+        device: torch.device | str | None = None,
+        enable_tensorrt: bool = False,
+    ) -> None:
+        super().__init__()
+        self.args = args
+        if device is not None:
+            device = torch.device(device)
+        else:
+            if torch.cuda.is_available():
+                torch.backends.cudnn.deterministic = True
+                device = torch.device("cuda:0")
+            else:
+                device = torch.device("cpu")
+
+        # WARNING: Yikes!
+        if isinstance(image_resolution, str):
+            image_resolution: tuple[int, int] = ast.literal_eval(image_resolution)
+
+        match yolo_version:
+            case "v3":
+                if use_tiny_yolo:
+                    yolo_model_def = "./models_/detectors/yolo/config/yolov3-tiny.cfg"
+                    yolo_weights_path = (
+                        "./models_/detectors/yolo/weights/yolov3-tiny.weights"
+                    )
+                else:
+                    yolo_model_def = "./models_/detectors/yolo/config/yolov3.cfg"
+                    yolo_weights_path = (
+                        "./models_/detectors/yolo/weights/yolov3.weights"
+                    )
+                yolo_class_path = "./models_/detectors/yolo/data/coco.names"
+            case "v5":
+                if use_tiny_yolo:
+                    yolo_model_def = "yolov5n"
+                else:
+                    yolo_model_def = "yolov5m"
+                if enable_tensorrt:
+                    yolo_trt_filename = f"{yolo_model_def}.engine"
+                    if os.path.exists(os.path.normpath(yolo_trt_filename)):
+                        yolo_model_def = yolo_trt_filename
+                yolo_class_path = ""
+                yolo_weights_path = ""
+            case "v8":
+                if use_tiny_yolo:
+                    yolo_model_def = "yolov8s"
+                else:
+                    yolo_model_def = "yolov8m"
+                yolo_class_path = ""
+                yolo_weights_path = ""
+
+        self.hrnet = SimpleHRNet(
+            hrnet_c,
+            hrnet_j,
+            hrnet_weights,
+            resolution=image_resolution,
+            multiperson=not single_person,
+            return_bounding_boxes=not disable_tracking,
+            max_batch_size=max_batch_size,
+            yolo_version=yolo_version,
+            yolo_model_def=yolo_model_def,
+            yolo_class_path=yolo_class_path,
+            yolo_weights_path=yolo_weights_path,
+            device=device,
+            enable_tensorrt=enable_tensorrt,
+        )
+        self.disable_tracking = disable_tracking
+        self.hrnet_joints_set = hrnet_joints_set
+
+        self.cache: dict[
+            int,
+            dict[
+                {
+                    "bboxes": deque[npt.NDArray[np.float_]],
+                    "pts": deque[npt.NDArray[np.float_]],
+                }
+            ],
+        ] = {}
+
+        self._prev_boxes: npt.NDArray[np.float_] | None = None
+        self._prev_pts: npt.NDArray[np.float_] | None = None
+        self._prev_person_ids: npt.NDArray[np.int_] | None = None
+        self._next_person_id: int = 0
+        self._frame_count: int = 0
+
+    @override
+    def __call__(
+        self, image: torch.Tensor | npt.NDArray[np.uint8] | cvt.MatLike
+    ) -> dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
+        self._frame_count += 1
+
+        if isinstance(image, torch.Tensor):
+            image = image.squeeze()
+            if image.ndim == 4:
+                image = image[-1]
+            assert image.ndim == 3, "Input tensor must be of shape (C, H, W)."
+            image = image.permute(1, 2, 0).detach().cpu().numpy()
+            image = (image * 255.0).astype(np.uint8)
+        else:
+            assert image.ndim == 3, "Input must be of shape (H, W, C)."
+
+        pts = self.hrnet.predict(image)
+
+        if not self.disable_tracking:
+            boxes, pts = pts
+            if len(pts) > 0:
+                if (
+                    self._prev_boxes is None
+                    and self._prev_pts is None
+                    and self._prev_person_ids is None
+                ):
+                    person_ids = np.arange(
+                        self._next_person_id,
+                        len(pts) + self._next_person_id,
+                        dtype=np.int_,
+                    )
+                    self._next_person_id = len(pts) + 1
+                else:
+                    boxes, pts, person_ids = find_person_id_associations(
+                        boxes=boxes,
+                        pts=pts,
+                        prev_boxes=self._prev_boxes,  # type: ignore[reportArgumentType]
+                        prev_pts=self._prev_pts,  # type: ignore[reportArgumentType]
+                        prev_person_ids=self._prev_person_ids,  # type: ignore[reportArgumentType]
+                        next_person_id=self._next_person_id,
+                        pose_alpha=0.2,
+                        similarity_threshold=0.4,
+                        smoothing_alpha=0.1,
+                    )
+                    assert (
+                        pts.shape[-1] == 3 and pts.shape[-2] == 17
+                    ), f"Invalid shape {pts.shape} for keypoints."
+                    self._next_person_id = max(
+                        self._next_person_id, np.max(person_ids) + 1
+                    )
+            else:
+                person_ids = np.array((), dtype=np.int_)
+
+            self._prev_boxes = boxes.copy()
+            self._prev_pts = pts.copy()
+            self._prev_person_ids = person_ids
+        else:
+            person_ids = np.arange(len(pts), dtype=np.int_)
+
+        iterable = (
+            zip(pts, person_ids)
+            if self.disable_tracking
+            else zip(boxes, pts, person_ids)
+        )
+
+        # person_id: (bboxes, poses, pose masks, bbox conf)
+        ret: dict[
+            int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        ] = {}
+
+        for unpackable_values in iterable:
+            if self.disable_tracking:
+                pt, person_id = unpackable_values
+                if (entry := self.cache.get(person_id, None)) is not None:
+                    entry["pts"].append(pt)
+                else:
+                    self.cache[person_id] = {
+                        "bboxes": deque([], maxlen=self.args.observe_length),
+                        "pts": deque([pt], maxlen=self.args.observe_length),
+                    }
+            else:
+                box, pt, person_id = unpackable_values
+                assert pt.ndim == 2, f"Invalid shape {pt.shape} for keypoints."
+                assert pt.shape == (17, 3), f"Invalid shape {pt.shape} for keypoints."
+
+                if (entry := self.cache.get(person_id, None)) is not None:
+                    entry["bboxes"].append(box)
+                    entry["pts"].append(pt)
+                    assert (
+                        pt.shape[-1] == 3
+                    ), f"Last dimension of keypoints must be 3, but is of shape {pt.shape} instead."
+
+                else:
+                    self.cache[person_id] = {
+                        "bboxes": deque([box], maxlen=self.args.observe_length),
+                        "pts": deque([pt], maxlen=self.args.observe_length),
+                    }
+
+        for person_id, entry in self.cache.items():
+            if person_id not in person_ids:
+                continue
+            pts = np.array(entry["pts"])
+            assert pts.ndim == 3, f"Invalid shape {pts.shape} for keypoints."
+            assert pts.shape[1:] == (17, 3), f"Invalid shape {pts.shape} for keypoints."
+            # boxes = np.array(entry["bboxes"], dtype=np.float_)
+            # boxes[:, ::2] = boxes[:, ::2] / image.shape[0]
+            # boxes[:, 1::2] = boxes[:, 1::2] / image.shape[1]
+            # boxes = np.clip(boxes, 0, 1)
+            boxes = np.zeros((pts.shape[0], 4), dtype=np.float_)
+            boxes[:, 0] = pts[:, :, 1].min(axis=1)
+            boxes[:, 1] = pts[:, :, 0].min(axis=1)
+            boxes[:, 2] = pts[:, :, 1].max(axis=1)
+            boxes[:, 3] = pts[:, :, 0].max(axis=1)
+
+            boxes[:, ::2] = boxes[:, ::2] / image.shape[0]
+            boxes[:, 1::2] = boxes[:, 1::2] / image.shape[1]
+
+            boxes = np.clip(boxes, 0, 1)
+
+            ret[person_id] = (
+                torch.from_numpy(boxes).type(FloatTensor).to(DEVICE),
+                torch.from_numpy(pts[:, :, :2][:, :, ::-1].copy())
+                .type(FloatTensor)
+                .to(DEVICE),
+                torch.ones((1, 4)).bool().to(DEVICE),
+                torch.ones((1, 17)).type(FloatTensor).to(DEVICE),
+            )
+
+        return ret
+
+    @override
+    def reset_tracker(self) -> None:
+        self._frame_count = 0
+        self._prev_boxes = None
+        self._prev_pts = None
+        self._prev_person_ids = None
+        self._next_person_id = 0
+
+
+class HRNetPipelineModelWrapper(nn.Module, PipelineWrapper):
+    def __init__(
+        self,
+        args: DefaultArguments,
+        model: nn.Module,
+        tracker: HRNetTrackerWrapper,
+        return_dict: bool = False,
+        return_pose: bool = False,
+    ) -> None:
+        super().__init__()
+        self.args = args
+        self.model = model
+        self.tracker: HRNetTrackerWrapper = tracker
+        self.return_dict = return_dict
+        self.return_pose = return_pose
+
+    @override
+    def _tracker_infer_intent_batch(self, x: T_intentBatch) -> tuple[
+        torch.Tensor,
+        dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
+    ]:
+        ...
+        imgs = x["image"]
+        assert isinstance(imgs, torch.Tensor), "input images must not be an empty list"
+        imgs = imgs.squeeze()
+        assert (
+            imgs.dim() == 4
+        ), f"input dimensionality must be 4, but is of shape {imgs.shape}"
+        pts = self.tracker(imgs[-1].unsqueeze(0))
+        return imgs, pts
+
+    @override
+    def _tracker_infer_intent_ndarray(self, x: npt.NDArray[np.uint8]) -> tuple[
+        npt.NDArray[np.uint8],
+        dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
+    ]:
+        im: list[npt.NDArray[np.uint8]] = list(x)
+        tracks = self.tracker(x[-1])
+        return x, tracks
+
+    @override
+    def _tracker_infer_intent_deque(self, x: deque[cvt.MatLike]) -> tuple[
+        npt.NDArray[np.uint8],
+        dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]],
+    ]:
+        im: list[cvt.MatLike] = list(x)
+        tracks = self.tracker(x[-1])
+        return np.asarray(im), tracks
+
+    @override
+    @torch.no_grad()
+    def forward(
+        self, x: T_intentBatch | npt.NDArray[np.uint8] | deque[cvt.MatLike]
+    ) -> torch.Tensor | PipelineResults:
+        imgs, tracks = self._tracker_infer_intent_batch(x)
+
+        ts = imgs.shape[0]
+
+        if (
+            len(tracks.keys()) == 0
+            or self.tracker._frame_count < self.args.observe_length
+        ):
+            preds = torch.zeros((1, self.args.max_track_size, 4), dtype=torch.float16)
+            if self.return_dict:
+                return PipelineResults(preds, None, None)
+            return preds
+
+        samples: list[T_intentSample] = []
+
+        for track_id, (boxes, poses, pose_masks, box_confs) in tracks.items():
+            if (
+                len(boxes) < self.args.observe_length
+                or len(poses) < self.args.observe_length
+            ):
+                continue
+            sample: T_intentSample = {
+                "image": imgs,
+                "pose": poses,
+                "bboxes": boxes,
+                "frames": x["frames"],
+                "ped_id": [f"track_{track_id:03d}"] * ts,
+                "video_id": x["video_id"],
+                "total_frames": x["total_frames"],
+                "pose_masks": pose_masks,
+                "local_featmaps": x["local_featmaps"],
+                "intention_prob": np.zeros((ts), dtype=np.float_),
+                "intention_binary": np.zeros((ts), dtype=np.int_),
+                "disagree_score": np.zeros((ts), dtype=np.float_),
+                "global_featmaps": x["global_featmaps"],
+                "original_bboxes": boxes,
+                "bbox_conf": box_confs,
+            }
+            samples.append(sample)
+
+        try:
+            batch_tensor: T_intentBatch = default_collate(samples)
+            if len(batch_tensor) == 0:
+                raise IndexError
+        except IndexError:
+            preds = torch.zeros((1, self.args.predict_length, 4), dtype=torch.float16)
+            if self.return_dict:
+                return PipelineResults(preds, None, None)
+            return preds
+
+        preds: torch.Tensor
+
+        if isinstance(self.model, ITSTransformerWrapper):
+            preds = self.model.generate(batch_tensor)
+        else:
+            preds = self.model(batch_tensor)
+
+        past_future_boxes: torch.Tensor = torch.cat(
+            (batch_tensor["bboxes"], preds),
+            dim=1,
+        )
+
+        box_confs: torch.Tensor = batch_tensor["bbox_conf"]
+
+        if self.return_dict:
+            res = PipelineResults(past_future_boxes, box_confs, None)
+            if self.return_pose:
+                res.poses = batch_tensor["pose"]
+            return res
 
         return preds
 
@@ -404,8 +847,8 @@ def main(args: DefaultArguments):
         model_weights=Path("osnet_x0_25_msmt17.pt"), device="cuda:0", fp16=True
     )
 
-    yolo_tracker = YOLOWithTracker(args, yolo_model, tracker)
-    pipeline_model = YOLOTrackerPipelineModel(args, model, yolo_tracker)
+    yolo_tracker = YOLOTrackerWrapper(args, yolo_model, tracker)
+    pipeline_model = YOLOPipelinModelWrapper(args, model, yolo_tracker)
 
     dl_iterator = tqdm(
         enumerate(train_loader),

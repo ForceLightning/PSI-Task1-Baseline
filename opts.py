@@ -2,19 +2,7 @@ import argparse
 from pathlib import Path
 
 
-def get_opts() -> argparse.Namespace:
-    """
-    Gets the command line arguments and returns the parsed arguments.
-
-    See `utils.args.DefaultArguments` for more information.
-
-    Returns:
-        argparse.Namespace
-
-    Example:
-        >>> # get arguments
-        >>> args = get_opts()
-    """
+def init_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="PyTorch implementation of the PSI2.0")
     # about data
     _ = parser.add_argument(
@@ -330,5 +318,56 @@ def get_opts() -> argparse.Namespace:
         action="store_true",
         help="Compile the model with torch.compile",
     )
+
+    ### Pipeline specific arguments ###
+    _ = parser.add_argument(
+        "--yolo_pipeline_weights",
+        type=str,
+        default="yolov8s-pose.pt",
+        help="Path to the weights of the YOLO pipeline model.",
+    )
+
+    _ = parser.add_argument(
+        "--boxmot_tracker_weights",
+        type=str,
+        default="osnet_x0_25_msmt17.pt",
+        help="Path to the weights of the BoxMoT tracker.",
+    )
+
+    _ = parser.add_argument(
+        "--tracker",
+        "-t",
+        type=str,
+        default="deepocsort",
+        choices=["botsort", "byte", "deepocsort", "hrnet"],
+        help="The tracker to use for tracking.",
+    )
+
+    _ = parser.add_argument(
+        "--hrnet_yolo_ver",
+        type=str,
+        default="v8",
+        choices=["v3", "v5", "v8"],
+        help="The version of the HRNet-YOLO model to use.",
+    )
+
+    return parser
+
+
+def get_opts() -> argparse.Namespace:
+    """
+    Gets the command line arguments and returns the parsed arguments.
+
+    See `utils.args.DefaultArguments` for more information.
+
+    Returns:
+        argparse.Namespace
+
+    Example:
+        >>> # get arguments
+        >>> args = get_opts()
+    """
+
+    parser = init_args()
 
     return parser.parse_args()

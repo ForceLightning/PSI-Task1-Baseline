@@ -16,4 +16,5 @@ thirdparty/deform_conv/deform_conv.egg-info/
 # Demo
 weights/
 *.avi
-
+*.mp4
+*.png

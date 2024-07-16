@@ -197,9 +197,7 @@ class SimpleHRNet:
                 ]
             )
 
-    def predict(
-        self, image: npt.NDArray[np.float_ | np.uint8]
-    ) -> npt.NDArray[np.float_] | list[npt.NDArray[np.float_]]:
+    def predict(self, image: npt.NDArray[np.float_ | np.uint8]):
         """
         Predicts the human pose on a single image or a stack of n images.
 
@@ -268,7 +266,9 @@ class SimpleHRNet:
                 detections = self.detector.predict_single(image)
                 nof_people = len(detections) if detections is not None else 0
             else:
-                detections = self.detector.predict(image, classes=0)
+                detections = self.detector.predict(
+                    image, verbose=False, classes=0, conf=0.15
+                )
                 if (det_boxes := detections[0].boxes) is not None:
                     nof_people = len(det_boxes)
                 else:
@@ -535,7 +535,9 @@ class SimpleHRNet:
             if self.yolo_version == "v3" or self.yolo_version == "v5":
                 image_detections = self.detector.predict_single(image)
             else:
-                image_detections = self.detector.predict(image, classes=0)
+                image_detections = self.detector.predict(
+                    image, verbose=False, classes=0, conf=0.15
+                )
 
             base_index = 0
             nof_people = int(

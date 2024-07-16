@@ -14,7 +14,6 @@ from numpy import typing as npt
 
 
 class PosePlotter:
-
     def __init__(self):
         self.pose_palette: npt.NDArray[np.uint8] = np.array(
             [

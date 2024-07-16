@@ -126,6 +126,13 @@ class DefaultArguments:
     :param str device: Device for YOLO prediction, defaults to 'cpu'.
     :param bool show: Whether to show YOLO prediction, defaults to False.
     :param bool save: Whether to save YOLO prediction, defaults to False.
+
+    :param str yolo_pipeline_weights: Path to YOLO pipeline weights, defaults to
+    "yolov8s-pose.pt".
+    :param str boxmot_tracker_weights: Path to BoxMOT tracker weights, defaults to
+    "osnet_x0_25_msmt17.pt".
+    :param tracker: Tracker type, defaults to "deepocsort".
+    :type tracker: Literal["botsort", "byte", "deepocsort", "hrnet"]
     """
 
     dataset: Literal["PSI2.0", "PSI1.0"] = "PSI2.0"
@@ -204,6 +211,11 @@ class DefaultArguments:
     device: str = "cpu"
     show: bool = False
     save: bool = False
+
+    ### Pipeline specific ###
+    yolo_pipeline_weights: str = "yolov8s-pose.pt"
+    boxmot_tracker_weights: str = "osnet_x0_25_msmt17.pt"
+    tracker: Literal["botsort", "byte", "deepocsort", "hrnet"] = "deepocsort"
 
 
 class ModelOpts(TypedDict):

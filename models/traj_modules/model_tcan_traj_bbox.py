@@ -113,6 +113,9 @@ class TCANTrajBbox(nn.Module, IConstructOptimizer):
         assert (
             bbox.shape[1] == self.args.observe_length
         ), "bbox temporal dimension size does not match `observe_length`"
+
+        assert bbox.max() <= 1, "bbox values should be normalized between 0 and 1"
+
         enc_input = bbox
 
         tcan_output: torch.Tensor
@@ -204,6 +207,7 @@ class TCANTrajBboxInt(TCANTrajBbox):
             intent.shape[1] == self.args.observe_length
         ), "intent temporal dimension does not match `observe_length`"
 
+        assert bbox.max() <= 1, "bbox values should be normalized between 0 and 1"
         # bs x ts x 5
         enc_input = torch.cat([bbox, intent], dim=2)
 

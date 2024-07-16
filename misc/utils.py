@@ -1,11 +1,14 @@
 import math
+
 import cv2
 import munkres
 import numpy as np
 import torch
+from cv2 import typing as cvt
+from numpy import typing as npt
 
 
-# solution proposed in https://github.com/pytorch/pytorch/issues/229#issuecomment-299424875 
+# solution proposed in https://github.com/pytorch/pytorch/issues/229#issuecomment-299424875
 def flip_tensor(tensor, dim=0):
     """
     flip the tensor on the dimension dim
@@ -17,7 +20,9 @@ def flip_tensor(tensor, dim=0):
 #
 # derived from https://github.com/leoxiaobin/deep-high-resolution-net.pytorch
 def flip_back(output_flipped, matched_parts):
-    assert len(output_flipped.shape) == 4, 'output_flipped has to be [batch_size, num_joints, height, width]'
+    assert (
+        len(output_flipped.shape) == 4
+    ), "output_flipped has to be [batch_size, num_joints, height, width]"
 
     output_flipped = flip_tensor(output_flipped, dim=-1)
 
@@ -35,15 +40,27 @@ def fliplr_joints(joints, joints_vis, width, matched_parts):
 
     # Change left-right parts
     for pair in matched_parts:
-        joints[pair[0], :], joints[pair[1], :] = \
-            joints[pair[1], :], joints[pair[0], :].copy()
-        joints_vis[pair[0], :], joints_vis[pair[1], :] = \
-            joints_vis[pair[1], :], joints_vis[pair[0], :].copy()
+        joints[pair[0], :], joints[pair[1], :] = (
+            joints[pair[1], :],
+            joints[pair[0], :].copy(),
+        )
+        joints_vis[pair[0], :], joints_vis[pair[1], :] = (
+            joints_vis[pair[1], :],
+            joints_vis[pair[0], :].copy(),
+        )
 
     return joints * joints_vis, joints_vis
 
 
-def get_affine_transform(center, scale, pixel_std, rot, output_size, shift=np.array([0, 0], dtype=np.float32), inv=0):
+def get_affine_transform(
+    center,
+    scale,
+    pixel_std,
+    rot,
+    output_size,
+    shift=np.array([0, 0], dtype=np.float32),
+    inv=0,
+):
     if not isinstance(scale, np.ndarray) and not isinstance(scale, list):
         print(scale)
         scale = np.array([scale, scale])
@@ -76,7 +93,7 @@ def get_affine_transform(center, scale, pixel_std, rot, output_size, shift=np.ar
 
 
 def affine_transform(pt, t):
-    new_pt = np.array([pt[0], pt[1], 1.]).T
+    new_pt = np.array([pt[0], pt[1], 1.0]).T
     new_pt = np.dot(t, new_pt)
     return new_pt[:2]
 
@@ -100,8 +117,7 @@ def crop(img, center, scale, pixel_std, output_size, rot=0):
     trans = get_affine_transform(center, scale, pixel_std, rot, output_size)
 
     dst_img = cv2.warpAffine(
-        img, trans, (int(output_size[0]), int(output_size[1])),
-        flags=cv2.INTER_LINEAR
+        img, trans, (int(output_size[0]), int(output_size[1])), flags=cv2.INTER_LINEAR
     )
 
     return dst_img
@@ -128,8 +144,10 @@ def get_max_preds(batch_heatmaps):
     heatmaps: numpy.ndarray([batch_size, num_joints, height, width])
     """
     # assert isinstance(batch_heatmaps, np.ndarray), 'batch_heatmaps should be numpy.ndarray'
-    assert isinstance(batch_heatmaps, torch.Tensor), 'batch_heatmaps should be torch.Tensor'
-    assert len(batch_heatmaps.shape) == 4, 'batch_images should be 4-ndim'
+    assert isinstance(
+        batch_heatmaps, torch.Tensor
+    ), "batch_heatmaps should be torch.Tensor"
+    assert len(batch_heatmaps.shape) == 4, "batch_images should be 4-ndim"
 
     batch_size = batch_heatmaps.shape[0]
     num_joints = batch_heatmaps.shape[1]
@@ -168,16 +186,18 @@ def get_final_preds(post_processing, batch_heatmaps, center, scale, pixel_std):
                     diff = torch.tensor(
                         [
                             hm[py][px + 1] - hm[py][px - 1],
-                            hm[py + 1][px] - hm[py - 1][px]
+                            hm[py + 1][px] - hm[py - 1][px],
                         ]
                     ).to(batch_heatmaps.device)
-                    coords[n][p] += torch.sign(diff) * .25
+                    coords[n][p] += torch.sign(diff) * 0.25
 
     preds = coords.clone()
 
     # Transform back
     for i in range(coords.shape[0]):
-        preds[i] = transform_preds(coords[i], center[i], scale[i], pixel_std, [heatmap_width, heatmap_height])
+        preds[i] = transform_preds(
+            coords[i], center[i], scale[i], pixel_std, [heatmap_width, heatmap_height]
+        )
 
     return preds, maxvals
 
@@ -210,7 +230,7 @@ def dist_acc(dists, thr=0.5):
         return -1
 
 
-def evaluate_pck_accuracy(output, target, hm_type='gaussian', thr=0.5):
+def evaluate_pck_accuracy(output, target, hm_type="gaussian", thr=0.5):
     """
     Calculate accuracy according to PCK,
     but uses ground truth heatmap rather than y,x locations
@@ -218,13 +238,16 @@ def evaluate_pck_accuracy(output, target, hm_type='gaussian', thr=0.5):
     followed by individual accuracies
     """
     idx = list(range(output.shape[1]))
-    if hm_type == 'gaussian':
+    if hm_type == "gaussian":
         pred, _ = get_max_preds(output)
         target, _ = get_max_preds(target)
         h = output.shape[2]
         w = output.shape[3]
-        norm = torch.ones((pred.shape[0], 2)) * torch.tensor([h, w],
-                                                             dtype=torch.float32) / 10  # Why they divide this by 10?
+        norm = (
+            torch.ones((pred.shape[0], 2))
+            * torch.tensor([h, w], dtype=torch.float32)
+            / 10
+        )  # Why they divide this by 10?
         norm = norm.to(output.device)
     else:
         raise NotImplementedError
@@ -242,6 +265,8 @@ def evaluate_pck_accuracy(output, target, hm_type='gaussian', thr=0.5):
 
     avg_acc = avg_acc / cnt if cnt != 0 else torch.tensor(0)
     return acc, avg_acc, cnt, pred, target
+
+
 #
 #
 
@@ -332,6 +357,8 @@ def bbox_iou(bbox_a, bbox_b):
     iou = area_i / area_u
 
     return iou
+
+
 #
 #
 
@@ -341,8 +368,30 @@ def bbox_iou(bbox_a, bbox_b):
 def oks_iou(g, d, a_g, a_d, sigmas=None, in_vis_thre=None):
     if not isinstance(sigmas, np.ndarray):
         if d.shape[1] == 17:  # COCO
-            sigmas = np.array(
-                [.26, .25, .25, .35, .35, .79, .79, .72, .72, .62, .62, 1.07, 1.07, .87, .87, .89, .89]) / 10.0
+            sigmas = (
+                np.array(
+                    [
+                        0.26,
+                        0.25,
+                        0.25,
+                        0.35,
+                        0.35,
+                        0.79,
+                        0.79,
+                        0.72,
+                        0.72,
+                        0.62,
+                        0.62,
+                        1.07,
+                        1.07,
+                        0.87,
+                        0.87,
+                        0.89,
+                        0.89,
+                    ]
+                )
+                / 10.0
+            )
         else:  # MPII and others
             sigmas = np.ones((d.shape[1],), dtype=np.float32) / 10.0
     vars = (sigmas * 2) ** 2
@@ -356,19 +405,24 @@ def oks_iou(g, d, a_g, a_d, sigmas=None, in_vis_thre=None):
         vd = d[n_d, :, 2]
         dx = xd - xg
         dy = yd - yg
-        e = (dx ** 2 + dy ** 2) / vars / ((a_g + a_d[n_d]) / 2 + np.spacing(1)) / 2
+        e = (dx**2 + dy**2) / vars / ((a_g + a_d[n_d]) / 2 + np.spacing(1)) / 2
         if in_vis_thre is not None:
             ind = list(vg > in_vis_thre) and list(vd > in_vis_thre)
             e = e[ind]
-        
-        e = e[e <=2^32 -1]
+
+        e = e[e <= 2 ^ 32 - 1]
 
         ious[n_d] = np.sum(np.exp(-e)) / e.shape[0] if e.shape[0] != 0 else 0.0
 
     return ious
 
 
-def compute_similarity_matrices(bboxes_a, bboxes_b, poses_a, poses_b):
+def compute_similarity_matrices(
+    bboxes_a: npt.NDArray[np.float_],
+    bboxes_b: npt.NDArray[np.float_],
+    poses_a: npt.NDArray[np.float_],
+    poses_b: npt.NDArray[np.float_],
+) -> tuple[npt.NDArray[np.float_], npt.NDArray[np.float_]]:
     assert len(bboxes_a) == len(poses_a) and len(bboxes_b) == len(poses_b)
 
     result_bbox = np.zeros((len(bboxes_a), len(bboxes_b)), dtype=np.float32)
@@ -383,8 +437,17 @@ def compute_similarity_matrices(bboxes_a, bboxes_b, poses_a, poses_b):
     return result_bbox, result_pose
 
 
-def find_person_id_associations(boxes, pts, prev_boxes, prev_pts, prev_person_ids, next_person_id=0,
-                                pose_alpha=0.5, similarity_threshold=0.5, smoothing_alpha=0.):
+def find_person_id_associations(
+    boxes: npt.NDArray[np.float_],
+    pts: npt.NDArray[np.float_],
+    prev_boxes: npt.NDArray[np.float_],
+    prev_pts: npt.NDArray[np.float_],
+    prev_person_ids: npt.NDArray[np.int_],
+    next_person_id: int = 0,
+    pose_alpha: float = 0.5,
+    similarity_threshold: float = 0.5,
+    smoothing_alpha: float = 0.0,
+) -> tuple[npt.NDArray[np.float_], npt.NDArray[np.float_], npt.NDArray[np.int_]]:
     """
     Find associations between previous and current skeletons and apply temporal smoothing.
     It requires previous and current bounding boxes, skeletons, and previous person_ids.
@@ -410,22 +473,36 @@ def find_person_id_associations(boxes, pts, prev_boxes, prev_pts, prev_person_id
             (:class:`np.ndarray`, :class:`np.ndarray`, :class:`np.ndarray`):
                 A list with (boxes, pts, person_ids) where boxes and pts are temporally smoothed.
     """
-    bbox_similarity_matrix, pose_similarity_matrix = compute_similarity_matrices(boxes, prev_boxes, pts, prev_pts)
-    similarity_matrix = pose_similarity_matrix * pose_alpha + bbox_similarity_matrix * (1 - pose_alpha)
+    bbox_similarity_matrix, pose_similarity_matrix = compute_similarity_matrices(
+        boxes, prev_boxes, pts, prev_pts
+    )
+    similarity_matrix = pose_similarity_matrix * pose_alpha + bbox_similarity_matrix * (
+        1 - pose_alpha
+    )
 
     m = munkres.Munkres()
-    assignments = np.asarray(m.compute((1 - similarity_matrix).tolist()))  # Munkres require a cost => 1 - similarity
+    assignments = np.asarray(
+        m.compute((1 - similarity_matrix).tolist())
+    )  # Munkres require a cost => 1 - similarity
 
     person_ids = np.ones(len(pts), dtype=np.int32) * -1
     for assignment in assignments:
         if similarity_matrix[assignment[0], assignment[1]] > similarity_threshold:
             person_ids[assignment[0]] = prev_person_ids[assignment[1]]
             if smoothing_alpha:
-                boxes[assignment[0]] = (1 - smoothing_alpha) * boxes[assignment[0]] + smoothing_alpha * prev_boxes[assignment[1]]
-                pts[assignment[0]] = (1 - smoothing_alpha) * pts[assignment[0]] + smoothing_alpha * prev_pts[assignment[1]]
+                boxes[assignment[0]] = (1 - smoothing_alpha) * boxes[
+                    assignment[0]
+                ] + smoothing_alpha * prev_boxes[assignment[1]]
+                pts[assignment[0]] = (1 - smoothing_alpha) * pts[
+                    assignment[0]
+                ] + smoothing_alpha * prev_pts[assignment[1]]
 
-    person_ids[person_ids == -1] = np.arange(next_person_id, next_person_id + np.sum(person_ids == -1))
+    person_ids[person_ids == -1] = np.arange(
+        next_person_id, next_person_id + np.sum(person_ids == -1)
+    )
 
     return boxes, pts, person_ids
+
+
 #
 #
