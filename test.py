@@ -1,6 +1,7 @@
 import os
 import torch
 import json
+from utils.visualisations import visualisations as vis
 
 cuda = True if torch.cuda.is_available() else False
 device = torch.device("cuda:0" if cuda else "cpu")
@@ -60,6 +61,9 @@ def test_intent(epoch, model, dataloader, args, recorder, writer):
 def predict_intent(model, dataloader, args, dset='test'):
     model.eval()
     dt = {}
+
+    visualisations = vis()
+
     for itern, data in enumerate(dataloader):
         intent_logit = model.forward(data)
         intent_prob = torch.sigmoid(intent_logit)
@@ -88,6 +92,21 @@ def predict_intent(model, dataloader, args, dset='test'):
     else:
         with open(os.path.join(args.checkpoint_path, 'results', f'{dset}_intent_pred'), 'w') as f:
             json.dump(dt, f)
+
+        #add to frame data
+    for j in range(len(data['frames'][i])):
+        #get frame
+        frame = data['frames'][i][j].item()
+        #get bbox and label
+        bbox = data['bboxes'][i][j]
+        label = data['intention_binary'][i][j]
+        #add to frame data
+        visualisations.add_to_frame_data(vid, frame, bbox, label)
+
+
+    #draw the boxes, default settings            
+    visualisations.draw_all_frame_data_boxes()
+
 
 
 def validate_traj(epoch, model, dataloader, args, recorder, writer):
