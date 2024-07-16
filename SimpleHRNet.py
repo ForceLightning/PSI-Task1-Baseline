@@ -107,17 +107,6 @@ class SimpleHRNet:
         self.yolo_weights_path = yolo_weights_path
         self.device = device
         self.enable_tensorrt = enable_tensorrt
-
-        # if self.multiperson:
-        #     if self.yolo_version == "v3":
-        #         from models_.detectors.YOLOv3 import YOLOv3
-        #     elif self.yolo_version == "v5":
-        #         from models_.detectors.YOLOv5 import YOLOv5
-        #     elif self.yolo_version == "v8":
-        #         from ultralytics import YOLO
-        #     else:
-        #         raise ValueError("Unsupported YOLO version.")
-
         if model_name in ("HRNet", "hrnet"):
             self.model = HRNet(c=c, nof_joints=nof_joints)
         elif model_name in ("PoseResNet", "poseresnet", "ResNet", "resnet"):
@@ -254,6 +243,9 @@ class SimpleHRNet:
             boxes = np.asarray(
                 [[0, 0, old_res[1], old_res[0]]], dtype=np.float32
             )  # [x1, y1, x2, y2]
+            original_boxes = np.asarray(
+                [[0, 0, old_res[1], old_res[0], 1.0]], dtype=np.float32
+            )
             heatmaps = np.zeros(
                 (1, self.nof_joints, self.resolution[0] // 4, self.resolution[1] // 4),
                 dtype=np.float32,
@@ -277,6 +269,7 @@ class SimpleHRNet:
             # print("v8 Detections",detections[0][1].boxes[0])
 
             boxes = np.empty((nof_people, 4), dtype=np.int32)
+            original_boxes = np.empty((nof_people, 5), dtype=np.int32)
             # boxes = torch.empty((nof_people, 4),device=self.device)
             images = torch.empty(
                 (nof_people, 3, self.resolution[0], self.resolution[1]),
@@ -297,6 +290,7 @@ class SimpleHRNet:
                 for i, (x1, y1, x2, y2, cls, cls_conf, cls_pred) in enumerate(
                     detections
                 ):
+                    original_boxes[i] = [x1, y1, x2, y2, cls_conf]
                     # for i, detection in enumerate(detections):
                     x1 = int(round(x1.item()))
                     x2 = int(round(x2.item()))
@@ -341,6 +335,7 @@ class SimpleHRNet:
                         image_crop = np.pad(image_crop, pad_tuple)
                     images[i] = self.transform(image_crop)
                     boxes[i] = [x1_new, y1_new, x2_new, y2_new]
+                    original_boxes[i] = [x1, y1, x2, y2, cls_conf]
                     # boxes[i] = torch.tensor([x1_new, y1_new, x2_new, y2_new])
             # elif detections and detections[0].boxes:
             elif (
@@ -362,6 +357,7 @@ class SimpleHRNet:
                     coords: list[float] = box.xyxy[0].tolist()
                     cls_pred: int = int(box.cls[0].item())
                     cls_conf: float = box.conf[0].item()
+                    original_boxes[i] = [*coords] + [cls_conf]
                     x1, y1, x2, y2 = [int(x) for x in coords]
 
                     # Adapt detections to match HRNet input aspect ratio (as suggested by xtyDoge in issue #14)
@@ -482,6 +478,7 @@ class SimpleHRNet:
             res.append(heatmaps)
         if self.return_bounding_boxes:
             res.append(boxes)
+            res.append(original_boxes)
         res.append(pts)
 
         if len(res) > 1:
@@ -521,6 +518,11 @@ class SimpleHRNet:
                 len(images),
                 axis=0,
             )  # [x1, y1, x2, y2]
+            original_boxes = np.repeat(
+                np.asarray([[0, 0, old_res[1], old_res[0], 1.0]], dtype=np.float32),
+                len(images),
+                axis=0,
+            )  # [x1, y1, x2, y2]
             heatmaps = np.zeros(
                 (
                     len(images),
@@ -544,6 +546,7 @@ class SimpleHRNet:
                 np.sum([len(d) for d in image_detections if d is not None])
             )
             boxes = np.empty((nof_people, 4), dtype=np.int32)
+            original_boxes = np.empty((nof_people, 5), dtype=np.int32)
             images_tensor = torch.empty(
                 (nof_people, 3, self.resolution[0], self.resolution[1])
             )  # (height, width)
@@ -567,6 +570,14 @@ class SimpleHRNet:
                     for i, (x1, y1, x2, y2, cls, cls_conf, cls_pred) in enumerate(
                         detections
                     ):
+                        original_boxes[base_index + i] = [
+                            x1.item(),
+                            y1.item(),
+                            x2.item(),
+                            y2.item(),
+                            cls_conf.item(),
+                        ]
+
                         x1 = int(round(x1.item()))
                         x2 = int(round(x2.item()))
                         y1 = int(round(y1.item()))
@@ -585,7 +596,7 @@ class SimpleHRNet:
                             # increase y side
                             center = y1 + (y2 - y1) // 2
                             length = int(round((y2 - y1) * correction_factor))
-                            y1 = max(0, center - length // 2)
+                            y1_new = max(0, center - length // 2)
                             y2 = min(image.shape[0], center + length // 2)
                         elif correction_factor < 1:
                             # increase x side
@@ -605,6 +616,13 @@ class SimpleHRNet:
                     for i, (x1, y1, x2, y2, cls_conf, cls_pred) in enumerate(
                         detections[0].boxes[0].data
                     ):
+                        original_boxes[base_index + i] = [
+                            x1.item(),
+                            y1.item(),
+                            x2.item(),
+                            y2.item(),
+                            cls_conf.item(),
+                        ]
                         x1 = int(round(x1.item()))
                         x2 = int(round(x2.item()))
                         y1 = int(round(y1.item()))
@@ -739,6 +757,7 @@ class SimpleHRNet:
 
         else:
             boxes = np.asarray([], dtype=np.int32)
+            original_boxes = np.asarray([], dtype=np.int32)
             if self.multiperson:
                 pts = []
                 for _ in range(len(image_detections)):
@@ -753,6 +772,7 @@ class SimpleHRNet:
             res.append(heatmaps)
         if self.return_bounding_boxes:
             res.append(boxes)
+            res.append(original_boxes)
         res.append(pts)
 
         if len(res) > 1:

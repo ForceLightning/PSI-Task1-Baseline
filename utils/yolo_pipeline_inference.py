@@ -35,10 +35,10 @@ from models.pose_pipeline.pose import (
     YOLOPipelinModelWrapper,
     YOLOTrackerWrapper,
 )
-from opts import get_opts
+from opts import get_opts, init_args
 from utils.args import DefaultArguments
 from utils.cuda import *
-from utils.plotting import PosePlotter
+from utils.plotting import PipelinePlotter, PosePlotter
 
 SAVE_VIDEO = False
 
@@ -216,11 +216,11 @@ def unscale_then_rescale_poses(
     unscale_x, unscale_y = unscale
     rescale_x, rescale_y = rescale
 
-    poses[:, :, :, 0] = poses[:, :, :, 0] / float(unscale_x)
-    poses[:, :, :, 1] = poses[:, :, :, 1] / float(unscale_y)
+    poses[..., 0] = poses[..., 0] / float(unscale_x)
+    poses[..., 1] = poses[..., 1] / float(unscale_y)
 
-    poses[:, :, :, 0] = poses[:, :, :, 0] * float(rescale_x)
-    poses[:, :, :, 1] = poses[:, :, :, 1] * float(rescale_y)
+    poses[..., 0] = poses[..., 0] * float(rescale_x)
+    poses[..., 1] = poses[..., 1] * float(rescale_y)
 
     return poses
 
@@ -324,8 +324,18 @@ def infer(
                     2,
                 ), f"Poses must be of shape (n_dets, 15, 17, 2) but is of shape {results.poses.shape} instead."
 
-                for track_id, (bboxes, bbox_conf, poses) in enumerate(
-                    zip(results.bboxes, results.bbox_conf, results.poses)
+                assert results.pose_conf.ndim == 3 and results.pose_conf.shape[1:] == (
+                    15,
+                    17,
+                ), f"Pose confidence must be of shape (n_dets, 15, 17) but is of shape {results.pose_conf.shape} instead."
+
+                for track_id, (bboxes, bbox_conf, poses, pose_conf) in enumerate(
+                    zip(
+                        results.bboxes,
+                        results.bbox_conf,
+                        results.poses,
+                        results.pose_conf,
+                    )
                 ):
                     rescaled_bboxes = scale_bboxes_up(
                         bboxes.detach().cpu().numpy(), args.image_shape
@@ -333,11 +343,11 @@ def infer(
                     if torch.count_nonzero(bboxes) > 15 * 4:
                         bbox = rescaled_bboxes[args.observe_length - 1, :].reshape((4))
                         im = plot_box_on_img(
-                            im, bbox, bbox_conf.max().item(), 0, track_id
+                            im, bbox, bbox_conf.mean().item(), 0, track_id
                         )
                         future_bbox = rescaled_bboxes[-1, :].reshape((4))
                         im = plot_box_on_img(
-                            im, future_bbox, bbox_conf.max().item(), 0, track_id
+                            im, future_bbox, bbox_conf.mean().item(), 0, track_id
                         )
                     im = plot_past_future_traj(
                         args,
@@ -345,28 +355,46 @@ def infer(
                         rescaled_bboxes,
                         track_id,
                     )
-                last_poses = (
-                    results.poses[:, -1, :, :].unsqueeze(1).detach().cpu().numpy()
-                )
-                # extend last dim to 3 for plotting
-                last_poses = np.concatenate(
-                    [
-                        last_poses,
-                        np.ones(
-                            (
-                                last_poses.shape[0],
-                                last_poses.shape[1],
-                                last_poses.shape[2],
-                                1,
-                            )
-                        ),
-                    ],
-                    axis=3,
-                )
-                last_poses = unscale_then_rescale_poses(
-                    last_poses, (640, 640), args.image_shape
-                )
-                pose_plotter.plot_keypoints(im, last_poses)
+                    last_pose = poses[-1, :, :].detach().cpu().numpy()
+                    last_pose_conf = np.expand_dims(
+                        pose_conf[-1, :].detach().cpu().numpy(), axis=1
+                    )
+                    last_combined_pose = np.concatenate(
+                        (last_pose, last_pose_conf), axis=1
+                    )
+                    last_combined_pose = unscale_then_rescale_poses(
+                        last_combined_pose, (640, 640), args.image_shape
+                    )
+                    im = PipelinePlotter.draw_points_and_skeleton(
+                        im,
+                        last_combined_pose,
+                        "coco",
+                        person_index=track_id,
+                        points_color_palette="gist_rainbow",
+                        skeleton_color_palette="jet",
+                        points_palette_samples=10,
+                        flip_xy=True,
+                    )
+                # last_poses = (
+                #     results.poses[:, -1, :, :].unsqueeze(1).detach().cpu().numpy()
+                # )
+                # last_confs = (
+                #     results.pose_conf[:, -1, :]
+                #     .unsqueeze(1)
+                #     .detach()
+                #     .cpu()
+                #     .numpy()
+                #     .reshape(-1, 1, 17, 1)
+                # )
+                # # extend last dim to 3 for plotting
+                # last_poses = np.concatenate(
+                #     [last_poses, last_confs],
+                #     axis=3,
+                # )
+                # last_poses = unscale_then_rescale_poses(
+                #     last_poses, (640, 640), args.image_shape
+                # )
+                # pose_plotter.plot_keypoints(im, last_poses)
             except DirtyGotoException:
                 continue
             except Exception as e:
@@ -395,6 +423,8 @@ def main(args: DefaultArguments):
     boxmot_tracker_weights = args.boxmot_tracker_weights
     tracker_type = args.tracker
     hrnet_yolo_ver = args.hrnet_yolo_ver
+    save_output: bool = args.save_output
+    output: str = args.output
 
     args.batch_size = 1
     args.intent_model = False
@@ -439,7 +469,7 @@ def main(args: DefaultArguments):
         match args.tracker:
             case "botsort":
                 tracker = BoTSORT(
-                    model_weights=boxmot_tracker_weights,
+                    model_weights=Path(boxmot_tracker_weights),
                     device="cuda:0",
                     fp16=True,
                 )
@@ -447,7 +477,7 @@ def main(args: DefaultArguments):
                 tracker = BYTETracker()
             case "deepocsort":
                 tracker = DeepOCSORT(
-                    model_weights=boxmot_tracker_weights,
+                    model_weights=Path(boxmot_tracker_weights),
                     device="cuda:0",
                     fp16=True,
                 )
@@ -489,9 +519,24 @@ def main(args: DefaultArguments):
         ]
     )
 
-    infer(args, pipeline_wrapper, source, transform)
+    infer(
+        args,
+        pipeline_wrapper,
+        source,
+        transform,
+        save_video=save_output,
+        save_path=output,
+    )
 
 
 if __name__ == "__main__":
-    args = get_opts()
+    # args = get_opts()
+    parser = init_args()
+
+    _ = parser.add_argument("--save_output", "-so", action="store_true")
+
+    _ = parser.add_argument("--output", "-o", type=str, default="pipeline.avi")
+
+    args = parser.parse_args()
+
     main(args)
