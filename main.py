@@ -14,7 +14,8 @@ import torch.nn as nn
 from sklearn.model_selection import ParameterSampler
 from torch.utils.tensorboard.writer import SummaryWriter
 
-from data.prepare_data import get_dataloader
+from data.prepare_data import get_dataloader, get_video_dimensions, \
+consolidate_yolo_data, save_data_to_txt, visualise_annotations, visualise_intent
 from database.create_database import create_database
 from eval import get_test_traj_gt, predict_driving, predict_intent, predict_traj
 from models.build_model import build_model
@@ -296,6 +297,20 @@ def main(args: DefaultArguments):
     # else:
     # args.backbone = None
     # args.freeze_backbone = False
+    args.crop_mode = 'enlarge'
+    args.normalize_bbox = None
+    # 'subtract_first_frame' #here use None, so the traj bboxes output loss is based on origianl coordinates
+    # [None (paper results) | center | L2 | subtract_first_frame (good for evidential) | divide_image_size]
+
+    # Model
+    args.model_name = 'tcn_int_bbox'  # TCN module, with bboxes sequence as input, to predict intent
+    args.load_image = False # only bbox sequence as input
+    if args.load_image:
+        args.backbone = 'resnet'
+        args.freeze_backbone = False
+    else:
+        args.backbone = None
+        args.freeze_backbone = False
 
     # Train
     # hyperparameter_list = {
@@ -318,16 +333,13 @@ def main(args: DefaultArguments):
 
     n_random_samples = 60
 
-    parameter_samples: list[
-        dict[
-            {
-                "lr": float,
-                "batch_size": int,
-                "epochs": int,
-                "n_layers-kernel_size": tuple[int, int],
-            }
-        ]
-    ] = list(ParameterSampler(hyperparameter_list, n_iter=n_random_samples))
+    hyperparameter_list = {
+        "lr": float,
+        "batch_size": int,
+        "epochs": int,
+        "n_layers-kernel_size": tuple[int,int],
+    }
+    parameter_samples: list[dict[str,any]] = list(ParameterSampler(hyperparameter_list, n_iter=n_random_samples))
 
     args.val_freq = 1
     args.test_freq = 1
@@ -391,18 +403,20 @@ def main(args: DefaultArguments):
             os.makedirs(result_path)
 
         print("Running with Parameters:", params)  # Print the current parameters
-        val_accuracy, test_accuracy = train(args)
+        val_accuracy, test_accuracy = main(args)
         print("Validation Accuracy:", val_accuracy)
         print("Test Accuracy:", test_accuracy)
 
-        if val_accuracy > best_val_accuracy:
-            best_val_accuracy = val_accuracy
-            best_hyperparameters = params
+    #     if val_accuracy > best_val_accuracy:
+    #         best_val_accuracy = val_accuracy
+    #         best_hyperparameters = params
 
-    print("Best Validation Accuracy:", best_val_accuracy)
-    print("Best Hyperparameters:", best_hyperparameters)
+    # print("Best Validation Accuracy:", best_val_accuracy)
+    # print("Best Hyperparameters:", best_hyperparameters)
 
 
 if __name__ == "__main__":
     args = get_opts()
+    main(args)
+    args.n_layers = 4
     main(args)

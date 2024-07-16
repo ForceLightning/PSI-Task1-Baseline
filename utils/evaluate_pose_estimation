@@ -1,0 +1,248 @@
+# this script will run an eval script for pose estimation
+
+import numpy as np
+import csv
+import re
+import coco_eval, coco_utils
+import torch
+
+
+class evaluate_pose_estimation:
+    # ground truth data, this will hold the ground truth data
+    # structure of ground truth data
+    # ground_truth = {
+    #     video_num : {
+    #       frame_num : {
+    #        "Nose": [],
+    #        "Neck": [],
+    #        "R-Sho": [],
+    #        "R-Elb": [],
+    #        "R-Wr": [],
+    #        "L-Sho": [],
+    #        "L-Elb": [],
+    #        "L-Wr": [],
+    #        "R-Hip": [],
+    #        "R-Knee": [],
+    #        "R-Ank": [],
+    #        "L-Hip": [],
+    #        "L-Knee": [],
+    #        "L-Ank": [],
+    #        "R-Eye": [],
+    #        "L-Eye": [],
+    #        "R-Ear": [],
+    #        "L-Ear": []
+    #       }
+    #     }
+    # }
+
+    ground_truth = {}
+
+    def __init__(self):
+        self.data = np.array([])
+
+    def load_data_manual_labels(self, video_num, filename):
+        # will be from a file
+        print("Loading data manually labeled...")
+        # reading file
+        with open(filename, "r") as file:
+            lines = csv.reader(file)
+
+            # parsing the data
+            for line in lines:
+                # parts = line.strip().split(",")
+                keypoint = line[0]  # keypoint name - body part
+                x = int(line[1])  # x coordinate
+                y = int(line[2])  # y coordinate
+                frame_file = line[3]  # frame file name
+                frame_num = int(frame_file.split("_")[0])
+
+                # init ground truth data
+                if video_num not in self.ground_truth:
+                    self.ground_truth[video_num] = {}
+
+                if frame_num not in self.ground_truth[video_num]:
+                    self.ground_truth[video_num][frame_num] = {
+                        "Nose": [],
+                        "Neck": [],
+                        "R-Sho": [],
+                        "R-Elb": [],
+                        "R-Wr": [],
+                        "L-Sho": [],
+                        "L-Elb": [],
+                        "L-Wr": [],
+                        "R-Hip": [],
+                        "R-Knee": [],
+                        "R-Ank": [],
+                        "L-Hip": [],
+                        "L-Knee": [],
+                        "L-Ank": [],
+                        "R-Eye": [],
+                        "L-Eye": [],
+                        "R-Ear": [],
+                        "L-Ear": [],
+                    }
+
+                # add the keypoint to the ground truth data
+                self.ground_truth[video_num][frame_num][keypoint].append(
+                    (x, y))
+
+            print(self.ground_truth)
+            print("Data loaded successfully.")
+
+    def load_data_coco_format(self, filename):
+        # will be from a file
+        print("Loading data in COCO format...")
+
+    def evaluate(self):
+        print("Evaluating data...")
+
+    def is_keypoint_within_threshold(self, gt_coord, pred_coords, threshold):
+        # calc the euclidean distance between the ground truth point and the predicted points, to find the point with the smallest dist to use to find PCK
+
+        min_dist = 1000000  # hold the min dist
+        for pred_coord in pred_coords:  # iter through all the predicted points
+            euclidean_distance = np.sqrt(
+                (gt_coord[0] - pred_coord[0]) ** 2 +
+                (gt_coord[1] - pred_coord[1]) ** 2
+            )
+            if euclidean_distance < min_dist:
+                min_dist = euclidean_distance
+
+        print("Comparing........")
+        print(f"Euclidean distance: {euclidean_distance}")
+        # DEBUG
+        print(f"GT: {gt_coord}")
+        print(f"Pred: {pred_coords}")
+
+        # check if the distance is within the threshold
+        return min_dist <= threshold
+
+    def pck_eval(self, pred_data, threshold=5):
+        # PCK - Percentage of Correct Keypoints
+        print("Evaluating PCK...")
+        # the func will return the percentage of correct keypoints over total keypoints
+        correct_keypoints = 0
+        total_keypoints = 0
+
+        # iterate over the pred data
+        for pred_vid in pred_data.keys():  # iter through each pred video, to locate the video in the ground truth data first
+            # if vid does not exist in gt, skip
+            if pred_vid not in self.ground_truth.keys():
+                print(f"Video {pred_vid} not found in ground truth data.")
+                continue
+            pred_frames = pred_data[pred_vid].keys()
+            for pred_frame in pred_frames:  # iter through each pred frame, to locate the frame in the ground truth data
+                if pred_frame not in self.ground_truth[pred_vid].keys():
+                    print(
+                        f"Frame {pred_frame} not found in video {pred_vid} ground truth data.")
+                    continue
+                # !!! swap order, iter through each keypoint of the GT DATA, AS WE WANT TO TAKE TOTAL KEYPOINTS REFERENCE FROM GT DATA !!!
+                gt_keypoints = self.ground_truth[pred_vid][pred_frame].keys()
+                for gt_keypoint in gt_keypoints:
+                    # get the keypoint data
+                    gt_coords = self.ground_truth[pred_vid][pred_frame][gt_keypoint]
+                    for gt_coord in gt_coords:
+                        # get all the predicted points for the keypoint
+                        pred_coords = pred_data[pred_vid][pred_frame][gt_keypoint]
+                        # check if the keypoint is within the threshold
+                        if self.is_keypoint_within_threshold(gt_coord, pred_coords, threshold):
+                            correct_keypoints += 1
+                        total_keypoints += 1
+
+        # calculate the percentage of correct keypoints
+        if total_keypoints == 0:
+            print("No keypoints in ground truth.")
+            return
+
+        pck = correct_keypoints / total_keypoints
+        print(f"PCK: {pck}")
+        print(f"Correct keypoints: {correct_keypoints}")
+        print(f"Total keypoints: {total_keypoints}")
+
+        return
+
+    def oks_eval(self, ds, model):
+        pass
+        # cocoDt = cocoGt.loadRes(pred_data)
+        # cocoEval = COCOeval(cocoGt, cocoDt, "keypoints")
+        cocoAnnotation = coco_utils.get_coco_api_from_dataset(ds)
+        coco_evaluator2 = coco_eval.CocoEvaluator( cocoAnnotation , iou_types = ['keypoints'])
+
+        for img, target in ds:
+            image = img.to(torch.float)
+            image = torch.unsqueeze(image, dim=0)
+            
+            result = model.predict(image, verbose=False, classes=[0])
+        
+            result = result[0]
+
+            if not result.boxes:
+                predsdic = {}
+
+            if len(result.boxes) == 1:
+                predsdic = { 
+                    "image_id": target["image_id"],    
+                    "labels": result.boxes.cls,
+                    'scores': result.boxes.conf,
+                    'boxes': result.boxes.xyxy,
+                    'keypoints': result.keypoints.data
+                    }
+            
+                res = { target["image_id"]: predsdic}
+                coco_evaluator2.update(res)
+
+            elif len(result.boxes) > 1: 
+                labels = torch.Tensor(size=(0,)).to( result.boxes[0].xyxy.device)
+                scores = torch.Tensor(size=(0,)).to( result.boxes[0].xyxy.device)         
+                boxes = torch.Tensor(size=(0,4)).to( result.boxes[0].xyxy.device)
+                keypoints = torch.Tensor(size=(0,17,3)).to( result.boxes[0].xyxy.device)
+                
+                for i in range(len(result.boxes)):
+                    labels = torch.cat( (labels, result.boxes[i].cls ), dim=0) 
+                    scores = torch.cat( (scores, result.boxes[i].conf ), dim=0) 
+                    boxes = torch.cat( (boxes, result.boxes[i].xyxy), dim=0) 
+                    keypoints = torch.cat( (keypoints, result.keypoints[i].data), dim=0) 
+                            
+                predsdic = { 
+                    "image_id": target["image_id"],    
+                    "labels": labels,
+                    'scores': scores,
+                    'boxes': boxes,
+                    'keypoints': keypoints
+                    }
+
+                res = { target["image_id"]: predsdic}
+                coco_evaluator2.update(res)
+                
+        coco_evaluator2.accumulate()
+        coco_evaluator2.summarize()
+
+
+
+# if __name__ == "__main__":
+#     eval_script = evaluate_pose_estimation()
+#     eval_script.load_data_manual_labels(1, "1.csv")
+
+#     data = {1: {158: {}}}
+
+#     with open("keypoints.txt", "r") as file:
+#         lines = file.readlines()
+#         for line in lines:
+#             # Use regular expressions to extract the keypoint name and coordinates
+#             match = re.match(r"Keypoints - ([\w-]+) : \[(.*?)\]", line.strip())
+#             if match:
+#                 keypoint_name = match.group(1)
+#                 keypoint_values = match.group(2).split("), (")
+#                 # Convert the keypoint values from string to tuple format
+#                 keypoint_values = [
+#                     tuple(map(float, kp.strip("()").split(", ")))
+#                     for kp in keypoint_values
+#                 ]
+#                 # REPLACE THIS TO BE DYNAMIC
+#                 data[1][158][keypoint_name] = keypoint_values
+
+#     # print(data)
+
+#     eval_script.pck_eval(data, 20)
+    
+
