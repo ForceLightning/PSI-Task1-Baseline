@@ -1,10 +1,12 @@
 #!/usr/bin/python
 # -*- coding:utf8 -*-
 import os
+import os.path as osp
+
 import cv2
 import numpy as np
+
 from .utils_folder import create_folder, folder_exists
-import os.path as osp
 
 
 def read_image(image_path):
@@ -17,4 +19,8 @@ def read_image(image_path):
 
 def save_image(image_save_path, image_data):
     create_folder(os.path.dirname(image_save_path))
-    return cv2.imwrite(image_save_path, image_data, [100])
+    return cv2.imwrite(
+        image_save_path,
+        image_data,
+        # [100]
+    )

@@ -1,12 +1,14 @@
+
 from __future__ import division
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+import numpy as np
 
-from .detector_utils import build_targets
 from .parse_config import *
+from .detector_utils import build_targets
 
 
 def create_modules(module_defs):
@@ -85,7 +87,7 @@ def create_modules(module_defs):
 
 
 class Upsample(nn.Module):
-    """nn.Upsample is deprecated"""
+    """ nn.Upsample is deprecated """
 
     def __init__(self, scale_factor, mode="linear"):
         super(Upsample, self).__init__()
@@ -129,9 +131,7 @@ class YOLOLayer(nn.Module):
         LongTensor = torch.cuda.LongTensor if x.is_cuda else torch.LongTensor
         ByteTensor = torch.cuda.ByteTensor if x.is_cuda else torch.ByteTensor
 
-        prediction = (
-            x.view(nB, nA, self.bbox_attrs, nG, nG).permute(0, 1, 3, 4, 2).contiguous()
-        )
+        prediction = x.view(nB, nA, self.bbox_attrs, nG, nG).permute(0, 1, 3, 4, 2).contiguous()
 
         # Get outputs
         x = torch.sigmoid(prediction[..., 0])  # Center x
@@ -143,12 +143,8 @@ class YOLOLayer(nn.Module):
 
         # Calculate offsets for each grid
         grid_x = torch.arange(nG).repeat(nG, 1).view([1, 1, nG, nG]).type(FloatTensor)
-        gscoperid_y = (
-            torch.arange(nG).repeat(nG, 1).t().view([1, 1, nG, nG]).type(FloatTensor)
-        )
-        scaled_anchors = FloatTensor(
-            [(a_w / stride, a_h / stride) for a_w, a_h in self.anchors]
-        )
+        grid_y = torch.arange(nG).repeat(nG, 1).t().view([1, 1, nG, nG]).type(FloatTensor)
+        scaled_anchors = FloatTensor([(a_w / stride, a_h / stride) for a_w, a_h in self.anchors])
         anchor_w = scaled_anchors[:, 0:1].view((1, nA, 1, 1))
         anchor_h = scaled_anchors[:, 1:2].view((1, nA, 1, 1))
 
@@ -160,11 +156,7 @@ class YOLOLayer(nn.Module):
         pred_boxes[..., 3] = torch.exp(h.data) * anchor_h
 
         output = torch.cat(
-            (
-                pred_boxes.view(nB, -1, 4) * stride,
-                pred_conf.view(nB, -1, 1),
-                pred_cls.view(nB, -1, self.num_classes),
-            ),
+            (pred_boxes.view(nB, -1, 4) * stride, pred_conf.view(nB, -1, 1), pred_cls.view(nB, -1, self.num_classes)),
             -1,
         )
 
@@ -177,18 +169,7 @@ class YOLOLayer(nn.Module):
                 self.mse_loss = self.mse_loss.cuda()
                 self.bce_loss = self.bce_loss.cuda()
 
-            (
-                num_targets,
-                num_correct,
-                obj_mask,
-                noobj_mask,
-                tx,
-                ty,
-                tw,
-                th,
-                tconf,
-                tcls,
-            ) = build_targets(
+            num_targets, num_correct, obj_mask, noobj_mask, tx, ty, tw, th, tconf, tcls = build_targets(
                 pred_boxes=pred_boxes.data.cpu(),
                 pred_conf=pred_conf.data.cpu(),
                 pred_cls=pred_cls.data.cpu(),
@@ -230,12 +211,7 @@ class YOLOLayer(nn.Module):
 
             loss = loss_x + loss_y + loss_w + loss_h + loss_conf + loss_cls
 
-            cls_acc = (
-                (pred_cls[obj_mask].argmax(1) == tcls[obj_mask].argmax(1))
-                .float()
-                .mean()
-                .item()
-            )
+            cls_acc = (pred_cls[obj_mask].argmax(1) == tcls[obj_mask].argmax(1)).float().mean().item()
 
             return (
                 output,
@@ -272,9 +248,7 @@ class Darknet(nn.Module):
         loss = 0
         self.metrics = []
         layer_outputs = []
-        for i, (module_def, module) in enumerate(
-            zip(self.module_defs, self.module_list)
-        ):
+        for i, (module_def, module) in enumerate(zip(self.module_defs, self.module_list)):
             if module_def["type"] in ["convolutional", "upsample", "maxpool"]:
                 x = module(x)
             elif module_def["type"] == "route":
@@ -306,9 +280,7 @@ class Darknet(nn.Module):
 
         # Open the weights file
         fp = open(weights_path, "rb")
-        header = np.fromfile(
-            fp, dtype=np.int32, count=5
-        )  # First five are header values
+        header = np.fromfile(fp, dtype=np.int32, count=5)  # First five are header values
 
         # Needed to write header when saving weights
         self.header_info = header
@@ -318,9 +290,7 @@ class Darknet(nn.Module):
         fp.close()
 
         ptr = 0
-        for i, (module_def, module) in enumerate(
-            zip(self.module_defs, self.module_list)
-        ):
+        for i, (module_def, module) in enumerate(zip(self.module_defs, self.module_list)):
             if module_def["type"] == "convolutional":
                 conv_layer = module[0]
                 if module_def["batch_normalize"]:
@@ -328,58 +298,44 @@ class Darknet(nn.Module):
                     bn_layer = module[1]
                     num_b = bn_layer.bias.numel()  # Number of biases
                     # Bias
-                    bn_b = torch.from_numpy(weights[ptr : ptr + num_b]).view_as(
-                        bn_layer.bias
-                    )
+                    bn_b = torch.from_numpy(weights[ptr : ptr + num_b]).view_as(bn_layer.bias)
                     bn_layer.bias.data.copy_(bn_b)
                     ptr += num_b
                     # Weight
-                    bn_w = torch.from_numpy(weights[ptr : ptr + num_b]).view_as(
-                        bn_layer.weight
-                    )
+                    bn_w = torch.from_numpy(weights[ptr : ptr + num_b]).view_as(bn_layer.weight)
                     bn_layer.weight.data.copy_(bn_w)
                     ptr += num_b
                     # Running Mean
-                    bn_rm = torch.from_numpy(weights[ptr : ptr + num_b]).view_as(
-                        bn_layer.running_mean
-                    )
+                    bn_rm = torch.from_numpy(weights[ptr : ptr + num_b]).view_as(bn_layer.running_mean)
                     bn_layer.running_mean.data.copy_(bn_rm)
                     ptr += num_b
                     # Running Var
-                    bn_rv = torch.from_numpy(weights[ptr : ptr + num_b]).view_as(
-                        bn_layer.running_var
-                    )
+                    bn_rv = torch.from_numpy(weights[ptr : ptr + num_b]).view_as(bn_layer.running_var)
                     bn_layer.running_var.data.copy_(bn_rv)
                     ptr += num_b
                 else:
                     # Load conv. bias
                     num_b = conv_layer.bias.numel()
-                    conv_b = torch.from_numpy(weights[ptr : ptr + num_b]).view_as(
-                        conv_layer.bias
-                    )
+                    conv_b = torch.from_numpy(weights[ptr : ptr + num_b]).view_as(conv_layer.bias)
                     conv_layer.bias.data.copy_(conv_b)
                     ptr += num_b
                 # Load conv. weights
                 num_w = conv_layer.weight.numel()
-                conv_w = torch.from_numpy(weights[ptr : ptr + num_w]).view_as(
-                    conv_layer.weight
-                )
+                conv_w = torch.from_numpy(weights[ptr : ptr + num_w]).view_as(conv_layer.weight)
                 conv_layer.weight.data.copy_(conv_w)
                 ptr += num_w
 
     def save_weights(self, path, cutoff=-1):
         """
-        @:param path    - path of the new weights file
-        @:param cutoff  - save layers between 0 and cutoff (cutoff = -1 -> all are saved)
+            @:param path    - path of the new weights file
+            @:param cutoff  - save layers between 0 and cutoff (cutoff = -1 -> all are saved)
         """
         fp = open(path, "wb")
         self.header_info[3] = self.seen
         self.header_info.tofile(fp)
 
         # Iterate through layers
-        for i, (module_def, module) in enumerate(
-            zip(self.module_defs[:cutoff], self.module_list[:cutoff])
-        ):
+        for i, (module_def, module) in enumerate(zip(self.module_defs[:cutoff], self.module_list[:cutoff])):
             if module_def["type"] == "convolutional":
                 conv_layer = module[0]
                 # If batch norm, load bn first
