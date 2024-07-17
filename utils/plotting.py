@@ -482,7 +482,7 @@ def visualise_intent(annotation_path: str, intent_path: str) -> None:
         dict[
             str,
             dict[
-                str, dict[str,float]
+                str, dict[{"intent": int, "intent_prob": float, "disagreement": float}]
             ],
         ],
     ] = json.loads(intent_results)

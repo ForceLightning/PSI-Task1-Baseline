@@ -333,13 +333,17 @@ def main(args: DefaultArguments):
 
     n_random_samples = 60
 
-    hyperparameter_list = {
-        "lr": float,
-        "batch_size": int,
-        "epochs": int,
-        "n_layers-kernel_size": tuple[int,int],
-    }
-    parameter_samples: list[dict[str,any]] = list(ParameterSampler(hyperparameter_list, n_iter=n_random_samples))
+
+    parameter_samples: list[
+        dict[
+            {
+                "lr": float,
+                "batch_size": int,
+                "epochs": int,
+                "n_layers-kernel_size": tuple[int,int],
+            }
+        ]
+    ] = list(ParameterSampler(hyperparameter_list, n_iter=n_random_samples))
 
     args.val_freq = 1
     args.test_freq = 1
