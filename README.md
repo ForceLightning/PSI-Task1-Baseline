@@ -53,7 +53,7 @@ cd thirdparty/deform_conv
 python setup.py develop
 ```
 
-4. Download the [pretrained models](https://drive.google.com/drive/folders/1VPcwo9jVhnJpf5GVwR2-za1PFE6bCOXE) and put in the directory DcPose_supp_files
+4. Download the [object detector and pretrained models](https://drive.google.com/drive/folders/1VPcwo9jVhnJpf5GVwR2-za1PFE6bCOXE) and put in the directory DcPose_supp_files
 
 Note that if a different CUDA Toolkit version is installed, modify the source for PyTorch wheels based on the CUDA Toolkit version.
 

@@ -1,11 +1,16 @@
+# Linting and formatting
+pyrightconfig.json
+.pylintrc
+
 # Cache
 **/__pycache__
 **/.pytest_cache
 *.pt
 
 # DCPose
-/demo/input/
-/demo/output/
+/DcPose_supp_files
+/demo/input
+/demo/output
 .idea
 
 # Deform Conv build files
