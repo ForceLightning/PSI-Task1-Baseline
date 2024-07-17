@@ -31,7 +31,7 @@ colors = [ [0,100,255], [0,100,255], [0,255,255], [0,100,255], [0,255,255], [0,1
         [0,255,0], [255,200,100], [255,0,255], [0,255,0], [255,200,100], [255,0,255],
         [0,0,255], [255,0,0], [200,200,0], [255,0,0], [200,200,0], [0,0,0]]
 
-class skeleton_drawer:
+class openpose_estimation:
     detected_keypoints = []
     frameWidth = 368 #init values 
     frameHeight = 368 #init values
@@ -257,21 +257,23 @@ class skeleton_drawer:
         # cv2.imshow("Detected Pose" , frameClone)
         # cv2.waitKey(0)
 
-        num_frames = 1
-        starting_frame = 120
-        file_path = "frames/video_0010"
+        num_frames = 450
+        starting_frame = 1
+        file_path = "frames/video_0131"
         output_path = "outputs"
         file = "frames/video_0013/169.jpg"
         #file = "outputs/vid0013_169_2.png"
         output_file = "outputs/vid0013_169_2_cropping_pred.png"
+        output_text_file = "outputs/0013_169.txt"
 
         #file = "frames/video_0013/169.jpg"
         #output_file = "outputs/vid0013_169_pred.png"
         #draw for 30 frames
         for counter in range(num_frames):
-            # image1 = cv2.imread(f"frames/video_0010/{str(starting_frame + counter).zfill(3)}.jpg")
+            image1 = cv2.imread(f"{file_path}/{str(starting_frame + counter).zfill(3)}.jpg")
+            output_text_file = f"{output_path}/{str(starting_frame + counter).zfill(3)}.txt"
             
-            image1 = cv2.imread(file)
+            # image1 = cv2.imread(file)
 
             self.frameWidth = image1.shape[1]
             self.frameHeight = image1.shape[0]
@@ -317,7 +319,7 @@ class skeleton_drawer:
             personwiseKeypoints = self.getPersonwiseKeypoints(valid_pairs, invalid_pairs)
 
             #write to text file
-            with open("outputs/0013_169.txt", "w") as f:
+            with open(output_text_file, "w") as f:
                 for i in range(len(personwiseKeypoints)):
                     for n in range(len(personwiseKeypoints[i])):
                         index = personwiseKeypoints[i][n]
