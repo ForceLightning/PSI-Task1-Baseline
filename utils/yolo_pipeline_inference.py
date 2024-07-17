@@ -431,6 +431,7 @@ def main(args: DefaultArguments):
     args.traj_model = True
     args.traj_loss = ["bbox_l2"]
     args.model_name = "tcan_traj_bbox"
+    # args.model_name = "transformer_traj_bbox"
     args.loss_weights = {
         "loss_intent": 0.0,
         "loss_traj": 1.0,

@@ -462,8 +462,11 @@ class YOLOPipelinModelWrapper(nn.Module, PipelineWrapper):
 
         # NOTE: Pose-based TS-Transformers are kinda broken with this implementation
         # as they require poses from future timesteps to make a prediction.
-        if isinstance(self.model, TransformerTrajBbox):
-            preds = self.model.generate(batch_tensor)
+        model_instance = getattr(self.model, "module", self.model)
+        # if isinstance(model_instance, ITSTransformerWrapper):
+        if isinstance(model_instance, TransformerTrajBbox):
+            print("beep beep im a jeep")
+            preds = model_instance.generate(batch_tensor)
         else:
             preds = self.model(batch_tensor)
 
@@ -829,7 +832,7 @@ class HRNetPipelineModelWrapper(nn.Module, PipelineWrapper):
                 "frames": x["frames"],
                 "ped_id": [f"track_{track_id:03d}"] * ts,
                 "video_id": x["video_id"],
-                "total_frames": x["total_frames"],
+                "total_frames": x["total_frames"].squeeze(),
                 "pose_masks": pose_masks,
                 "local_featmaps": x["local_featmaps"],
                 "intention_prob": np.zeros((ts), dtype=np.float_),
@@ -854,8 +857,11 @@ class HRNetPipelineModelWrapper(nn.Module, PipelineWrapper):
 
         preds: torch.Tensor
 
-        if isinstance(self.model, ITSTransformerWrapper):
-            preds = self.model.generate(batch_tensor)
+        model_instance = getattr(self.model, "module", self.model)
+        # if isinstance(model_instance, ITSTransformerWrapper):
+        if isinstance(model_instance, TransformerTrajBbox):
+            print(batch_tensor["total_frames"])
+            preds = model_instance.generate(batch_tensor)
         else:
             preds = self.model(batch_tensor)
 

@@ -1,5 +1,5 @@
 """Calculates the optimal learning rate for a given model and dataset using the LR
-    Finder method.
+Finder method.
 """
 
 from __future__ import annotations

@@ -141,7 +141,7 @@ def main(
 
         # print("Predicted pts:",pts)
         if not disable_tracking:
-            boxes, pts = pts
+            boxes, _, pts = pts
 
         if not disable_tracking:
             if len(pts) > 0:

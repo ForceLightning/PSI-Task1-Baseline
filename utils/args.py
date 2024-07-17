@@ -133,6 +133,8 @@ class DefaultArguments:
     "osnet_x0_25_msmt17.pt".
     :param tracker: Tracker type, defaults to "deepocsort".
     :type tracker: Literal["botsort", "byte", "deepocsort", "hrnet"]
+    :param hrnet_yolo_ver: HRNet YOLO version, defaults to "v8".
+    :type hrnet_yolo_ver: Literal["v3", "v5", "v8"]
     """
 
     dataset: Literal["PSI2.0", "PSI1.0"] = "PSI2.0"
@@ -216,6 +218,7 @@ class DefaultArguments:
     yolo_pipeline_weights: str = "yolov8s-pose.pt"
     boxmot_tracker_weights: str = "osnet_x0_25_msmt17.pt"
     tracker: Literal["botsort", "byte", "deepocsort", "hrnet"] = "deepocsort"
+    hrnet_yolo_ver: Literal["v3", "v5", "v8"] = "v8"
 
 
 class ModelOpts(TypedDict):
