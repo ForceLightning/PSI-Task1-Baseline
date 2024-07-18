@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Literal, Sequence, TypeAlias
+from typing import Any, Literal, Sequence, TypeAlias, TypedDict
 
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import torch
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
@@ -22,13 +23,14 @@ from sklearn.metrics import (
     classification_report,
     confusion_matrix,
     f1_score,
-    mean_squared_error,
     precision_recall_curve,
     roc_auc_score,
 )
 from sklearn.metrics import roc_curve as sk_roc_curve
+from sklearn.metrics._classification import _check_targets
 from sklearn.preprocessing import LabelBinarizer
-from sklearn.utils.multiclass import type_of_target
+from sklearn.utils.multiclass import type_of_target, unique_labels
+from torch.nn import functional as F
 from tqdm.auto import tqdm
 
 from utils.args import DefaultArguments
@@ -312,6 +314,7 @@ def evaluate_intents(
 
         np_gt = np.array(gt)
         np_pred = np.array(pred)
+        np_proba = np.array(proba)
 
         # GUARD
         assert (
@@ -320,8 +323,13 @@ def evaluate_intents(
 
         bal_acc = balanced_accuracy_score(np_gt, np_pred)
 
-        classi_report = classification_report(
-            np_gt, np_pred, target_names=["not cross", "cross"], output_dict=True
+        classi_report = extended_classification_report(
+            np_gt,
+            np_pred,
+            np_proba,
+            target_names=["not cross", "cross"],
+            output_dict=True,
+            zero_division=0.0,
         )
 
         with pd.option_context(
@@ -340,7 +348,7 @@ def evaluate_intents(
 
         gts.append(np_gt)
         preds.append(np_pred)
-        probas.append(np.array(proba))
+        probas.append(np_proba)
         results.append((res["acc"], res["f1"], res["mAcc"], res["confusion_matrix"]))
 
     if gen_auc_charts:
@@ -391,9 +399,9 @@ def auc_charts(
             raise ValueError(f"Target type ({y_type}) not supported")
 
     title = (
-        f"ROC and PRC Curves for {task_name}"
+        f"ROC and PRC Curves for {task_name} with {average} average"
         if task_name is not None
-        else "ROC and PRC Curves"
+        else f"ROC and PRC Curves with {average} average"
     )
     fig.suptitle(title)
 
@@ -409,7 +417,6 @@ def _binary_auc_charts(
 ) -> None:
     fpr, tpr, _ = sk_roc_curve(gt, proba)
     auroc = auc(fpr, tpr)
-
     prec, rec, _ = precision_recall_curve(gt, proba)
     auprc = average_precision_score(gt, proba)
 
@@ -445,6 +452,9 @@ def _multiclass_auc_charts(
 
     recall_mean = np.linspace(0, 1, 1000)
     fpr_mean = np.linspace(0, 1, 1000)
+
+    if not np.allclose(1, proba.sum(axis=1)):
+        proba = F.softmax(torch.tensor(proba), dim=1).numpy()
 
     for i in range(num_classes):
         if np.sum(gt, axis=0)[i] == 0:
@@ -875,18 +885,22 @@ def evaluate_drivings(
             # adjusted=True
         )
 
-        speed_classi_report = classification_report(
+        speed_classi_report = extended_classification_report(
             np_gt_speed,
             np_pred_speed,
+            np_proba_speed,
             target_names=["maintainSpeed", "decreaseSpeed", "increaseSpeed"],
             output_dict=True,
+            zero_division=0.0,
         )
 
-        dir_classi_report = classification_report(
+        dir_classi_report = extended_classification_report(
             np_gt_dir,
             np_pred_dir,
+            np_proba_dir,
             target_names=["goStraight", "turnLeft", "turnRight"],
             output_dict=True,
+            zero_division=0.0,
         )
 
         with pd.option_context(
@@ -903,12 +917,14 @@ def evaluate_drivings(
             path_iter.write(f"Speed Balanced Accuracy: {speed_bal_acc:.4f}")
             path_iter.write("Speed confusion matrix: ")
             path_iter.write(str(pd.DataFrame(res["speed_confusion_matrix"])))
+            path_iter.write("\n\n")
 
             path_iter.write("Direction classification report: ")
             path_iter.write(str(pd.DataFrame(dir_classi_report)))
             path_iter.write(f"Direction Balanced Accuracy: {dir_bal_acc:.4f}")
             path_iter.write("Direction confusion matrix: ")
             path_iter.write(str(pd.DataFrame(res["dir_confusion_matrix"])))
+            path_iter.write("\n\n")
 
         results.append(res)
 
@@ -996,6 +1012,99 @@ def measure_driving_prediction(
 
     # print("dir: ", dir_matrix.diagonal(), sum_cnt, dir_cls_wise_acc, np.mean(dir_cls_wise_acc))
     return results
+
+
+def extended_classification_report(
+    y_true: npt.ArrayLike,
+    y_pred: npt.ArrayLike,
+    y_proba: npt.ArrayLike,
+    *,
+    labels: Sequence[str] | None = None,
+    target_names: Sequence[str] | None = None,
+    sample_weight: npt.ArrayLike | None = None,
+    digits: int = 2,
+    output_dict: bool = False,
+    zero_division: Literal["warn"] | float | np.floating[Any] = "warn",
+) -> dict[str, dict[str, float]]:
+    """Extends the `classification_report` function from `sklearn` to include AUROC and
+    AP.
+
+    :param npt.ArrayLike y_true: Ground truth labels.
+    :param npt.ArrayLike y_pred: Predicted labels.
+    :param npt.ArrayLike y_proba: Predicted probabilities.
+    :param Sequence[str] labels: List of labels to include in the report.
+    :param Sequence[str] target_names: List of display names matching the labels.
+    :param npt.ArrayLike sample_weight: Sample weights.
+    :param int digits: Number of digits for formatting output floating point values.
+    :param bool output_dict: If True, return output as dict.
+    :param Literal["warn"] | float | np.floating[Any] zero_division: Value to use for
+    division by zero.
+
+    :return: Classification report with AUROC and AP.
+    :rtype: dict[str, dict[str, float]]
+    """
+    classi_report: dict[str, dict[str, float]] = classification_report(
+        y_true,
+        y_pred,
+        labels=labels,
+        target_names=target_names,
+        sample_weight=sample_weight,
+        digits=digits,
+        output_dict=True,
+        zero_division=zero_division,
+    )
+
+    # add AUROC and AP to the classification report, if target type is binary
+    # or multiclass.
+    y_type, y_true, y_pred = _check_targets(y_true, y_pred)
+
+    if labels is None:
+        labels = unique_labels(y_true, y_pred)
+        labels_given = False
+    else:
+        labels = np.asarray(labels)
+        labels_given = True
+
+    micro_is_accuracy = (y_type == "multiclass" or y_type == "binary") and (
+        not labels_given or (set(labels) == set(unique_labels(y_true, y_pred)))
+    )
+
+    if target_names is None:
+        target_names = ["%s" % l for l in labels]
+
+    headers = ["AUROC", "AP"]
+
+    if y_type == "binary" or y_type == "multiclass":
+        if not np.allclose(1, y_proba.sum(axis=1)):
+            y_proba = F.softmax(torch.tensor(y_proba), dim=1).numpy()
+
+        auroc = roc_auc_score(y_true, y_proba, average=None, multi_class="ovr")
+        auprc = average_precision_score(y_true, y_proba, average=None)
+
+        rows = zip(target_names, auroc, auprc)
+
+        report_dict = {label[0]: label[1:] for label in rows}
+        for label, scores in report_dict.items():
+            classi_report[label].update(dict(zip(headers, [float(i) for i in scores])))
+
+        average_options = ("micro", "macro", "weighted")
+        for average in average_options:
+            if average.startswith("micro") and micro_is_accuracy:
+                line_heading = "accuracy"
+            else:
+                line_heading = average + " avg"
+            avg_auroc = roc_auc_score(
+                y_true, y_proba, average=average, multi_class="ovr"
+            )
+            avg_ap = average_precision_score(y_true, y_proba, average=average)
+            avg = [avg_auroc, avg_ap]
+
+            if line_heading != "accuracy":
+                classi_report[line_heading].update(
+                    dict(zip(headers, [float(i) for i in avg]))
+                )
+
+    return classi_report
 
 
 if __name__ == "__main__":
