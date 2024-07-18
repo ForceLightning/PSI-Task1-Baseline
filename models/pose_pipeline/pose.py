@@ -437,7 +437,7 @@ class YOLOPipelinModelWrapper(nn.Module, PipelineWrapper):
             box_confs,
             pose_confs,
         ) in tracks.items():
-            sample: T_intentSample = {
+            sample: T_intentSample = {  # type: ignore[reportAssignmentType]
                 "image": imgs,
                 "pose": poses,
                 "bboxes": boxes,
@@ -759,7 +759,6 @@ class HRNetPipelineModelWrapper(nn.Module, PipelineWrapper):
             tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
         ],
     ]:
-        ...
         imgs = x["image"]
         assert isinstance(imgs, torch.Tensor), "input images must not be an empty list"
         imgs = imgs.squeeze()

@@ -127,7 +127,7 @@ def id_to_color(
 def plot_past_future_traj(
     args: DefaultArguments,
     im: npt.NDArray[np.uint8] | cvt.MatLike,
-    boxes: list[npt.NDArray[np.float32]],
+    boxes: list[npt.NDArray[np.float32]] | npt.NDArray[np.float32],
     track_id: int,
 ) -> cvt.MatLike | npt.NDArray[np.uint8]:
     """Plots past and future trajectories of all detected pedestrians.
