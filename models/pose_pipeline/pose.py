@@ -329,7 +329,7 @@ class PipelineResults:
     pose_conf: torch.Tensor | npt.NDArray[np.float_] | None
 
 
-class YOLOPipelinModelWrapper(nn.Module, PipelineWrapper):
+class YOLOPipelineModelWrapper(nn.Module, PipelineWrapper):
     def __init__(
         self,
         args: DefaultArguments,
@@ -921,7 +921,7 @@ def main(args: DefaultArguments):
     )
 
     yolo_tracker = YOLOTrackerWrapper(args, yolo_model, tracker)
-    pipeline_model = YOLOPipelinModelWrapper(args, model, yolo_tracker)
+    pipeline_model = YOLOPipelineModelWrapper(args, model, yolo_tracker)
 
     dl_iterator = tqdm(
         enumerate(train_loader),

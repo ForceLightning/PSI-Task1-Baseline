@@ -34,7 +34,7 @@ from models.pose_pipeline.pose import (
     HRNetTrackerWrapper,
     PipelineWrapper,
     TrackerWrapper,
-    YOLOPipelinModelWrapper,
+    YOLOPipelineModelWrapper,
     YOLOTrackerWrapper,
 )
 from opts import init_args
@@ -111,31 +111,7 @@ class IntentPipelineResults:
     bbox_conf: torch.Tensor | npt.NDArray[np.float_] | None
 
 
-class YOLOIntentPipelineWrapper(YOLOPipelinModelWrapper):
-    def __init__(
-        self,
-        args: DefaultArguments,
-        model: nn.Module,
-        tracker: YOLOTrackerWrapper,
-        return_dict: bool = False,
-        return_pose: bool = False,
-        persistent_tracker: bool = False,
-    ):
-        super().__init__()
-        self.args = args
-        self.model = model
-        self.tracker = tracker
-        self.return_dict = return_dict
-        self.return_pose = return_pose
-        if self.return_pose and not self.return_dict:
-            raise ValueError(
-                "return_pose is only valid when return_dict is set to True."
-            )
-        self.persistent_tracker = persistent_tracker
-        self.frame_cache: deque[cvt.MatLike | npt.NDArray[np.uint8] | torch.Tensor] = (
-            deque(maxlen=args.observe_length)
-        )
-
+class YOLOIntentPipelineWrapper(YOLOPipelineModelWrapper):
     @override
     def forward(self, x: T_intentBatch) -> torch.Tensor | IntentPipelineResults | None:
         tracks: dict[
@@ -145,6 +121,8 @@ class YOLOIntentPipelineWrapper(YOLOPipelinModelWrapper):
         imgs, tracks = self._tracker_infer_intent_batch(x)
 
         ts = imgs.shape[0]
+
+        samples: list[T_intentSample] = []
 
         for track_id, (
             boxes,
@@ -159,8 +137,10 @@ class YOLOIntentPipelineWrapper(YOLOPipelinModelWrapper):
             ):
                 continue
 
+            # NOTE: Since we know that the boxes are normalized from the HRNet tracker
+            # pipeline, we can just scale them up here as the inferencing models were
+            # trained on non-normalized boxes.
             scaled_boxes = deepcopy(boxes)
-
             scaled_boxes[..., 0::2] = boxes[..., 0::2] * self.args.image_shape[0]
             scaled_boxes[..., 1::2] = boxes[..., 1::2] * self.args.image_shape[1]
 
@@ -212,8 +192,7 @@ class HRNetIntentPipelineWrapper(HRNetPipelineModelWrapper):
         tracker: HRNetTrackerWrapper,
         return_dict: bool = True,
     ):
-        super().__init__(args, model, tracker)
-        self.return_dict = return_dict
+        super().__init__(args, model, tracker, return_dict=return_dict)
 
     @override
     def forward(self, x: T_intentBatch) -> torch.Tensor | IntentPipelineResults | None:
@@ -245,6 +224,9 @@ class HRNetIntentPipelineWrapper(HRNetPipelineModelWrapper):
             ):
                 continue
 
+            # NOTE: Since we know that the boxes are normalized from the HRNet tracker
+            # pipeline, we can just scale them up here as the inferencing models were
+            # trained on non-normalized boxes.
             original_boxes = boxes.clone()
             boxes[..., 0::2] = boxes[..., 0::2] * self.args.image_shape[0]
             boxes[..., 1::2] = boxes[..., 1::2] * self.args.image_shape[1]
@@ -471,13 +453,12 @@ class GTTrackingIntentPipelineWrapper(nn.Module, PipelineWrapper):
             ):
                 continue
 
-            original_bboxes = deepcopy(boxes)
-            original_bboxes[..., 0::2] = (
-                original_bboxes[..., 0::2] / self.args.image_shape[0]
-            )
-            original_bboxes[..., 1::2] = (
-                original_bboxes[..., 1::2] / self.args.image_shape[1]
-            )
+            # NOTE: Since we know that the boxes are not normalized from the ground
+            # truth annotations, we can just scale them down here as the visualisation
+            # pipeline expects non-normalized boxes.
+            og_bboxes = deepcopy(boxes)
+            og_bboxes[..., 0::2] = og_bboxes[..., 0::2] / self.args.image_shape[0]
+            og_bboxes[..., 1::2] = og_bboxes[..., 1::2] / self.args.image_shape[1]
 
             sample: T_intentSample = {  # type: ignore[reportAssignmentType]
                 "image": imgs,
@@ -493,7 +474,7 @@ class GTTrackingIntentPipelineWrapper(nn.Module, PipelineWrapper):
                 "intention_binary": np.zeros((ts), dtype=np.int_),
                 "disagree_score": np.zeros((ts), dtype=np.float_),
                 "global_featmaps": x["global_featmaps"],
-                "original_bboxes": original_bboxes,
+                "original_bboxes": og_bboxes,
                 "bbox_conf": box_confs,
                 "pose_conf": pose_confs,
             }

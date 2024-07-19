@@ -32,7 +32,7 @@ from models.pose_pipeline.pose import (
     PipelineResults,
     PipelineWrapper,
     TrackerWrapper,
-    YOLOPipelinModelWrapper,
+    YOLOPipelineModelWrapper,
     YOLOTrackerWrapper,
 )
 from opts import get_opts, init_args
@@ -489,7 +489,7 @@ def main(args: DefaultArguments):
         tracker_wrapper = YOLOTrackerWrapper(
             args, yolo_model, tracker, persistent_tracker=True
         )
-        pipeline_wrapper = YOLOPipelinModelWrapper(
+        pipeline_wrapper = YOLOPipelineModelWrapper(
             args,
             model,
             tracker_wrapper,
