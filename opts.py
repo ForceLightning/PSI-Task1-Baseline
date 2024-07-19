@@ -123,7 +123,9 @@ def init_args() -> argparse.ArgumentParser:
         help="Backbone type [resnet50 | vgg16 | faster_rcnn]",
     )
     _ = parser.add_argument(
-        "--freeze_backbone", type=bool, default=False, help="[True | False]"
+        "--freeze_backbone",
+        action="store_true",
+        help="Whether to freeze backbone training",
     )
     _ = parser.add_argument(
         "--model_name", type=str, default="lstm", help="model name, [lstm, lstmed]"
