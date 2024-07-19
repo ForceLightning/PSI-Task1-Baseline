@@ -168,180 +168,188 @@ class openpose_estimation:
         return personwiseKeypoints
 
 
-    def main(self, args):
-        parser = argparse.ArgumentParser(description='Run keypoint detection') 
-        parser.add_argument("--device", default="cpu", help="Device to inference on"  )
-        parser.add_argument("--image_file", default="group.jpg", help="Input image")
+def main():
+    parser = argparse.ArgumentParser(description='Run keypoint detection') 
+    parser.add_argument("--device", default="cpu", help="Device to inference on"  )
+    parser.add_argument("--image_file", default="group.jpg", help="Input image")
 
-        args = parser.parse_args()
-
-
-
-        #image1 = image[300: 500, 400: 600]
-
-        protoFile = "PSI-Intent-Prediction/models/vis_models/pose_deploy_linevec.prototxt"
-        weightsFile = "PSI-Intent-Prediction/models/vis_models/pose_iter_440000.caffemodel"
-        nPoints = 18
-        # COCO Output Format
-        keypointsMapping = ['Nose', 'Neck', 'R-Sho', 'R-Elb', 'R-Wr', 'L-Sho', 'L-Elb', 'L-Wr', 'R-Hip', 'R-Knee', 'R-Ank', 'L-Hip', 'L-Knee', 'L-Ank', 'R-Eye', 'L-Eye', 'R-Ear', 'L-Ear']
-
-        t = time.time()
-        net = cv2.dnn.readNetFromCaffe(protoFile, weightsFile)
-        if args.device == "cpu":
-            net.setPreferableBackend(cv2.dnn.DNN_TARGET_CPU)
-            print("Using CPU device")
-        elif args.device == "gpu":
-            net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
-            net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
-            print("Using GPU device")
+    args = parser.parse_args()
 
 
 
+    #image1 = image[300: 500, 400: 600]
+
+    protoFile = "PSI_Intent_Prediction/models/vis_models/pose_deploy_linevec.prototxt"
+    weightsFile = "PSI_Intent_Prediction/models/vis_models/pose_iter_440000.caffemodel"
+    nPoints = 18
+    # COCO Output Format
+    keypointsMapping = ['Nose', 'Neck', 'R-Sho', 'R-Elb', 'R-Wr', 'L-Sho', 'L-Elb', 'L-Wr', 'R-Hip', 'R-Knee', 'R-Ank', 'L-Hip', 'L-Knee', 'L-Ank', 'R-Eye', 'L-Eye', 'R-Ear', 'L-Ear']
+
+    t = time.time()
+    net = cv2.dnn.readNetFromCaffe(protoFile, weightsFile)
+    if args.device == "cpu":
+        net.setPreferableBackend(cv2.dnn.DNN_TARGET_CPU)
+        print("Using CPU device")
+    elif args.device == "gpu":
+        net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
+        net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
+        print("Using GPU device")
 
 
-        # image1 = cv2.imread(f"test_image.jpg")
-
-        # frameWidth = image1.shape[1]
-        # frameHeight = image1.shape[0]
-
-        # # Fix the input Height and get the width according to the Aspect Ratio
-        # inHeight = 368
-        # inWidth = int((inHeight/frameHeight)*frameWidth)
-
-        # inpBlob = cv2.dnn.blobFromImage(image1, 1.0 / 255, (inWidth, inHeight),
-        #                           (0, 0, 0), swapRB=False, crop=False)
-
-        # net.setInput(inpBlob)
-        # output = net.forward()
-        # print("Time Taken in forward pass = {}".format(time.time() - t))
-
-        # detected_keypoints = []
-        # self.keypoints_list = np.zeros((0,3))
-        # keypoint_id = 0
-        # threshold = 0.1
-
-        # for part in range(nPoints):
-        #     probMap = output[0,part,:,:]
-        #     probMap = cv2.resize(probMap, (image1.shape[1], image1.shape[0]))
-        #     keypoints = getKeypoints(probMap, threshold)
-        #     print("Keypoints - {} : {}".format(keypointsMapping[part], keypoints))
-        #     keypoints_with_id = []
-        #     for i in range(len(keypoints)):
-        #         keypoints_with_id.append(keypoints[i] + (keypoint_id,))
-        #         self.keypoints_list = np.vstack([self.keypoints_list, keypoints[i]])
-        #         keypoint_id += 1
-
-        #     detected_keypoints.append(keypoints_with_id)
 
 
-        # frameClone = image1.copy()
-        # for i in range(nPoints):
-        #     for j in range(len(detected_keypoints[i])):
-        #         cv2.circle(frameClone, detected_keypoints[i][j][0:2], 2, colors[i], -1, cv2.LINE_AA)
-        # cv2.imshow("Keypoints",frameClone)
+
+    # image1 = cv2.imread(f"test_image.jpg")
+
+    # frameWidth = image1.shape[1]
+    # frameHeight = image1.shape[0]
+
+    # # Fix the input Height and get the width according to the Aspect Ratio
+    # inHeight = 368
+    # inWidth = int((inHeight/frameHeight)*frameWidth)
+
+    # inpBlob = cv2.dnn.blobFromImage(image1, 1.0 / 255, (inWidth, inHeight),
+    #                           (0, 0, 0), swapRB=False, crop=False)
+
+    # net.setInput(inpBlob)
+    # output = net.forward()
+    # print("Time Taken in forward pass = {}".format(time.time() - t))
+
+    # detected_keypoints = []
+    # self.keypoints_list = np.zeros((0,3))
+    # keypoint_id = 0
+    # threshold = 0.1
+
+    # for part in range(nPoints):
+    #     probMap = output[0,part,:,:]
+    #     probMap = cv2.resize(probMap, (image1.shape[1], image1.shape[0]))
+    #     keypoints = getKeypoints(probMap, threshold)
+    #     print("Keypoints - {} : {}".format(keypointsMapping[part], keypoints))
+    #     keypoints_with_id = []
+    #     for i in range(len(keypoints)):
+    #         keypoints_with_id.append(keypoints[i] + (keypoint_id,))
+    #         self.keypoints_list = np.vstack([self.keypoints_list, keypoints[i]])
+    #         keypoint_id += 1
+
+    #     detected_keypoints.append(keypoints_with_id)
 
 
-        # valid_pairs, invalid_pairs = getValidPairs(output)
-        # personwiseKeypoints = getPersonwiseKeypoints(valid_pairs, invalid_pairs)
-
-        # for i in range(17):
-        #     for n in range(len(personwiseKeypoints)):
-        #         index = personwiseKeypoints[n][np.array(POSE_PAIRS[i])]
-        #         if -1 in index:
-        #             continue
-        #         B = np.int32(self.keypoints_list[index.astype(int), 0])
-        #         A = np.int32(self.keypoints_list[index.astype(int), 1])
-        #         cv2.line(frameClone, (B[0], A[0]), (B[1], A[1]), colors[i], 1, cv2.LINE_AA)
+    # frameClone = image1.copy()
+    # for i in range(nPoints):
+    #     for j in range(len(detected_keypoints[i])):
+    #         cv2.circle(frameClone, detected_keypoints[i][j][0:2], 2, colors[i], -1, cv2.LINE_AA)
+    # cv2.imshow("Keypoints",frameClone)
 
 
-        # cv2.imshow("Detected Pose" , frameClone)
-        # cv2.waitKey(0)
+    # valid_pairs, invalid_pairs = getValidPairs(output)
+    # personwiseKeypoints = getPersonwiseKeypoints(valid_pairs, invalid_pairs)
 
-        num_frames = 450
-        starting_frame = 1
-        file_path = "frames/video_0131"
-        output_path = "outputs"
-        file = "frames/video_0013/169.jpg"
-        #file = "outputs/vid0013_169_2.png"
-        output_file = "outputs/vid0013_169_2_cropping_pred.png"
-        output_text_file = "outputs/0013_169.txt"
-
-        #file = "frames/video_0013/169.jpg"
-        #output_file = "outputs/vid0013_169_pred.png"
-        #draw for 30 frames
-        for counter in range(num_frames):
-            image1 = cv2.imread(f"{file_path}/{str(starting_frame + counter).zfill(3)}.jpg")
-            output_text_file = f"{output_path}/{str(starting_frame + counter).zfill(3)}.txt"
-            
-            # image1 = cv2.imread(file)
-
-            self.frameWidth = image1.shape[1]
-            self.frameHeight = image1.shape[0]
-
-            # Fix the input Height and get the width according to the Aspect Ratio
-            inHeight = 368
-            inWidth = int((inHeight/self.frameHeight)* self.frameWidth)
-
-            inpBlob = cv2.dnn.blobFromImage(image1, 1/255, (inWidth, inHeight),
-                                    (0, 0, 0), swapRB=True, crop=False)
-
-            net.setInput(inpBlob)
-            output = net.forward()
-            print("Time Taken in forward pass = {}".format(time.time() - t))
-
-            detected_keypoints = []
-            self.keypoints_list = np.zeros((0,3))
-            keypoint_id = 0
-            threshold = 0.1
-
-            for part in range(nPoints):
-                probMap = output[0,part,:,:]
-                probMap = cv2.resize(probMap, (image1.shape[1], image1.shape[0]))
-                keypoints = self.getKeypoints(probMap, threshold)
-                print("Keypoints - {} : {}".format(keypointsMapping[part], keypoints))
-                keypoints_with_id = []
-                for i in range(len(keypoints)):
-                    keypoints_with_id.append(keypoints[i] + (keypoint_id,))
-                    self.keypoints_list = np.vstack([self.keypoints_list, keypoints[i]])
-                    keypoint_id += 1
-
-                detected_keypoints.append(keypoints_with_id)
+    # for i in range(17):
+    #     for n in range(len(personwiseKeypoints)):
+    #         index = personwiseKeypoints[n][np.array(POSE_PAIRS[i])]
+    #         if -1 in index:
+    #             continue
+    #         B = np.int32(self.keypoints_list[index.astype(int), 0])
+    #         A = np.int32(self.keypoints_list[index.astype(int), 1])
+    #         cv2.line(frameClone, (B[0], A[0]), (B[1], A[1]), colors[i], 1, cv2.LINE_AA)
 
 
-            frameClone = image1.copy()
-            for i in range(nPoints):
-                for j in range(len(detected_keypoints[i])):
-                    cv2.circle(frameClone, detected_keypoints[i][j][0:2], 2, colors[i], -1, cv2.LINE_AA)
-            #cv2.imshow("Keypoints",frameClone)
+    # cv2.imshow("Detected Pose" , frameClone)
+    # cv2.waitKey(0)
+
+    num_frames = 451
+    starting_frame = 0
+    file_path = "PSI_Intent_Prediction/frames/video_0131"
+    output_path = "outputs/video_0131"
+    #file = "frames/video_0013/169.jpg"
+    #file = "outputs/vid0013_169_2.png"
+    output_file = "outputs/vid0013_169_2_cropping_pred.png"
+    output_text_file = "outputs/0013_169.txt"
+
+    op_est = openpose_estimation()
+    #file = "frames/video_0013/169.jpg"
+    #output_file = "outputs/vid0013_169_pred.png"
+    #draw for 30 frames
+    for counter in range(num_frames):
+        image1 = cv2.imread(f"{file_path}/{str(starting_frame + counter).zfill(3)}.jpg")
+        output_file = f"{output_path}/pred_{str(starting_frame + counter).zfill(3)}.png"
+        output_text_file = f"{output_path}/{str(starting_frame + counter).zfill(3)}.txt"
+        
+        # image1 = cv2.imread(file)
+
+        op_est.frameWidth = image1.shape[1]
+        op_est.frameHeight = image1.shape[0]
+
+        # Fix the input Height and get the width according to the Aspect Ratio
+        inHeight = 368
+        inWidth = int((inHeight/op_est.frameHeight)* op_est.frameWidth)
+
+        inpBlob = cv2.dnn.blobFromImage(image1, 1/255, (inWidth, inHeight),
+                                (0, 0, 0), swapRB=True, crop=False)
+
+        net.setInput(inpBlob)
+        output = net.forward()
+        print("Time Taken in forward pass = {}".format(time.time() - t))
+
+        op_est.detected_keypoints = []
+        op_est.keypoints_list = np.zeros((0,3))
+        keypoint_id = 0
+        threshold = 0.1
+
+        for part in range(nPoints):
+            probMap = output[0,part,:,:]
+            probMap = cv2.resize(probMap, (image1.shape[1], image1.shape[0]))
+            keypoints = op_est.getKeypoints(probMap, threshold)
+            print("Keypoints - {} : {}".format(keypointsMapping[part], keypoints))
+            keypoints_with_id = []
+            for i in range(len(keypoints)):
+                keypoints_with_id.append(keypoints[i] + (keypoint_id,))
+                op_est.keypoints_list = np.vstack([op_est.keypoints_list, keypoints[i]])
+                keypoint_id += 1
+
+            op_est.detected_keypoints.append(keypoints_with_id)
 
 
-            valid_pairs, invalid_pairs = self.getValidPairs(output)
-            personwiseKeypoints = self.getPersonwiseKeypoints(valid_pairs, invalid_pairs)
+        frameClone = image1.copy()
+        for i in range(nPoints):
+            for j in range(len(op_est.detected_keypoints[i])):
+                cv2.circle(frameClone, op_est.detected_keypoints[i][j][0:2], 4, colors[i], -1, cv2.LINE_AA)
+        #cv2.imshow("Keypoints",frameClone)
 
-            #write to text file
-            with open(output_text_file, "w") as f:
-                for i in range(len(personwiseKeypoints)):
-                    for n in range(len(personwiseKeypoints[i])):
-                        index = personwiseKeypoints[i][n]
-                        if index == -1:
-                            continue
-                        x, y = self.keypoints_list[index.astype(int)][:2]
-                        f.write(str(x) + " " + str(y) + " ")
-                    f.write("\n")
-                    
-            for i in range(17):
-                for n in range(len(personwiseKeypoints)):
-                    index = personwiseKeypoints[n][np.array(POSE_PAIRS[i])]
-                    if -1 in index:
+
+        valid_pairs, invalid_pairs = op_est.getValidPairs(output)
+        personwiseKeypoints = op_est.getPersonwiseKeypoints(valid_pairs, invalid_pairs)
+
+        #write to text file
+        with open(output_text_file, "w") as f:
+            for i in range(len(personwiseKeypoints)):
+                for n in range(len(personwiseKeypoints[i])):
+                    index = personwiseKeypoints[i][n]
+                    if index == -1:
                         continue
-                    B = np.int32(self.keypoints_list[index.astype(int), 0])
-                    A = np.int32(self.keypoints_list[index.astype(int), 1])
-                    cv2.line(frameClone, (B[0], A[0]), (B[1], A[1]), colors[i], 1, cv2.LINE_AA)
+                    if index > op_est.keypoints_list.shape[0]:
+                        break
+                    x, y = op_est.keypoints_list[index.astype(int)][:2]
+                    f.write(str(x) + " " + str(y) + " ")
+                f.write("\n")
+                
+        for i in range(17):
+            for n in range(len(personwiseKeypoints)):
+                index = personwiseKeypoints[n][np.array(POSE_PAIRS[i])]
+                if -1 in index:
+                    continue
+                B = np.int32(op_est.keypoints_list[index.astype(int), 0])
+                A = np.int32(op_est.keypoints_list[index.astype(int), 1])
+                cv2.line(frameClone, (B[0], A[0]), (B[1], A[1]), colors[i], 2, cv2.LINE_AA)
 
 
-            cv2.imwrite(output_file,frameClone)
-            print("writing frame", starting_frame + counter)
+        cv2.imwrite(output_file,frameClone)
+        print("writing frame", starting_frame + counter)
 
-        print("done")
-            #cv2.imshow("Detected Pose" , frameClone)
-            #cv2.waitKey(0)
+    print("done")
+        #cv2.imshow("Detected Pose" , frameClone)
+        #cv2.waitKey(0)
+
+
+if __name__ == '__main__':
+    main()
