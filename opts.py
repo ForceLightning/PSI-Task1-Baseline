@@ -339,7 +339,7 @@ def init_args() -> argparse.ArgumentParser:
         "-t",
         type=str,
         default="deepocsort",
-        choices=["botsort", "byte", "deepocsort", "hrnet"],
+        choices=["botsort", "byte", "deepocsort", "hrnet", "demo"],
         help="The tracker to use for tracking.",
     )
 

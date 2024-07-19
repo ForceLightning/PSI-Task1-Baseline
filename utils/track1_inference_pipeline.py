@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
+import pickle
 import traceback
 from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
 import cv2
 import numpy as np
@@ -14,6 +17,7 @@ from cv2 import typing as cvt
 from numpy import typing as npt
 from PIL import Image, ImageDraw, ImageFont
 from torch import nn
+from torch.nn import functional as F
 from torch.utils.data import default_collate
 from torchvision.transforms import v2
 from tqdm.auto import tqdm
@@ -21,6 +25,7 @@ from typing_extensions import override
 from ultralytics import YOLO
 
 from data.custom_dataset import T_intentBatch, T_intentSample
+from database.create_database import T_intentDB
 from eval import load_args, load_model_state_dict
 from models.build_model import build_model
 from models.pose_pipeline.pose import (
@@ -70,8 +75,7 @@ def plot_box_intent_on_img(
     im = plot_box_on_img(img, box, conf, cls, id)
 
     # Draw the crossing confidence
-    # crossing_conf = (intent - 0.5) * 2
-    crossing_conf = intent
+    crossing_conf = abs(intent - 0.5) * 2
     color = id_to_color(id)
     im = cv2.putText(
         im,
@@ -91,7 +95,7 @@ def plot_box_intent_on_img(
     font = ImageFont.truetype("seguisym.ttf", size=30)
     draw = ImageDraw.Draw(pil_im, "RGBA")
     text = "🚶" if intent > 0.5 else "🚹"
-    color = (*color, int(abs(crossing_conf / 2) * 255))
+    color = (*color, int(crossing_conf * 255))
     draw.text((int(box[2]), int(box[1]) - 10), text, font=font, fill=color)
 
     # Return the image
@@ -157,8 +161,8 @@ class YOLOIntentPipelineWrapper(YOLOPipelinModelWrapper):
 
             scaled_boxes = deepcopy(boxes)
 
-            scaled_boxes[::2] = boxes[::2] * self.args.image_shape[0]
-            scaled_boxes[1::2] = boxes[1::2] * self.args.image_shape[1]
+            scaled_boxes[..., 0::2] = boxes[..., 0::2] * self.args.image_shape[0]
+            scaled_boxes[..., 1::2] = boxes[..., 1::2] * self.args.image_shape[1]
 
             sample: T_intentSample = {  # type: ignore[reportAssignmentType]
                 "image": imgs,
@@ -174,7 +178,7 @@ class YOLOIntentPipelineWrapper(YOLOPipelinModelWrapper):
                 "intention_binary": np.zeros((ts), dtype=np.int_),
                 "disagree_score": np.zeros((ts), dtype=np.float_),
                 "global_featmaps": x["global_featmaps"],
-                "original_bboxes": scaled_boxes,
+                "original_bboxes": boxes,
                 "bbox_conf": box_confs,
                 "pose_conf": pose_confs,
             }
@@ -185,16 +189,14 @@ class YOLOIntentPipelineWrapper(YOLOPipelinModelWrapper):
 
         batch_tensor: T_intentBatch = default_collate(samples)
         preds: torch.Tensor = self.model(batch_tensor)
+        preds = F.sigmoid(preds)
 
         if preds.ndim == 0:
             preds = preds.unsqueeze(0)
 
         if self.return_dict:
-            boxes = batch_tensor["bboxes"]
-            boxes[:, ::2] = boxes[:, ::2] / self.args.image_shape[0]
-            boxes[:, 1::2] = boxes[:, 1::2] / self.args.image_shape[1]
             return IntentPipelineResults(
-                boxes,
+                batch_tensor["original_bboxes"],
                 preds,
                 batch_tensor["bbox_conf"],
             )
@@ -243,6 +245,10 @@ class HRNetIntentPipelineWrapper(HRNetPipelineModelWrapper):
             ):
                 continue
 
+            original_boxes = boxes.clone()
+            boxes[..., 0::2] = boxes[..., 0::2] * self.args.image_shape[0]
+            boxes[..., 1::2] = boxes[..., 1::2] * self.args.image_shape[1]
+
             sample: T_intentSample = {  # type: ignore[reportAssignmentType]
                 "image": imgs,
                 "pose": poses,
@@ -257,7 +263,7 @@ class HRNetIntentPipelineWrapper(HRNetPipelineModelWrapper):
                 "intention_binary": np.zeros((ts), dtype=np.int_),
                 "disagree_score": np.zeros((ts), dtype=np.float_),
                 "global_featmaps": x["global_featmaps"],
-                "original_bboxes": boxes,
+                "original_bboxes": original_boxes,
                 "bbox_conf": box_confs,
                 "pose_conf": pose_confs,
             }
@@ -268,17 +274,246 @@ class HRNetIntentPipelineWrapper(HRNetPipelineModelWrapper):
 
         batch_tensor: T_intentBatch = default_collate(samples)
         preds: torch.Tensor = self.model(batch_tensor)
+        preds = F.sigmoid(preds)
 
         if preds.ndim == 0:
             preds = preds.unsqueeze(0)
 
         if self.return_dict:
             return IntentPipelineResults(
-                batch_tensor["bboxes"],
+                batch_tensor["original_bboxes"],
                 preds,
                 batch_tensor["bbox_conf"],
             )
 
+        return preds
+
+
+class GTTrackingIntentPipelineWrapper(nn.Module, PipelineWrapper):
+    def __init__(
+        self,
+        args: DefaultArguments,
+        model: nn.Module,
+        db: T_intentDB,
+        return_dict: bool = False,
+    ):
+        super().__init__()
+        self.args = args
+        self.model = model
+        self.db = db
+        self.return_dict = return_dict
+
+    def _tracker_infer_intent_batch(self, x: T_intentBatch) -> tuple[
+        torch.Tensor,
+        dict[
+            int,
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+        ],
+    ]:
+        pass
+
+    def _tracker_infer_intent_deque(self, x: deque[cvt.MatLike]) -> tuple[
+        npt.NDArray[np.uint8],
+        dict[
+            int,
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+        ],
+    ]:
+        pass
+
+    def _tracker_infer_intent_ndarray(self, x: npt.NDArray[np.uint8]) -> tuple[
+        npt.NDArray[np.uint8],
+        dict[
+            int,
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+        ],
+    ]:
+        pass
+
+    def __getitem__(self, video_id: str, frames: Sequence[int]) -> (
+        dict[
+            int,
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+        ]
+        | None
+    ):
+        working_dict: dict[
+            str,
+            dict[
+                {
+                    "bbox": list[tuple[float, float, float, float]],
+                    "bbox_conf": list[float],
+                    "pose": list[list[tuple[float, float]]],
+                    "pose_mask": list[list[bool]],
+                    "pose_conf": list[list[float]],
+                }
+            ],
+        ] = {}
+
+        for ped_id, annotations in self.db[video_id].items():
+            # extract frames from annotations within `frames`.
+            if ped_id not in working_dict:
+                working_dict[ped_id]: dict[
+                    {
+                        "bbox": list[tuple[float, float, float, float]],
+                        "bbox_conf": list[float],
+                        "pose": list[list[tuple[float, float]]],
+                        "pose_mask": list[list[bool]],
+                        "pose_conf": list[list[float]],
+                    }
+                ] = {
+                    "bbox": [],
+                    "bbox_conf": [],
+                    "pose": [],
+                    "pose_mask": [],
+                    "pose_conf": [],
+                }
+
+            cv_anns = annotations["cv_annotations"]
+
+            for ann_frame in annotations["frames"]:
+                if ann_frame in frames:
+                    ann_subidx = annotations["frames"].index(ann_frame)
+                    ### Bounding Boxes ###
+                    bbox = cv_anns["bbox"][ann_subidx]
+                    # GUARD
+                    assert all(
+                        isinstance(x, float) for x in bbox
+                    ), f"bbox coordinates are not int: {bbox}"
+                    if (bbox_list := working_dict[ped_id].get("bbox")) is not None:
+                        bbox_list.append(tuple(bbox))
+                        working_dict[ped_id]["bbox_conf"].append(1.0)
+                    else:
+                        working_dict[ped_id]["bbox"] = [tuple(bbox)]
+                        working_dict[ped_id]["bbox_conf"] = [1.0]
+                    ### Poses ###
+                    pose = cv_anns["skeleton"][ann_subidx]
+                    pose_mask = cv_anns["observed_skeleton"][ann_subidx]
+
+                    assert len(pose) == 17, f"pose length not 17! {pose}"
+                    if (pose_list := working_dict[ped_id].get("pose")) is not None:
+                        pose_list.append(pose)
+                        working_dict[ped_id]["pose_mask"].append(pose_mask)
+                        working_dict[ped_id]["pose_conf"].append(
+                            [float(x) for x in pose_mask]
+                        )
+                    else:
+                        working_dict[ped_id]["pose"] = [pose]
+                        working_dict[ped_id]["pose_mask"] = [pose_mask]
+                        working_dict[ped_id]["pose_conf"] = [
+                            [float(x) for x in pose_mask]
+                        ]
+
+        # Convert format
+        res: dict[
+            int,
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+        ] = {}
+        for track_id, (ped_id, annotations) in enumerate(working_dict.items()):
+            try:
+                if len(annotations["bbox"]) < self.args.observe_length:
+                    continue
+            except KeyError:
+                print(annotations)
+                continue
+
+            bbox = torch.from_numpy(np.asarray(annotations["bbox"], dtype=np.float_))
+            # bbox[:, 0::2] = bbox[:, 0::2] / self.args.image_shape[0]
+            # bbox[:, 1::2] = bbox[:, 1::2] / self.args.image_shape[1]
+
+            bbox_conf = torch.from_numpy(
+                np.asarray(annotations["bbox_conf"], dtype=np.float_)
+            )
+            pose = torch.from_numpy(np.asarray(annotations["pose"], dtype=np.float_))
+            pose_conf = torch.from_numpy(
+                np.asarray(annotations["pose_conf"], dtype=np.float_)
+            )
+            pose_mask = torch.from_numpy(
+                np.asarray(annotations["pose_mask"], dtype=np.float_)
+            )
+
+            res[track_id] = (bbox, pose, pose_mask, bbox_conf, pose_conf)
+
+        if len(res.keys()) == 0:
+            return None
+
+        return res
+
+    def forward(self, x: T_intentBatch) -> torch.Tensor | IntentPipelineResults | None:
+        imgs = x["image"]
+
+        ts = imgs.shape[0] if isinstance(imgs, np.ndarray) else len(imgs)
+
+        video_id: str = x["video_id"][0][0]
+        frames: list[int] = x["frames"]
+
+        tracks = self.__getitem__(video_id, frames)
+        preds: torch.Tensor = torch.zeros(
+            (1, self.args.max_track_size, 4), dtype=torch.float32
+        )
+        if tracks is None:
+            if self.return_dict:
+                return None
+            return preds
+
+        samples: list[T_intentSample] = []
+
+        for track_id, (
+            boxes,
+            poses,
+            pose_masks,
+            box_confs,
+            pose_confs,
+        ) in tracks.items():
+            if any(
+                len(x) < self.args.observe_length
+                for x in [boxes, poses, box_confs, pose_confs]
+            ):
+                continue
+
+            original_bboxes = deepcopy(boxes)
+            original_bboxes[..., 0::2] = (
+                original_bboxes[..., 0::2] / self.args.image_shape[0]
+            )
+            original_bboxes[..., 1::2] = (
+                original_bboxes[..., 1::2] / self.args.image_shape[1]
+            )
+
+            sample: T_intentSample = {  # type: ignore[reportAssignmentType]
+                "image": imgs,
+                "pose": poses,
+                "bboxes": boxes,
+                "frames": x["frames"],
+                "ped_id": [f"track_{track_id:03d}"] * ts,
+                "video_id": x["video_id"],
+                "total_frames": x["total_frames"],
+                "pose_masks": pose_masks,
+                "local_featmaps": x["local_featmaps"],
+                "intention_prob": np.zeros((ts), dtype=np.float_),
+                "intention_binary": np.zeros((ts), dtype=np.int_),
+                "disagree_score": np.zeros((ts), dtype=np.float_),
+                "global_featmaps": x["global_featmaps"],
+                "original_bboxes": original_bboxes,
+                "bbox_conf": box_confs,
+                "pose_conf": pose_confs,
+            }
+            samples.append(sample)
+
+        if len(samples) == 0:
+            if self.return_dict:
+                return None
+            return preds
+
+        batch_tensor: T_intentBatch = default_collate(samples)
+        preds = self.model(batch_tensor)
+        preds = F.sigmoid(preds)
+
+        if preds.ndim == 0:
+            preds = preds.unsqueeze(0)
+
+        if self.return_dict:
+            bbox = batch_tensor["original_bboxes"]
+            return IntentPipelineResults(bbox, preds, batch_tensor["bbox_conf"])
         return preds
 
 
@@ -302,6 +537,9 @@ def infer(
 
     if save_video:
         fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+
+    video_id = os.path.normpath(source).split(os.sep)[-1]
+    video_id = os.path.splitext(video_id)[0]
 
     with tqdm(total=int(vid.get(cv2.CAP_PROP_FRAME_COUNT)), leave=True) as pbar:
         while True:
@@ -346,7 +584,7 @@ def infer(
                     "track_id": np.zeros((1, args.observe_length), dtype=np.int64),
                     "local_featmaps": [],
                     "global_featmaps": [],
-                    "video_id": [source.split("_")[1]] * args.max_track_size,
+                    "video_id": [video_id] * args.max_track_size,
                 }
 
                 batch_tensor: T_intentBatch = default_collate([sample])
@@ -412,6 +650,7 @@ def main(args: DefaultArguments):
     hrnet_yolo_ver = args.hrnet_yolo_ver
     save_output: bool = args.save_output
     output: str = args.output
+    load_db: bool = args.load_db
 
     args.batch_size = 1
     args.intent_model = True
@@ -438,6 +677,45 @@ def main(args: DefaultArguments):
             model, options={"triton.cudagraphs": True}, fullgraph=True
         )
     model = nn.DataParallel(model)
+
+    db: T_intentDB | None = None
+    if load_db:
+        if not os.path.exists(
+            db_path := os.path.join(
+                args.dataset_root_path, args.database_path, args.database_file
+            )
+        ):
+            raise FileNotFoundError(f"Database file not found at {db_path}")
+        task = args.task_name.split("_")[1]
+        with open(
+            os.path.join(
+                args.dataset_root_path, args.database_path, f"{task}_database_train.pkl"
+            ),
+            "rb",
+        ) as f:
+            imdb_train: T_intentDB = pickle.load(f)
+        with open(
+            os.path.join(
+                args.dataset_root_path, args.database_path, f"{task}_database_val.pkl"
+            ),
+            "rb",
+        ) as f:
+            imdb_val: T_intentDB = pickle.load(f)
+        with open(
+            os.path.join(
+                args.dataset_root_path, args.database_path, f"{task}_database_test.pkl"
+            ),
+            "rb",
+        ) as f:
+            imdb_test: T_intentDB = pickle.load(f)
+
+        db = imdb_train
+        for imdb in [imdb_val, imdb_test]:
+            for vid in imdb:
+                if vid not in db:
+                    db[vid] = imdb[vid]
+
+        del imdb_train, imdb_val, imdb_test
 
     if args.checkpoint_path != "ckpts":
         args = load_args(args.dataset_root_path, args.checkpoint_path)
@@ -489,6 +767,9 @@ def main(args: DefaultArguments):
             tracker_wrapper,
             return_dict=True,
         )
+    elif tracker_type == "demo":
+        assert db is not None, f"Did not load db, thus gt annotations cannot be loaded"
+        pipeline_wrapper = GTTrackingIntentPipelineWrapper(args, model, db, True)
     else:
         raise ValueError(f"Invalid tracker type: {tracker_type}")
 
@@ -518,6 +799,8 @@ if __name__ == "__main__":
     _ = parser.add_argument("--save_output", "-so", action="store_true")
 
     _ = parser.add_argument("--output", "-o", type=str, default="pipeline.avi")
+
+    _ = parser.add_argument("--load_db", "-l", action="store_true")
 
     args = parser.parse_args()
 
