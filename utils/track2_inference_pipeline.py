@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import colorsys
 import hashlib
-import os
 import traceback
 from collections import deque
-from copy import deepcopy
 from pathlib import Path
 
 import cv2
@@ -19,9 +17,7 @@ from torch import nn
 from torch.utils.data import default_collate
 from torchvision.transforms import v2
 from tqdm.auto import tqdm
-from typing_extensions import override
 from ultralytics import YOLO
-from ultralytics.engine.results import Results
 
 from data.custom_dataset import T_intentBatch, T_intentSample
 from eval import load_args, load_model_state_dict
@@ -35,7 +31,7 @@ from models.pose_pipeline.pose import (
     YOLOPipelineModelWrapper,
     YOLOTrackerWrapper,
 )
-from opts import get_opts, init_args
+from opts import init_args
 from utils.args import DefaultArguments
 from utils.cuda import *
 from utils.plotting import PipelinePlotter, PosePlotter
@@ -193,10 +189,10 @@ def scale_bboxes_up(
             raise ValueError(f"Invalid scale type: `{type(scale)}`")
 
     if isinstance(bboxes, torch.Tensor):
-        bboxes = bboxes.detach().cpu().numpy()
+        bboxes: npt.NDArray[np.float_] = bboxes.detach().cpu().numpy()
 
-    bboxes[:, 0::2] = bboxes[:, 0::2] * scale_x
-    bboxes[:, 1::2] = bboxes[:, 1::2] * scale_y
+    bboxes[..., 0::2] = bboxes[..., 0::2] * scale_x
+    bboxes[..., 1::2] = bboxes[..., 1::2] * scale_y
 
     return bboxes
 
@@ -304,8 +300,11 @@ def infer(
 
                 batch_tensor: T_intentBatch = default_collate([sample])
 
-                results: PipelineResults = pipeline_model(batch_tensor)
+                results: PipelineResults | None = pipeline_model(batch_tensor)
                 _ = buffer.popleft()
+
+                if results is None:
+                    raise DirtyGotoException
 
                 assert (
                     results.bboxes.ndim == 3

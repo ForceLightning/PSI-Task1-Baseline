@@ -32,6 +32,7 @@ from models.pose_pipeline.pose import (
     BaseTracker,
     HRNetPipelineModelWrapper,
     HRNetTrackerWrapper,
+    PipelineResults,
     PipelineWrapper,
     TrackerWrapper,
     YOLOPipelineModelWrapper,
@@ -40,7 +41,7 @@ from models.pose_pipeline.pose import (
 from opts import init_args
 from utils.args import DefaultArguments
 from utils.cuda import *
-from utils.yolo_pipeline_inference import (
+from utils.track2_inference_pipeline import (
     DirtyGotoException,
     id_to_color,
     plot_box_on_img,
@@ -113,13 +114,7 @@ class IntentPipelineResults:
 
 class YOLOIntentPipelineWrapper(YOLOPipelineModelWrapper):
     @override
-    def forward(self, x: T_intentBatch) -> torch.Tensor | IntentPipelineResults | None:
-        tracks: dict[
-            int,
-            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
-        ] = {}
-        imgs, tracks = self._tracker_infer_intent_batch(x)
-
+    def generate_samples(self, imgs, tracks, x):
         ts = imgs.shape[0]
 
         samples: list[T_intentSample] = []
@@ -164,23 +159,19 @@ class YOLOIntentPipelineWrapper(YOLOPipelineModelWrapper):
             }
             samples.append(sample)
 
-        if len(samples) == 0:
-            return None
+        return samples
 
-        batch_tensor: T_intentBatch = default_collate(samples)
-        preds: torch.Tensor = self.model(batch_tensor)
+    @override
+    def pack_preds(self, x, preds):
         preds = F.sigmoid(preds)
 
         if preds.ndim == 0:
             preds = preds.unsqueeze(0)
 
         if self.return_dict:
-            return IntentPipelineResults(
-                batch_tensor["original_bboxes"],
-                preds,
-                batch_tensor["bbox_conf"],
+            return PipelineResults(
+                bboxes=x["original_bboxes"], bbox_conf=x["bbox_conf"], intent=preds
             )
-
         return preds
 
 
@@ -195,20 +186,8 @@ class HRNetIntentPipelineWrapper(HRNetPipelineModelWrapper):
         super().__init__(args, model, tracker, return_dict=return_dict)
 
     @override
-    def forward(self, x: T_intentBatch) -> torch.Tensor | IntentPipelineResults | None:
-        imgs, tracks = self._tracker_infer_intent_batch(x)
-
+    def generate_samples(self, imgs, tracks, x):
         ts = imgs.shape[0]
-
-        if (
-            len(tracks.keys()) == 0
-            or self.tracker._frame_count < self.args.observe_length
-        ):
-            preds = torch.zeros((1, self.args.max_track_size, 4), dtype=torch.float16)
-            if self.return_dict:
-                return None
-            return preds
-
         samples: list[T_intentSample] = []
 
         for track_id, (
@@ -251,27 +230,26 @@ class HRNetIntentPipelineWrapper(HRNetPipelineModelWrapper):
             }
             samples.append(sample)
 
-        if len(samples) == 0:
-            return None
+        return samples
 
-        batch_tensor: T_intentBatch = default_collate(samples)
-        preds: torch.Tensor = self.model(batch_tensor)
+    @override
+    def pack_preds(self, x, preds):
         preds = F.sigmoid(preds)
 
         if preds.ndim == 0:
             preds = preds.unsqueeze(0)
 
         if self.return_dict:
-            return IntentPipelineResults(
-                batch_tensor["original_bboxes"],
-                preds,
-                batch_tensor["bbox_conf"],
+            return PipelineResults(
+                bboxes=x["original_bboxes"],
+                bbox_conf=x["bbox_conf"],
+                intent=preds,
             )
 
         return preds
 
 
-class GTTrackingIntentPipelineWrapper(nn.Module, PipelineWrapper):
+class GTTrackingIntentPipelineWrapper(PipelineWrapper):
     def __init__(
         self,
         args: DefaultArguments,
@@ -284,33 +262,6 @@ class GTTrackingIntentPipelineWrapper(nn.Module, PipelineWrapper):
         self.model = model
         self.db = db
         self.return_dict = return_dict
-
-    def _tracker_infer_intent_batch(self, x: T_intentBatch) -> tuple[
-        torch.Tensor,
-        dict[
-            int,
-            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
-        ],
-    ]:
-        pass
-
-    def _tracker_infer_intent_deque(self, x: deque[cvt.MatLike]) -> tuple[
-        npt.NDArray[np.uint8],
-        dict[
-            int,
-            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
-        ],
-    ]:
-        pass
-
-    def _tracker_infer_intent_ndarray(self, x: npt.NDArray[np.uint8]) -> tuple[
-        npt.NDArray[np.uint8],
-        dict[
-            int,
-            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
-        ],
-    ]:
-        pass
 
     def __getitem__(self, video_id: str, frames: Sequence[int]) -> (
         dict[
@@ -400,9 +351,6 @@ class GTTrackingIntentPipelineWrapper(nn.Module, PipelineWrapper):
                 continue
 
             bbox = torch.from_numpy(np.asarray(annotations["bbox"], dtype=np.float_))
-            # bbox[:, 0::2] = bbox[:, 0::2] / self.args.image_shape[0]
-            # bbox[:, 1::2] = bbox[:, 1::2] / self.args.image_shape[1]
-
             bbox_conf = torch.from_numpy(
                 np.asarray(annotations["bbox_conf"], dtype=np.float_)
             )
@@ -421,23 +369,23 @@ class GTTrackingIntentPipelineWrapper(nn.Module, PipelineWrapper):
 
         return res
 
-    def forward(self, x: T_intentBatch) -> torch.Tensor | IntentPipelineResults | None:
+    @override
+    def get_imgs_and_tracks(self, x):
         imgs = x["image"]
-
-        ts = imgs.shape[0] if isinstance(imgs, np.ndarray) else len(imgs)
+        assert not isinstance(imgs, list), "imgs should not be an empty list"
 
         video_id: str = x["video_id"][0][0]
         frames: list[int] = x["frames"]
 
         tracks = self.__getitem__(video_id, frames)
-        preds: torch.Tensor = torch.zeros(
-            (1, self.args.max_track_size, 4), dtype=torch.float32
-        )
-        if tracks is None:
-            if self.return_dict:
-                return None
-            return preds
 
+        assert tracks is not None, "tracks is `None`!"
+
+        return imgs, tracks
+
+    @override
+    def generate_samples(self, imgs, tracks, x):
+        ts = imgs.shape[0]
         samples: list[T_intentSample] = []
 
         for track_id, (
@@ -480,21 +428,18 @@ class GTTrackingIntentPipelineWrapper(nn.Module, PipelineWrapper):
             }
             samples.append(sample)
 
-        if len(samples) == 0:
-            if self.return_dict:
-                return None
-            return preds
+        return samples
 
-        batch_tensor: T_intentBatch = default_collate(samples)
-        preds = self.model(batch_tensor)
+    @override
+    def pack_preds(self, x, preds):
         preds = F.sigmoid(preds)
 
         if preds.ndim == 0:
             preds = preds.unsqueeze(0)
 
         if self.return_dict:
-            bbox = batch_tensor["original_bboxes"]
-            return IntentPipelineResults(bbox, preds, batch_tensor["bbox_conf"])
+            bbox = x["original_bboxes"]
+            return PipelineResults(bboxes=bbox, intent=preds, bbox_conf=x["bbox_conf"])
         return preds
 
 
@@ -575,6 +520,9 @@ def infer(
 
                 if results is None:
                     raise DirtyGotoException("No results returned.")
+
+                assert results.bbox_conf is not None
+                assert results.intent is not None
 
                 # NOTE: This is just to avoid iterating over a 0-d tensor, there should
                 # be a better way.

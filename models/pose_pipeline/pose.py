@@ -16,7 +16,6 @@ from cv2 import typing as cvt
 from numpy import typing as npt
 from torch import nn
 from torch.utils.data import default_collate
-from torch.utils.data._utils import pin_memory
 from tqdm.auto import tqdm
 from typing_extensions import override
 from ultralytics import YOLO
@@ -28,7 +27,6 @@ from database.create_database import create_database
 from misc.utils import find_person_id_associations
 from models.build_model import build_model
 from models.model_interfaces import ITSTransformerWrapper
-from models.traj_modules.model_transformer_traj_bbox import TransformerTrajBbox
 from opts import get_opts
 from SimpleHRNet import SimpleHRNet
 from utils.args import DefaultArguments
@@ -58,65 +56,70 @@ class TrackerWrapper(metaclass=abc.ABCMeta):
         pass
 
 
-class PipelineWrapper(metaclass=abc.ABCMeta):
+class PipelineWrapper(nn.Module, metaclass=abc.ABCMeta):
     model: nn.Module
     tracker: TrackerWrapper
     return_dict: bool = False
     return_pose: bool = False
 
     @abc.abstractmethod
-    def _tracker_infer_intent_batch(self, x: T_intentBatch) -> tuple[
-        torch.Tensor,
+    def get_imgs_and_tracks(
+        self,
+        x: T_intentBatch,
+    ) -> tuple[
+        npt.NDArray[np.uint8] | torch.Tensor,
         dict[
             int,
             tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
         ],
     ]:
-        """Infers from a batch of T_intentBatch data.
-
-        :param T_intentBatch x: Batch of data to infer from.
-        :return: tuple of images and tracks in format {track_id: (bboxes, poses, pose
-        masks, bbox conf, pose conf)}
-        :rtype: tuple[torch.Tensor, dict[int, tuple[torch.Tensor, torch.Tensor,
-        torch.Tensor, torch.Tensor]]]
-        """
         pass
 
     @abc.abstractmethod
-    def _tracker_infer_intent_ndarray(self, x: npt.NDArray[np.uint8]) -> tuple[
-        npt.NDArray[np.uint8],
-        dict[
-            int,
-            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
-        ],
-    ]:
-        """Infers from a single frame of data.
-
-        :param npt.NDArray[np.uint8] x: Single frame of data to infer from.
-        :return: tuple of images and tracks in format {track_id: (bboxes, poses, pose
-        masks, bbox conf)}
-        :rtype: tuple[npt.NDArray[np.uint8], dict[int, tuple[torch.Tensor, torch.Tensor,
-        torch.Tensor, torch.Tensor]]]
-        """
+    def generate_samples(
+        self,
+        imgs: npt.NDArray[np.uint8] | torch.Tensor,
+        tracks: dict[int, tuple[torch.Tensor, ...]],
+        x: T_intentBatch,
+    ) -> list[T_intentSample]:
         pass
 
     @abc.abstractmethod
-    def _tracker_infer_intent_deque(self, x: deque[cvt.MatLike]) -> tuple[
-        npt.NDArray[np.uint8],
-        dict[
+    def pack_preds(
+        self,
+        x: T_intentBatch,
+        preds: torch.Tensor,
+    ) -> torch.Tensor | PipelineResults | None:
+        pass
+
+    @torch.no_grad()
+    def forward(self, x: T_intentBatch) -> torch.Tensor | PipelineResults | None:
+        tracks: dict[
             int,
             tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
-        ],
-    ]:
-        """Infers from a deque of frames.
+        ] = {}
+        imgs, tracks = self.get_imgs_and_tracks(x)
 
-        :param deque[cvt.MatLike] x: Deque of frames to infer from.
-        :return: tuple of images and tracks in format {track_id: (bboxes, poses, pose
-        masks, bbox conf)}
-        :rtype: tuple[npt.NDArray[np.uint8], dict[int, tuple[torch.Tensor, torch.Tensor,
-        torch.Tensor, torch.Tensor]]]
-        """
-        pass
+        preds: torch.Tensor
+
+        if len(tracks.keys()) == 0:
+            preds = torch.zeros((1, self.args.max_track_size, 4), dtype=torch.float32)
+            return None
+
+        samples: list[T_intentSample] = self.generate_samples(imgs, tracks, x)
+
+        if len(samples) == 0:
+            return None
+
+        batch_tensor: T_intentBatch = default_collate(samples)
+
+        model_instance = getattr(self.model, "module", self.model)
+
+        if isinstance(model_instance, ITSTransformerWrapper):
+            preds = model_instance.generate(batch_tensor)
+        else:
+            preds = model_instance(batch_tensor)
+        return self.pack_preds(batch_tensor, preds)
 
 
 class YOLOTrackerWrapper(TrackerWrapper):
@@ -324,12 +327,13 @@ class YOLOTrackerWrapper(TrackerWrapper):
 @dataclass
 class PipelineResults:
     bboxes: torch.Tensor
-    bbox_conf: torch.Tensor | npt.NDArray[np.float_] | None
-    poses: torch.Tensor | None
-    pose_conf: torch.Tensor | npt.NDArray[np.float_] | None
+    bbox_conf: torch.Tensor | npt.NDArray[np.float_] | None = None
+    poses: torch.Tensor | None = None
+    pose_conf: torch.Tensor | npt.NDArray[np.float_] | None = None
+    intent: torch.Tensor | None = None
 
 
-class YOLOPipelineModelWrapper(nn.Module, PipelineWrapper):
+class YOLOPipelineModelWrapper(PipelineWrapper):
     def __init__(
         self,
         args: DefaultArguments,
@@ -354,7 +358,6 @@ class YOLOPipelineModelWrapper(nn.Module, PipelineWrapper):
             deque(maxlen=args.observe_length)
         )
 
-    @override
     def _tracker_infer_intent_batch(self, x: T_intentBatch) -> tuple[
         torch.Tensor,
         dict[
@@ -372,7 +375,6 @@ class YOLOPipelineModelWrapper(nn.Module, PipelineWrapper):
         tracks = self.yolo_tracker(imgs[-1].unsqueeze(0))
         return imgs, tracks
 
-    @override
     def _tracker_infer_intent_ndarray(self, x: npt.NDArray[np.uint8]) -> tuple[
         npt.NDArray[np.uint8],
         dict[
@@ -382,14 +384,12 @@ class YOLOPipelineModelWrapper(nn.Module, PipelineWrapper):
     ]:
         if not self.persistent_tracker:
             self.yolo_tracker.reset_tracker()
-        im: list[npt.NDArray[np.uint8]] = list(x)  # equivalent to [i for i in x]
         tracks: dict[
             int,
             tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
         ] = self.yolo_tracker(x[-1])
         return x, tracks
 
-    @override
     def _tracker_infer_intent_deque(self, x: deque[cvt.MatLike]) -> tuple[
         npt.NDArray[np.uint8],
         dict[
@@ -407,29 +407,14 @@ class YOLOPipelineModelWrapper(nn.Module, PipelineWrapper):
         return np.asarray(im), tracks
 
     @override
-    def forward(self, x: T_intentBatch) -> torch.Tensor | PipelineResults:
-        tracks: dict[
-            int,
-            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
-        ] = {}
+    def get_imgs_and_tracks(self, x):
         imgs, tracks = self._tracker_infer_intent_batch(x)
+        return imgs, tracks
 
+    @override
+    def generate_samples(self, imgs, tracks, x: T_intentBatch) -> list[T_intentSample]:
         ts = imgs.shape[0]
-
-        if (
-            len(tracks.keys()) == 0
-            or len(self.yolo_tracker.frame_cache) < self.args.observe_length
-        ):
-            preds = torch.zeros((1, self.args.max_track_size, 4), dtype=torch.float16)
-            if self.return_dict:
-                return PipelineResults(preds, None, None, None)
-            return preds
-
         samples: list[T_intentSample] = []
-        # TODO(chris): Take the detected kps and boxes and convert to a format that the
-        # inner prediction model can parse.
-
-        # construct the batch for input to the prediction head.
         for track_id, (
             boxes,
             poses,
@@ -437,6 +422,11 @@ class YOLOPipelineModelWrapper(nn.Module, PipelineWrapper):
             box_confs,
             pose_confs,
         ) in tracks.items():
+            if (
+                len(boxes) < self.args.observe_length
+                or len(poses) < self.args.observe_length
+            ):
+                continue
             sample: T_intentSample = {  # type: ignore[reportAssignmentType]
                 "image": imgs,
                 "pose": poses,
@@ -457,34 +447,26 @@ class YOLOPipelineModelWrapper(nn.Module, PipelineWrapper):
             }
             samples.append(sample)
 
-        batch_tensor: T_intentBatch = default_collate(samples)
-        preds: torch.Tensor
+        return samples
 
-        # NOTE: Pose-based TS-Transformers are kinda broken with this implementation
-        # as they require poses from future timesteps to make a prediction.
-        model_instance = getattr(self.model, "module", self.model)
-        # if isinstance(model_instance, ITSTransformerWrapper):
-        if isinstance(model_instance, TransformerTrajBbox):
-            print("beep beep im a jeep")
-            preds = model_instance.generate(batch_tensor)
-        else:
-            preds = self.model(batch_tensor)
+    @override
+    def pack_preds(self, x, preds):
+        past_boxes = x["bboxes"].to(DEVICE)
+        future_boxes = preds.to(DEVICE)
+        past_future_boxes: torch.Tensor = torch.cat((past_boxes, future_boxes), dim=1)
 
-        past_future_boxes: torch.Tensor = torch.cat(
-            (batch_tensor["bboxes"], preds), dim=1
-        )
-
-        box_confs: torch.Tensor = batch_tensor["bbox_conf"]
+        box_confs: torch.Tensor = x["bbox_conf"]
+        pose_confs: torch.Tensor = x["pose_conf"]
 
         if self.return_dict:
             if self.return_pose:
                 return PipelineResults(
-                    past_future_boxes,
-                    box_confs,
-                    batch_tensor["pose"],
-                    batch_tensor["pose_conf"],
+                    bboxes=past_future_boxes,
+                    bbox_conf=box_confs,
+                    poses=x["pose"],
+                    pose_conf=pose_confs,
                 )
-            return PipelineResults(past_future_boxes, box_confs, None, None)
+            return PipelineResults(bboxes=past_future_boxes, bbox_conf=box_confs)
 
         return preds
 
@@ -709,14 +691,14 @@ class HRNetTrackerWrapper(TrackerWrapper):
             # boxes[:, 2] = pts[:, :, 0].max(axis=1)
             # boxes[:, 3] = pts[:, :, 1].max(axis=1)
 
-            boxes[:, ::2] = boxes[:, ::2] / image.shape[0]
-            boxes[:, 1::2] = boxes[:, 1::2] / image.shape[1]
+            boxes[..., 0::2] = boxes[..., 0::2] / image.shape[0]
+            boxes[..., 1::2] = boxes[..., 1::2] / image.shape[1]
 
             boxes = np.clip(boxes, 0, 1)
 
             ret[person_id] = (
                 torch.from_numpy(boxes).type(FloatTensor).to(DEVICE),
-                torch.from_numpy(pts[:, :, :2][:, :, ::-1].copy())
+                torch.from_numpy(pts[..., :2][..., ::-1].copy())
                 .type(FloatTensor)
                 .to(DEVICE),
                 torch.ones((1, 4)).bool().to(DEVICE),
@@ -735,7 +717,7 @@ class HRNetTrackerWrapper(TrackerWrapper):
         self._next_person_id = 0
 
 
-class HRNetPipelineModelWrapper(nn.Module, PipelineWrapper):
+class HRNetPipelineModelWrapper(PipelineWrapper):
     def __init__(
         self,
         args: DefaultArguments,
@@ -751,7 +733,6 @@ class HRNetPipelineModelWrapper(nn.Module, PipelineWrapper):
         self.return_dict = return_dict
         self.return_pose = return_pose
 
-    @override
     def _tracker_infer_intent_batch(self, x: T_intentBatch) -> tuple[
         torch.Tensor,
         dict[
@@ -768,7 +749,6 @@ class HRNetPipelineModelWrapper(nn.Module, PipelineWrapper):
         pts = self.tracker(imgs[-1].unsqueeze(0))
         return imgs, pts
 
-    @override
     def _tracker_infer_intent_ndarray(self, x: npt.NDArray[np.uint8]) -> tuple[
         npt.NDArray[np.uint8],
         dict[
@@ -776,11 +756,9 @@ class HRNetPipelineModelWrapper(nn.Module, PipelineWrapper):
             tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
         ],
     ]:
-        im: list[npt.NDArray[np.uint8]] = list(x)
         tracks = self.tracker(x[-1])
         return x, tracks
 
-    @override
     def _tracker_infer_intent_deque(self, x: deque[cvt.MatLike]) -> tuple[
         npt.NDArray[np.uint8],
         dict[
@@ -793,23 +771,13 @@ class HRNetPipelineModelWrapper(nn.Module, PipelineWrapper):
         return np.asarray(im), tracks
 
     @override
-    @torch.no_grad()
-    def forward(
-        self, x: T_intentBatch | npt.NDArray[np.uint8] | deque[cvt.MatLike]
-    ) -> torch.Tensor | PipelineResults:
+    def get_imgs_and_tracks(self, x):
         imgs, tracks = self._tracker_infer_intent_batch(x)
+        return imgs, tracks
 
+    @override
+    def generate_samples(self, imgs, tracks, x):
         ts = imgs.shape[0]
-
-        if (
-            len(tracks.keys()) == 0
-            or self.tracker._frame_count < self.args.observe_length
-        ):
-            preds = torch.zeros((1, self.args.max_track_size, 4), dtype=torch.float16)
-            if self.return_dict:
-                return PipelineResults(preds, None, None, None)
-            return preds
-
         samples: list[T_intentSample] = []
 
         for track_id, (
@@ -844,38 +812,25 @@ class HRNetPipelineModelWrapper(nn.Module, PipelineWrapper):
             }
             samples.append(sample)
 
-        try:
-            batch_tensor: T_intentBatch = default_collate(samples)
-            if len(batch_tensor) == 0:
-                raise IndexError
-        except IndexError:
-            preds = torch.zeros((1, self.args.predict_length, 4), dtype=torch.float16)
-            if self.return_dict:
-                return PipelineResults(preds, None, None, None)
-            return preds
+        return samples
 
-        preds: torch.Tensor
-
-        model_instance = getattr(self.model, "module", self.model)
-        # if isinstance(model_instance, ITSTransformerWrapper):
-        if isinstance(model_instance, TransformerTrajBbox):
-            print(batch_tensor["total_frames"])
-            preds = model_instance.generate(batch_tensor)
-        else:
-            preds = self.model(batch_tensor)
-
+    @override
+    def pack_preds(self, x, preds):
+        past_boxes = x["original_bboxes"].to(DEVICE)
+        future_boxes = preds.to(DEVICE)
         past_future_boxes: torch.Tensor = torch.cat(
-            (batch_tensor["bboxes"], preds),
+            (past_boxes, future_boxes),
             dim=1,
         )
 
-        box_confs: torch.Tensor = batch_tensor["bbox_conf"]
+        box_confs: torch.Tensor = x["bbox_conf"]
+        pose_confs: torch.Tensor = x["pose_conf"]
 
         if self.return_dict:
             res = PipelineResults(past_future_boxes, box_confs, None, None)
             if self.return_pose:
-                res.poses = batch_tensor["pose"]
-                res.pose_conf = batch_tensor["pose_conf"]
+                res.poses = x["pose"]
+                res.pose_conf = pose_confs
             return res
 
         return preds
