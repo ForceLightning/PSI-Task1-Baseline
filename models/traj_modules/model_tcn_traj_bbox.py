@@ -199,3 +199,49 @@ class TCNTrajBboxInt(TCNTrajBbox):
             -1, self.predict_length, self.output_dim
         )
         return output
+
+
+class TCNTrajBboxPose(TCNTrajBbox):
+    """A TCN model for trajectory prediction with bbox input and pose data."""
+
+    @overload
+    def forward(self, data: T_intentBatch) -> torch.Tensor: ...
+
+    @overload
+    def forward(self, data: tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor: ...
+
+    @override
+    def forward(
+        self, data: T_intentBatch | tuple[torch.Tensor, torch.Tensor]
+    ) -> torch.Tensor:
+        enc_input: torch.Tensor
+        if isinstance(data, dict):
+            bbox: torch.Tensor = (
+                data["bboxes"][:, : self.args.observe_length, :]
+                .type(FloatTensor)
+                .to(DEVICE)
+            )
+            poses: torch.Tensor = (
+                data["pose"][:, : self.args.observe_length, :]
+                .type(FloatTensor)
+                .to(DEVICE)
+            )
+            poses = poses.reshape(-1, self.args.observe_length, 34)
+            assert bbox.shape[1] == self.args.observe_length
+            # enc_input = bbox
+            enc_input = torch.cat([bbox, poses], dim=2)
+        else:
+            bbox, poses = data
+            poses = poses.reshape(-1, self.args.observe_length, 34)
+            enc_input = torch.cat((bbox, poses), dim=2)
+
+        tcn_output: torch.Tensor = self.tcn(enc_input.transpose(1, 2)).transpose(1, 2)
+        tcn_last_output = tcn_output[:, -1:, :]
+
+        output: torch.Tensor = self.fc(
+            tcn_last_output
+        )  # bs x output_dim * predict_length
+        output = self.activation(output).reshape(
+            -1, self.predict_length, self.output_dim
+        )
+        return output

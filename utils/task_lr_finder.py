@@ -22,6 +22,7 @@ from utils.lr_finder import LRFinder, TrainDataLoaderIter
 
 
 class TrainIterBbox(TrainDataLoaderIter):
+
     def __init__(self, ag: DefaultArguments, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.args = ag
@@ -32,11 +33,23 @@ class TrainIterBbox(TrainDataLoaderIter):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         return (
             batch_data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
-            # / self.args.image_shape[0]
         ), batch_data["bboxes"][:, self.args.observe_length :, :].type(FloatTensor)
-        # / self.args.image_shape[
-        #     0
-        # ]
+
+
+class TrainIterBboxPose(TrainDataLoaderIter):
+    def __init__(self, ag: DefaultArguments, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.args = ag
+
+    @override
+    def inputs_labels_from_batch(
+        self, batch_data: T_intentBatch
+    ) -> tuple[tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
+        bbox = batch_data["bboxes"][:, : self.args.observe_length, :].type(FloatTensor)
+        pose = batch_data["pose"][:, : self.args.observe_length, :].type(FloatTensor)
+        out = batch_data["bboxes"][:, self.args.observe_length :, :].type(FloatTensor)
+
+        return (bbox, pose), out
 
 
 class TrainIterGlobalIntent(TrainDataLoaderIter):
@@ -172,7 +185,10 @@ def main(args: DefaultArguments):
     criterion: nn.Module
     if "global" not in args.model_name:
         if "transformer" not in args.model_name:
-            train_data_iter = TrainIterBbox(args, train_loader)
+            if "pose" not in args.model_name:
+                train_data_iter = TrainIterBbox(args, train_loader)
+            else:
+                train_data_iter = TrainIterBboxPose(args, train_loader)
             criterion = torch.nn.L1Loss().to(DEVICE)
         else:
             if "pose" in args.model_name:
@@ -256,10 +272,12 @@ if __name__ == "__main__":
             args.predict_length = 45
             # args.model_name = "tcn_traj_bbox"
             # args.model_name = "tcn_traj_bbox_int"
+            # args.model_name = "tcn_traj_bbox_pose"
             # args.model_name = "tcn_traj_global"
             # args.model_name = "tcan_traj_bbox"
             # args.model_name = "tcan_traj_bbox_int"
-            args.model_name = "tcan_traj_global"
+            args.model_name = "tcan_traj_bbox_pose"
+            # args.model_name = "tcan_traj_global"
             # args.model_name = "transformer_traj_bbox"
             # args.model_name = "transformer_traj_bbox_pose"
             # args.model_name = "transformer_traj_intent_bbox_pose"

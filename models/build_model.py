@@ -14,8 +14,16 @@ from models.driving_modules.model_tcn_driving_global import ResTCNDrivingGlobal
 from models.intent_modules.model_lstm_int_bbox import LSTMIntBbox
 from models.intent_modules.model_tcn_int_bbox import TCNINTBbox
 from models.traj_modules.model_lstmed_traj_bbox import LSTMedTrajBbox
-from models.traj_modules.model_tcan_traj_bbox import TCANTrajBbox, TCANTrajBboxInt
-from models.traj_modules.model_tcn_traj_bbox import TCNTrajBbox, TCNTrajBboxInt
+from models.traj_modules.model_tcan_traj_bbox import (
+    TCANTrajBbox,
+    TCANTrajBboxInt,
+    TCANTrajBboxPose,
+)
+from models.traj_modules.model_tcn_traj_bbox import (
+    TCNTrajBbox,
+    TCNTrajBboxInt,
+    TCNTrajBboxPose,
+)
 from models.traj_modules.model_tcn_traj_global import TCANTrajGlobal, TCNTrajGlobal
 from models.traj_modules.model_transformer_traj_bbox import (
     TransformerTrajBbox,
@@ -60,12 +68,16 @@ def build_model(
             model = get_tcn_traj_bbox(args).to(DEVICE)
         case "tcn_traj_bbox_int":
             model = get_tcn_traj_bbox_int(args).to(DEVICE)
+        case "tcn_traj_bbox_pose":
+            model = get_tcn_traj_bbox_pose(args).to(DEVICE)
         case "tcn_traj_global":
             model = get_tcn_traj_bbox_global(args).to(DEVICE)
         case "tcan_traj_bbox":
             model = get_tcan_traj_bbox(args).to(DEVICE)
         case "tcan_traj_bbox_int":
             model = get_tcan_traj_bbox_int(args).to(DEVICE)
+        case "tcan_traj_bbox_pose":
+            model = get_tcan_traj_bbox_pose(args).to(DEVICE)
         case "tcan_traj_global":
             model = get_tcan_traj_bbox_global(args).to(DEVICE)
         case "transformer_traj_bbox":
@@ -206,6 +218,30 @@ def get_tcn_traj_bbox_int(args: DefaultArguments) -> TCNTrajBboxInt:
     return model
 
 
+def get_tcn_traj_bbox_pose(args: DefaultArguments) -> TCNTrajBboxPose:
+    """Gets the TCN model for trajectory prediction with intent.
+    :param DefaultArguments args: Training arguments.
+    """
+    model_configs = {}
+    model_configs["traj_model_opts"] = {
+        "enc_in_dim": 38,
+        "enc_out_dim": 128,
+        "dec_in_emb_dim": 0,
+        "dec_out_dim": 128,
+        "output_dim": 4,
+        "n_layers": args.n_layers,
+        "dropout": 0.125,
+        "kernel_size": args.kernel_size,
+        "observe_length": args.observe_length,
+        "predict_length": args.predict_length,
+        "return_sequence": True,
+        "output_activation": "None",
+    }
+    args.model_configs = model_configs
+    model = TCNTrajBboxPose(args, model_configs["traj_model_opts"])
+    return model
+
+
 def get_tcan_traj_bbox(args: DefaultArguments) -> TCANTrajBbox:
     """Gets the TCAN model for trajectory prediction.
     :param DefaultArguments args: Training arguments.
@@ -252,6 +288,31 @@ def get_tcan_traj_bbox_int(args: DefaultArguments) -> TCANTrajBboxInt:
     }
     args.model_configs = model_configs
     model = TCANTrajBboxInt(args, model_configs["traj_model_opts"])
+    return model
+
+
+def get_tcan_traj_bbox_pose(args: DefaultArguments) -> TCANTrajBboxPose:
+    """Gets the TCAN model for trajectory prediction with intent.
+    :param DefaultArguments args: Training arguments.
+    """
+    model_configs = {}
+    model_configs["traj_model_opts"] = {
+        "enc_in_dim": 38,
+        "enc_out_dim": 80,
+        "dec_in_emb_dim": 0,
+        "dec_out_dim": 80,
+        "output_dim": 4,
+        "n_layers": args.n_layers,
+        "dropout": 0.125,
+        "kernel_size": args.kernel_size,
+        "observe_length": args.observe_length,
+        "predict_length": args.predict_length,
+        "return_sequence": True,
+        "output_activation": "None",
+        "num_heads": 2,
+    }
+    args.model_configs = model_configs
+    model = TCANTrajBboxPose(args, model_configs["traj_model_opts"])
     return model
 
 
