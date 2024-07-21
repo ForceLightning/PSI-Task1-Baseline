@@ -4,7 +4,6 @@ from copy import deepcopy
 from typing import Any
 
 import numpy as np
-from numpy import typing as npt
 from torch.utils.data import DataLoader
 
 from data.custom_dataset import (
@@ -58,6 +57,7 @@ def get_dataloader(
     ) as fid:
         imdb_val = pickle.load(fid)
     val_seq = generate_data_sequence("val", imdb_val, args)
+    test_seq: T_intentSeq | T_drivingSeq | None = None
     if load_test:
         with open(
             os.path.join(
@@ -73,7 +73,7 @@ def get_dataloader(
     )  # returned tracks
     val_d = get_train_val_data(val_seq, args, overlap=args.seq_overlap_rate)
     test_d = None
-    if load_test:
+    if load_test and test_seq:
         test_d = get_test_data(test_seq, args, overlap=args.test_seq_overlap_rate)
 
     # Create video dataset and dataloader

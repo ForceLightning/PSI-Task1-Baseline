@@ -208,11 +208,11 @@ def main(args: DefaultArguments):
         case "ped_intent":
             args.database_file = "intent_database_train.pkl"
             args.intent_model = True
-            args.batch_size = [256]
+            args.batch_size = [256]  # type: ignore[reportAttributeAccessIssue]
             # intent prediction
             args.intent_num = 2  # 3 for 'major' vote; 2 for mean intent
             args.intent_type = "mean"  # >= 0.5 --> 1 (cross); < 0.5 --> 0 (not cross)
-            args.intent_loss = ["bce"]
+            args.intent_loss = ["bce"]  # type: ignore[reportAttributeAccessIssue]
             args.intent_disagreement = (
                 1  # -1: not use disagreement 1: use disagreement to reweigh samples
             )
@@ -240,7 +240,7 @@ def main(args: DefaultArguments):
             # args.traj_loss = ["bbox_l1"]
             # args.batch_size = [256]
             # args.batch_size = [64]
-            args.batch_size = [256]
+            args.batch_size = [256]  # type: ignore[reportAttributeAccessIssue]
             args.predict_length = 45
             # args.model_name = "lstm_traj_bbox"
             # args.model_name = "tcn_traj_bbox"
@@ -270,7 +270,7 @@ def main(args: DefaultArguments):
             args.database_file = "driving_database_train.pkl"
             args.driving_loss = ["cross_entropy"]
             # args.batch_size = [64]
-            args.batch_size = [256]
+            args.batch_size = [256]  # type: ignore[reportAttributeAccessIssue]
             # args.model_name = "reslstm_driving_global"
             args.model_name = "restcn_driving_global"
             args.loss_weights = {
@@ -281,7 +281,6 @@ def main(args: DefaultArguments):
             args.load_image = False
             args.backbone = "resnet50"
             args.freeze_backbone = True
-            # args.seq_overlap_rate = 0.1  # overlap rate for train/val set
             args.seq_overlap_rate = 1
             args.test_seq_overlap_rate = 1  # overlap for test set. if == 1, means overlap is one frame, following PIE
             args.predict_length = 1
