@@ -247,7 +247,10 @@ def infer(
     if save_video:
         fourcc = cv2.VideoWriter_fourcc(*"MJPG")
 
-    with tqdm(total=vid.get(cv2.CAP_PROP_FRAME_COUNT), leave=True) as pbar:
+    total_frames = int(vid.get(cv2.CAP_PROP_FRAME_COUNT))
+    time_elapsed: list[float] = []
+
+    with tqdm(total=total_frames, leave=True) as pbar:
         while True:
             _ = pbar.update(1)
             ret, im = vid.read()
@@ -374,32 +377,13 @@ def infer(
                         points_palette_samples=10,
                         flip_xy=True,
                     )
-                # last_poses = (
-                #     results.poses[:, -1, :, :].unsqueeze(1).detach().cpu().numpy()
-                # )
-                # last_confs = (
-                #     results.pose_conf[:, -1, :]
-                #     .unsqueeze(1)
-                #     .detach()
-                #     .cpu()
-                #     .numpy()
-                #     .reshape(-1, 1, 17, 1)
-                # )
-                # # extend last dim to 3 for plotting
-                # last_poses = np.concatenate(
-                #     [last_poses, last_confs],
-                #     axis=3,
-                # )
-                # last_poses = unscale_then_rescale_poses(
-                #     last_poses, (640, 640), args.image_shape
-                # )
-                # pose_plotter.plot_keypoints(im, last_poses)
             except DirtyGotoException:
                 continue
             except Exception as e:
                 pbar.write(f"Error: {e}, {frame_number:04d}, {traceback.format_exc()}")
                 break
             finally:
+                time_elapsed.append(pbar.format_dict["elapsed"] - sum(time_elapsed))
                 cv2.imshow("YOLO Tracker", im)
 
                 if save_video and video_writer:
@@ -414,6 +398,11 @@ def infer(
 
     vid.release()
     cv2.destroyAllWindows()
+
+    np_elapsed = np.array(time_elapsed[15:])
+    print(
+        f"Average time per frame: {np_elapsed.mean() * 1e3:0.3f}ms ± {np_elapsed.std() * 1e3:0.3f}ms"
+    )
 
 
 def main(args: DefaultArguments):
@@ -430,7 +419,6 @@ def main(args: DefaultArguments):
     args.traj_model = True
     args.traj_loss = ["bbox_l2"]
     args.model_name = "tcan_traj_bbox"
-    # args.model_name = "transformer_traj_bbox"
     args.loss_weights = {
         "loss_intent": 0.0,
         "loss_traj": 1.0,

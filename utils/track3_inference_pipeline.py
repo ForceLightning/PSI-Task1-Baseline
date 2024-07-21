@@ -130,7 +130,10 @@ def infer(
     video_id = os.path.normpath(source).split(os.sep)[-1]
     video_id = os.path.splitext(video_id)[0]
 
-    with tqdm(total=int(vid.get(cv2.CAP_PROP_FRAME_COUNT)), leave=True) as pbar:
+    total_frames = int(vid.get(cv2.CAP_PROP_FRAME_COUNT))
+    time_elapsed: list[float] = []
+
+    with tqdm(total=total_frames, leave=True) as pbar:
         while True:
             _ = pbar.update(1)
             ret, im = vid.read()
@@ -197,6 +200,10 @@ def infer(
                 )
                 break
             finally:
+                # Update time elapsed
+                time_elapsed.append(pbar.format_dict["elapsed"] - sum(time_elapsed))
+
+                # Display Image
                 cv2.imshow("Pedestrian Intent Prediction Pipeline", im)
 
                 if save_video and video_writer:
@@ -213,6 +220,11 @@ def infer(
 
     vid.release()
     cv2.destroyAllWindows()
+
+    np_elapsed = np.array(time_elapsed[15:])
+    print(
+        f"Average time per frame: {np_elapsed.mean() * 1e3:0.3f}ms ± {np_elapsed.std() * 1e3:0.3f}ms"
+    )
 
 
 def main(args: DefaultArguments):
@@ -247,7 +259,10 @@ def main(args: DefaultArguments):
 
     if args.checkpoint_path != "ckpts":
         args = load_args(args.dataset_root_path, args.checkpoint_path)
+
         args.freeze_backbone = freeze_backbone
+        args.load_image = True
+
         model = load_model_state_dict(args.checkpoint_path, model)
 
     transform = v2.Compose(
