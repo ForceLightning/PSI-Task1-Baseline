@@ -269,7 +269,7 @@ class SimpleHRNet:
             # print("v8 Detections",detections[0][1].boxes[0])
 
             boxes = np.empty((nof_people, 4), dtype=np.int32)
-            original_boxes = np.empty((nof_people, 5), dtype=np.int32)
+            original_boxes = np.empty((nof_people, 5), dtype=np.float_)
             # boxes = torch.empty((nof_people, 4),device=self.device)
             images = torch.empty(
                 (nof_people, 3, self.resolution[0], self.resolution[1]),
@@ -335,7 +335,6 @@ class SimpleHRNet:
                         image_crop = np.pad(image_crop, pad_tuple)
                     images[i] = self.transform(image_crop)
                     boxes[i] = [x1_new, y1_new, x2_new, y2_new]
-                    original_boxes[i] = [x1, y1, x2, y2, cls_conf]
                     # boxes[i] = torch.tensor([x1_new, y1_new, x2_new, y2_new])
             # elif detections and detections[0].boxes:
             elif (
@@ -357,7 +356,7 @@ class SimpleHRNet:
                     coords: list[float] = box.xyxy[0].tolist()
                     cls_pred: int = int(box.cls[0].item())
                     cls_conf: float = box.conf[0].item()
-                    original_boxes[i] = [*coords] + [cls_conf]
+                    original_boxes[i] = coords + [cls_conf]
                     x1, y1, x2, y2 = [int(x) for x in coords]
 
                     # Adapt detections to match HRNet input aspect ratio (as suggested by xtyDoge in issue #14)
@@ -546,7 +545,7 @@ class SimpleHRNet:
                 np.sum([len(d) for d in image_detections if d is not None])
             )
             boxes = np.empty((nof_people, 4), dtype=np.int32)
-            original_boxes = np.empty((nof_people, 5), dtype=np.int32)
+            original_boxes = np.empty((nof_people, 5), dtype=np.float_)
             images_tensor = torch.empty(
                 (nof_people, 3, self.resolution[0], self.resolution[1])
             )  # (height, width)
@@ -757,7 +756,7 @@ class SimpleHRNet:
 
         else:
             boxes = np.asarray([], dtype=np.int32)
-            original_boxes = np.asarray([], dtype=np.int32)
+            original_boxes = np.asarray([], dtype=np.float_)
             if self.multiperson:
                 pts = []
                 for _ in range(len(image_detections)):
