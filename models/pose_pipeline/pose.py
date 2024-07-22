@@ -4,6 +4,8 @@ import abc
 import ast
 import os
 from collections import deque
+from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -15,6 +17,7 @@ from boxmot.trackers.basetracker import BaseTracker
 from cv2 import typing as cvt
 from numpy import typing as npt
 from torch import nn
+from torch.nn import functional as F
 from torch.utils.data import default_collate
 from tqdm.auto import tqdm
 from typing_extensions import override
@@ -23,7 +26,7 @@ from ultralytics.engine.results import Results
 
 from data.custom_dataset import T_intentBatch, T_intentSample
 from data.prepare_data import get_dataloader
-from database.create_database import create_database
+from database.create_database import T_intentDB, create_database
 from misc.utils import find_person_id_associations
 from models.build_model import build_model
 from models.model_interfaces import ITSTransformerWrapper
@@ -45,8 +48,10 @@ class TrackerWrapper(metaclass=abc.ABCMeta):
 
         :param image: Singular frame to predict on.
         :type image: torch.Tensor | npt.NDArray[np.uint8] | cvt.MatLike
-        :return: Dictionary of track id: (bboxes, poses, pose masks, bbox confidence)
-        :rtype: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]
+        :return: Dictionary of track id: (bboxes, poses, pose masks, bbox confidence,
+        pose confidence)
+        :rtype: dict[int, tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
+        torch.Tensor]]
         """
         pass
 
@@ -103,7 +108,6 @@ class PipelineWrapper(nn.Module, metaclass=abc.ABCMeta):
         preds: torch.Tensor
 
         if len(tracks.keys()) == 0:
-            preds = torch.zeros((1, self.args.max_track_size, 4), dtype=torch.float32)
             return None
 
         samples: list[T_intentSample] = self.generate_samples(imgs, tracks, x)
@@ -696,14 +700,19 @@ class HRNetTrackerWrapper(TrackerWrapper):
 
             boxes = np.clip(boxes, 0, 1)
 
+            pts_conf: torch.Tensor = (
+                torch.from_numpy(pts[:, :, 2].copy()).type(FloatTensor).to(DEVICE)
+            )
+            pts_mask = (pts_conf == 0.0).bool()
+
             ret[person_id] = (
                 torch.from_numpy(boxes).type(FloatTensor).to(DEVICE),
                 torch.from_numpy(pts[..., :2][..., ::-1].copy())
                 .type(FloatTensor)
                 .to(DEVICE),
-                torch.ones((1, 4)).bool().to(DEVICE),
+                pts_mask,
                 torch.from_numpy(box_conf).type(FloatTensor).to(DEVICE),
-                torch.from_numpy(pts[:, :, 2].copy()).type(FloatTensor).to(DEVICE),
+                pts_conf,
             )
 
         return ret
@@ -792,11 +801,20 @@ class HRNetPipelineModelWrapper(PipelineWrapper):
                 or len(poses) < self.args.observe_length
             ):
                 continue
-            sample: T_intentSample = {
+
+            print(poses.min(), poses.max(), poses.mean(), poses.std())
+
+            # NOTE: This scales up the poses in a hardcoded manner.
+            scaled_poses = deepcopy(poses).type(FloatTensor)
+
+            scaled_poses[..., 0] = scaled_poses[..., 0] / 640.0 * 1280.0
+            scaled_poses[..., 1] = scaled_poses[..., 1] / 640.0 * 720.0
+
+            sample: T_intentSample = {  # type: ignore[reportAssignmentType]
                 "image": imgs,
-                "pose": poses,
+                "pose": scaled_poses,
                 "bboxes": boxes,
-                "frames": x["frames"],
+                "frames": x["frames"].squeeze(),
                 "ped_id": [f"track_{track_id:03d}"] * ts,
                 "video_id": x["video_id"],
                 "total_frames": x["total_frames"].squeeze(),
@@ -818,20 +836,240 @@ class HRNetPipelineModelWrapper(PipelineWrapper):
     def pack_preds(self, x, preds):
         past_boxes = x["original_bboxes"].to(DEVICE)
         future_boxes = preds.to(DEVICE)
-        past_future_boxes: torch.Tensor = torch.cat(
-            (past_boxes, future_boxes),
-            dim=1,
-        )
 
         box_confs: torch.Tensor = x["bbox_conf"]
         pose_confs: torch.Tensor = x["pose_conf"]
 
         if self.return_dict:
-            res = PipelineResults(past_future_boxes, box_confs, None, None)
+            res = PipelineResults(past_boxes, future_boxes, box_confs)
             if self.return_pose:
                 res.poses = x["pose"]
                 res.pose_conf = pose_confs
             return res
+
+        return preds
+
+
+class GTTrackingIntentPipelineWrapper(PipelineWrapper):
+    def __init__(
+        self,
+        args: DefaultArguments,
+        model: nn.Module,
+        db: T_intentDB,
+        return_dict: bool = False,
+        normalize_bbox: bool = False,
+    ):
+        super().__init__()
+        self.args = args
+        self.model = model
+        self.db = db
+        self.return_dict = return_dict
+        self.normalize_bbox = normalize_bbox
+
+    def __getitem__(self, video_id: str, frames: Sequence[int]) -> (
+        dict[
+            int,
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+        ]
+        | None
+    ):
+        working_dict: dict[
+            str,
+            dict[
+                {
+                    "bbox": list[tuple[float, float, float, float]],
+                    "bbox_conf": list[float],
+                    "pose": list[list[tuple[float, float]]],
+                    "pose_mask": list[list[bool]],
+                    "pose_conf": list[list[float]],
+                }
+            ],
+        ] = {}
+
+        for ped_id, annotations in self.db[video_id].items():
+            # extract frames from annotations within `frames`.
+            if ped_id not in working_dict:
+                working_dict[ped_id] = {
+                    "bbox": [],
+                    "bbox_conf": [],
+                    "pose": [],
+                    "pose_mask": [],
+                    "pose_conf": [],
+                }
+
+            cv_anns = annotations["cv_annotations"]
+
+            for ann_frame in annotations["frames"]:
+                if ann_frame in frames:
+                    ann_subidx = annotations["frames"].index(ann_frame)
+                    ### Bounding Boxes ###
+                    bbox = cv_anns["bbox"][ann_subidx]
+                    # GUARD
+                    assert all(
+                        isinstance(x, float) for x in bbox
+                    ), f"bbox coordinates not of type float: {bbox}"
+                    if (bbox_list := working_dict[ped_id].get("bbox")) is not None:
+                        bbox_list.append(tuple(bbox))
+                        working_dict[ped_id]["bbox_conf"].append(1.0)
+                    else:
+                        working_dict[ped_id]["bbox"] = [tuple(bbox)]
+                        working_dict[ped_id]["bbox_conf"] = [1.0]
+                    ### Poses ###
+                    pose = cv_anns["skeleton"][ann_subidx]
+                    pose_mask = cv_anns["observed_skeleton"][ann_subidx]
+
+                    assert len(pose) == 17, f"pose length not 17! {pose}"
+                    if (pose_list := working_dict[ped_id].get("pose")) is not None:
+                        pose_list.append(pose)
+                        working_dict[ped_id]["pose_mask"].append(pose_mask)
+                        working_dict[ped_id]["pose_conf"].append(
+                            [float(x) for x in pose_mask]
+                        )
+                    else:
+                        working_dict[ped_id]["pose"] = [pose]
+                        working_dict[ped_id]["pose_mask"] = [pose_mask]
+                        working_dict[ped_id]["pose_conf"] = [
+                            [float(x) for x in pose_mask]
+                        ]
+
+        # Convert format
+        res: dict[
+            int,
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+        ] = {}
+        for track_id, (ped_id, annotations) in enumerate(working_dict.items()):
+            try:
+                if len(annotations["bbox"]) < self.args.observe_length:
+                    continue
+            except KeyError:
+                print(annotations)
+                continue
+
+            bbox = torch.from_numpy(np.asarray(annotations["bbox"], dtype=np.float_))
+            bbox_conf = torch.from_numpy(
+                np.asarray(annotations["bbox_conf"], dtype=np.float_)
+            )
+            pose = torch.from_numpy(np.asarray(annotations["pose"], dtype=np.float_))
+            pose_conf = torch.from_numpy(
+                np.asarray(annotations["pose_conf"], dtype=np.float_)
+            )
+            pose_mask = torch.from_numpy(
+                np.asarray(annotations["pose_mask"], dtype=np.float_)
+            )
+
+            res[track_id] = (bbox, pose, pose_mask, bbox_conf, pose_conf)
+
+        if len(res.keys()) == 0:
+            return None
+
+        return res
+
+    @override
+    def get_imgs_and_tracks(self, x):
+        imgs = x["image"]
+        assert not isinstance(imgs, list), "imgs should not be an empty list"
+
+        video_id: str = x["video_id"][0][0]
+        frames: list[int] = x["frames"]
+
+        tracks = self.__getitem__(video_id, frames)
+
+        if tracks is None:
+            return imgs, {
+                0: (
+                    torch.Tensor(),
+                    torch.Tensor(),
+                    torch.Tensor(),
+                    torch.Tensor(),
+                    torch.Tensor(),
+                )
+            }
+
+        return imgs, tracks
+
+    @override
+    def generate_samples(self, imgs, tracks, x):
+        ts = imgs.shape[0]
+        samples: list[T_intentSample] = []
+
+        for track_id, (
+            boxes,
+            poses,
+            pose_masks,
+            box_confs,
+            pose_confs,
+        ) in tracks.items():
+            if any(
+                len(x) < self.args.observe_length
+                for x in [boxes, poses, box_confs, pose_confs]
+            ):
+                continue
+
+            # NOTE: Since we know that the boxes are not normalized from the ground
+            # truth annotations, we can just scale them down here as the visualisation
+            # pipeline expects non-normalized boxes.
+            og_bboxes = deepcopy(boxes)
+            og_bboxes[..., 0::2] = og_bboxes[..., 0::2] / self.args.image_shape[0]
+            og_bboxes[..., 1::2] = og_bboxes[..., 1::2] / self.args.image_shape[1]
+
+            sample: T_intentSample = {  # type: ignore[reportAssignmentType]
+                "image": imgs,
+                "pose": poses,
+                "bboxes": og_bboxes if self.normalize_bbox else boxes,
+                "frames": x["frames"],
+                "ped_id": [f"track_{track_id:03d}"] * ts,
+                "video_id": x["video_id"],
+                "total_frames": x["total_frames"],
+                "pose_masks": pose_masks,
+                "local_featmaps": x["local_featmaps"],
+                "intention_prob": np.zeros((ts), dtype=np.float_),
+                "intention_binary": np.zeros((ts), dtype=np.int_),
+                "disagree_score": np.zeros((ts), dtype=np.float_),
+                "global_featmaps": x["global_featmaps"],
+                "original_bboxes": og_bboxes,
+                "bbox_conf": box_confs,
+                "pose_conf": pose_confs,
+            }
+            samples.append(sample)
+
+        return samples
+
+    @override
+    def pack_preds(self, x, preds):
+        if self.args.task_name == "ped_intent":
+            preds = F.sigmoid(preds)
+
+            if preds.ndim == 0:
+                preds = preds.unsqueeze(0)
+
+            if self.return_dict:
+                bbox = x["original_bboxes"]
+                return PipelineResults(
+                    bboxes=bbox,
+                    intent=preds,
+                    bbox_conf=x["bbox_conf"],
+                    poses=x["pose"],
+                    pose_conf=x["pose_conf"],
+                )
+
+        elif self.args.task_name == "ped_traj":
+            past_boxes = x["original_bboxes"].to(DEVICE)
+            future_boxes = preds.to(DEVICE)
+
+            box_confs: torch.Tensor = x["bbox_conf"]
+            pose_confs: torch.Tensor = x["pose_conf"]
+
+            if self.return_dict:
+                res = PipelineResults(
+                    past_boxes,
+                    future_boxes,
+                    box_confs,
+                    poses=x["pose"],
+                    pose_conf=pose_confs,
+                )
+                return res
+        else:
+            raise NotImplementedError("Driving decision not implemented")
 
         return preds
 
