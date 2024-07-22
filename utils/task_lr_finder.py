@@ -276,9 +276,9 @@ if __name__ == "__main__":
             # args.model_name = "tcn_traj_global"
             # args.model_name = "tcan_traj_bbox"
             # args.model_name = "tcan_traj_bbox_int"
-            args.model_name = "tcan_traj_bbox_pose"
+            # args.model_name = "tcan_traj_bbox_pose"
             # args.model_name = "tcan_traj_global"
-            # args.model_name = "transformer_traj_bbox"
+            args.model_name = "transformer_traj_bbox"
             # args.model_name = "transformer_traj_bbox_pose"
             # args.model_name = "transformer_traj_intent_bbox_pose"
             args.loss_weights = {
@@ -319,5 +319,7 @@ if __name__ == "__main__":
     args.observe_length = 15
     args.max_track_size = args.observe_length + args.predict_length
     args.crop_mode = "enlarge"
+
+    print(args.model_name)
 
     main(args)

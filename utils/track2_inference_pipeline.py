@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import colorsys
 import hashlib
+import os
+import pickle
 import traceback
 from collections import deque
 from pathlib import Path
@@ -48,6 +50,7 @@ def plot_box_on_img(
     conf: float,
     cls: int,
     id: int,
+    bbox_stats: bool = True,
 ) -> npt.NDArray[np.uint8] | cvt.MatLike:
     """Draws a bounding box with ID, confidence, and class information
 
@@ -59,6 +62,7 @@ def plot_box_on_img(
     :param int cls: Class ID of the detection.
     :param int id: Unique identifier for the detection.
     :return: The image array with the bounding box drawn on it.
+    :param bool bbox_stats: Whether to show bbox cls and conf stats.
     :rtype: npt.NDArray[np.uint8] or cvt.MatLike
     """
     thickness = 2
@@ -72,15 +76,16 @@ def plot_box_on_img(
         thickness,
     )
 
-    img = cv2.putText(
-        img,
-        f"id: {int(id)}, conf: {conf:.2f}, c: {int(cls)}",
-        (int(box[0]), int(box[1]) - 10),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        fontscale,
-        id_to_color(id),
-        thickness,
-    )
+    if bbox_stats:
+        img = cv2.putText(
+            img,
+            f"id: {int(id)}, conf: {conf:.2f}, c: {int(cls)}",
+            (int(box[0]), int(box[1]) - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            fontscale,
+            id_to_color(id),
+            thickness,
+        )
 
     return img
 
@@ -144,23 +149,24 @@ def plot_past_future_traj(
     :return: Image with past and future trajectories of all detected pedestrians.
     :rtype: npt.NDArray[np.uint8] or cvt.MatLike
     """
+    centres: deque[tuple[int, int]] = deque(maxlen=2)
     for i, box in enumerate(boxes):
+        centre = (int((box[0] + box[2]) / 2), int((box[1] + box[3]) / 2))
+        centres.append(centre)
+        color = id_to_color(track_id)
         if i < args.observe_length:
             trajectory_thickness = int(np.sqrt(float(i + 1)) * 1.2)
-        else:
-            scalar = (
-                args.observe_length - (i / args.predict_length) * args.observe_length
+            im = cv2.circle(
+                im,
+                centre,
+                2,
+                color=color,
+                thickness=trajectory_thickness,
             )
-            scalar = max(0.0, scalar)
-            trajectory_thickness = int(np.sqrt(float(scalar)) * 1.2)
-        centre = (int((box[0] + box[2]) / 2), int((box[1] + box[3]) / 2))
-        im = cv2.circle(
-            im,
-            centre,
-            2,
-            color=id_to_color(track_id),
-            thickness=trajectory_thickness,
-        )
+        else:
+            prev_centre, curr_centre = centres
+            im = cv2.line(im, prev_centre, curr_centre, color=color, thickness=1)
+
     return im
 
 
@@ -253,6 +259,9 @@ def infer(
     total_frames = int(vid.get(cv2.CAP_PROP_FRAME_COUNT))
     time_elapsed: list[float] = []
 
+    video_id = os.path.normpath(source).split(os.sep)[-1]
+    video_id = os.path.splitext(video_id)[0]
+
     with tqdm(total=total_frames, leave=True) as pbar:
         while True:
             _ = pbar.update(1)
@@ -301,7 +310,7 @@ def infer(
                     "track_id": np.zeros((1, args.observe_length), dtype=np.int64),
                     "local_featmaps": [],
                     "global_featmaps": [],
-                    "video_id": [source.split("_")[1]] * args.max_track_size,
+                    "video_id": [video_id] * args.max_track_size,
                 }
 
                 batch_tensor: T_intentBatch = default_collate([sample])
@@ -322,37 +331,54 @@ def infer(
                     results.bbox_conf is not None
                 ), "Confidence levels are not detected."
 
+                assert (
+                    results.future_bboxes is not None
+                ), "Future bounding boxes are not detected."
+
                 assert results.poses is not None, "Poses are not detected."
                 assert results.poses.ndim == 4 and results.poses.shape[1:] == (
-                    15,
+                    args.observe_length,
                     17,
                     2,
                 ), f"Poses must be of shape (n_dets, 15, 17, 2) but is of shape {results.poses.shape} instead."
 
                 assert results.pose_conf.ndim == 3 and results.pose_conf.shape[1:] == (
-                    15,
+                    args.observe_length,
                     17,
                 ), f"Pose confidence must be of shape (n_dets, 15, 17) but is of shape {results.pose_conf.shape} instead."
 
-                for track_id, (bboxes, bbox_conf, poses, pose_conf) in enumerate(
+                for track_id, (
+                    bboxes,
+                    future_bboxes,
+                    bbox_conf,
+                    poses,
+                    pose_conf,
+                ) in enumerate(
                     zip(
                         results.bboxes,
+                        results.future_bboxes,
                         results.bbox_conf,
                         results.poses,
                         results.pose_conf,
                     )
                 ):
+                    past_future_boxes = torch.cat((bboxes, future_bboxes), dim=0)
                     rescaled_bboxes = scale_bboxes_up(
-                        bboxes.detach().cpu().numpy(), args.image_shape
+                        past_future_boxes.detach().cpu().numpy(), args.image_shape
                     )
-                    if torch.count_nonzero(bboxes) > 15 * 4:
+                    if torch.count_nonzero(past_future_boxes) > args.observe_length * 4:
                         bbox = rescaled_bboxes[args.observe_length - 1, :].reshape((4))
                         im = plot_box_on_img(
                             im, bbox, bbox_conf.mean().item(), 0, track_id
                         )
                         future_bbox = rescaled_bboxes[-1, :].reshape((4))
                         im = plot_box_on_img(
-                            im, future_bbox, bbox_conf.mean().item(), 0, track_id
+                            im,
+                            future_bbox,
+                            bbox_conf.mean().item(),
+                            0,
+                            track_id,
+                            bbox_stats=False,
                         )
                     im = plot_past_future_traj(
                         args,
@@ -366,9 +392,6 @@ def infer(
                     )
                     last_combined_pose = np.concatenate(
                         (last_pose, last_pose_conf), axis=1
-                    )
-                    last_combined_pose = unscale_then_rescale_poses(
-                        last_combined_pose, (640, 640), args.image_shape
                     )
                     im = PipelinePlotter.draw_points_and_skeleton(
                         im,
@@ -416,6 +439,7 @@ def main(args: DefaultArguments):
     hrnet_yolo_ver = args.hrnet_yolo_ver
     save_output: bool = args.save_output
     output: str = args.output
+    load_db: bool = args.load_db
 
     args.batch_size = 1
     args.intent_model = False
@@ -435,12 +459,56 @@ def main(args: DefaultArguments):
     args.max_track_size = args.observe_length + args.predict_length
     args.kernel_size = 2
     args.n_layers = 4
+    args.task_name = "ped_traj"
 
     if "transformer" in args.model_name:
         args.observe_length += 1
         args.max_track_size += 1
 
     model, _, _ = build_model(args)
+
+    db: T_intentDB | None = None
+    if load_db:
+        if not os.path.exists(
+            db_path := os.path.join(
+                args.dataset_root_path, args.database_path, args.database_file
+            )
+        ):
+            raise FileNotFoundError(f"Database file not found at {db_path}")
+        task = args.task_name.split("_")[1]
+        with open(
+            os.path.join(
+                args.dataset_root_path, args.database_path, f"{task}_database_train.pkl"
+            ),
+            "rb",
+        ) as f:
+            imdb_train: T_intentDB = pickle.load(f)
+        with open(
+            os.path.join(
+                args.dataset_root_path, args.database_path, f"{task}_database_val.pkl"
+            ),
+            "rb",
+        ) as f:
+            imdb_val: T_intentDB = pickle.load(f)
+        with open(
+            os.path.join(
+                args.dataset_root_path, args.database_path, f"{task}_database_test.pkl"
+            ),
+            "rb",
+        ) as f:
+            imdb_test: T_intentDB = pickle.load(f)
+
+        db = imdb_test
+        for imdb in [imdb_val, imdb_train]:
+            for vid in imdb:
+                if vid not in db:
+                    db[vid] = imdb[vid]
+
+        del imdb_train, imdb_val, imdb_test
+
+    if isinstance(model, ITSTransformerWrapper):
+        model.config.lags_sequence = [1]
+        model.config.context_length = 15
     if args.compile_model:
         model = torch.compile(
             model, options={"triton.cudagraphs": True}, fullgraph=True
@@ -450,6 +518,10 @@ def main(args: DefaultArguments):
     if args.checkpoint_path != "ckpts":
         args = load_args(args.dataset_root_path, args.checkpoint_path)
         model = load_model_state_dict(args.checkpoint_path, model)
+
+    if "transformer" in args.model_name:
+        args.observe_length += 1
+        args.max_track_size += 1
 
     tracker_wrapper: TrackerWrapper
     pipeline_wrapper: PipelineWrapper
@@ -498,6 +570,11 @@ def main(args: DefaultArguments):
             return_dict=True,
             return_pose=True,
         )
+    elif tracker_type == "demo":
+        assert db is not None, f"Did not load db, thus gt annotations cannot be loaded."
+        pipeline_wrapper = GTTrackingIntentPipelineWrapper(
+            args, model, db, True, normalize_bbox=True
+        )
     else:
         raise ValueError(f"Invalid tracker type: {tracker_type}")
 
@@ -527,6 +604,8 @@ if __name__ == "__main__":
     _ = parser.add_argument("--save_output", "-so", action="store_true")
 
     _ = parser.add_argument("--output", "-o", type=str, default="pipeline.avi")
+
+    _ = parser.add_argument("--load_db", "-l", action="store_true")
 
     args = parser.parse_args()
 

@@ -240,10 +240,11 @@ class TCANTrajBboxPose(TCANTrajBbox):
     def forward(
         self, data: T_intentBatch | tuple[torch.Tensor, torch.Tensor]
     ) -> torch.Tensor:
-
         # bs x ts x 4
         bbox: torch.Tensor
+        # bs x ts x 17 x 2
         pose: torch.Tensor
+
         if isinstance(data, dict):
             bbox = (
                 data["bboxes"][:, : self.args.observe_length, :]
@@ -259,24 +260,29 @@ class TCANTrajBboxPose(TCANTrajBbox):
             bbox = data[0]
             pose = data[1]
 
-        pose = pose.reshape(-1, self.args.observe_length, 34)
+        bs, ts, _ = bbox.shape
+
+        assert ts == self.args.observe_length
+
+        pose = pose.reshape(bs, self.args.observe_length, 34)
         assert (
             bbox.shape[1] == self.args.observe_length
         ), "bbox temporal dimension does not match `observe_length`"
 
         assert bbox.max() <= 1, "bbox values should be normalized between 0 and 1"
-        # bs x ts x 5
+
+        # bs x ts x 38
         enc_input = torch.cat([bbox, pose], dim=2)
 
         tcan_output: torch.Tensor = self.tcan(enc_input)
 
         tcan_output = tcan_output.transpose(1, 2)
         tcan_output = tcan_output.reshape(
-            -1, self.TCAN_dec_out_dim * self.observe_length
+            bs, self.TCAN_dec_out_dim * self.observe_length
         )
 
         output: torch.Tensor = self.fc(tcan_output)
         output = self.activation(output).reshape(
-            -1, self.predict_length, self.output_dim
+            bs, self.predict_length, self.output_dim
         )
         return output

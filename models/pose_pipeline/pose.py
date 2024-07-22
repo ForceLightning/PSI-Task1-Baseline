@@ -331,6 +331,7 @@ class YOLOTrackerWrapper(TrackerWrapper):
 @dataclass
 class PipelineResults:
     bboxes: torch.Tensor
+    future_bboxes: torch.Tensor | npt.NDArray[np.float_] | None = None
     bbox_conf: torch.Tensor | npt.NDArray[np.float_] | None = None
     poses: torch.Tensor | None = None
     pose_conf: torch.Tensor | npt.NDArray[np.float_] | None = None
@@ -431,14 +432,21 @@ class YOLOPipelineModelWrapper(PipelineWrapper):
                 or len(poses) < self.args.observe_length
             ):
                 continue
+
+            # NOTE: This scales up the poses in a hardcoded manner.
+            scaled_poses = deepcopy(poses).type(FloatTensor)
+
+            scaled_poses[..., 0] = scaled_poses[..., 0] / 640.0 * 1280.0
+            scaled_poses[..., 1] = scaled_poses[..., 1] / 640.0 * 720.0
+
             sample: T_intentSample = {  # type: ignore[reportAssignmentType]
                 "image": imgs,
-                "pose": poses,
+                "pose": scaled_poses,
                 "bboxes": boxes,
-                "frames": x["frames"],
+                "frames": x["frames"].squeeze(),
                 "ped_id": [f"track_{track_id:03d}"] * ts,
                 "video_id": x["video_id"],
-                "total_frames": x["total_frames"],
+                "total_frames": x["total_frames"].squeeze(),
                 "pose_masks": pose_masks,
                 "local_featmaps": x["local_featmaps"],
                 "intention_prob": np.zeros((ts), dtype=np.float_),
@@ -457,7 +465,6 @@ class YOLOPipelineModelWrapper(PipelineWrapper):
     def pack_preds(self, x, preds):
         past_boxes = x["bboxes"].to(DEVICE)
         future_boxes = preds.to(DEVICE)
-        past_future_boxes: torch.Tensor = torch.cat((past_boxes, future_boxes), dim=1)
 
         box_confs: torch.Tensor = x["bbox_conf"]
         pose_confs: torch.Tensor = x["pose_conf"]
@@ -465,12 +472,15 @@ class YOLOPipelineModelWrapper(PipelineWrapper):
         if self.return_dict:
             if self.return_pose:
                 return PipelineResults(
-                    bboxes=past_future_boxes,
+                    bboxes=past_boxes,
+                    future_bboxes=future_boxes,
                     bbox_conf=box_confs,
                     poses=x["pose"],
                     pose_conf=pose_confs,
                 )
-            return PipelineResults(bboxes=past_future_boxes, bbox_conf=box_confs)
+            return PipelineResults(
+                bboxes=past_boxes, future_bboxes=future_boxes, bbox_conf=box_confs
+            )
 
         return preds
 
@@ -802,8 +812,6 @@ class HRNetPipelineModelWrapper(PipelineWrapper):
             ):
                 continue
 
-            print(poses.min(), poses.max(), poses.mean(), poses.std())
-
             # NOTE: This scales up the poses in a hardcoded manner.
             scaled_poses = deepcopy(poses).type(FloatTensor)
 
@@ -1016,10 +1024,10 @@ class GTTrackingIntentPipelineWrapper(PipelineWrapper):
                 "image": imgs,
                 "pose": poses,
                 "bboxes": og_bboxes if self.normalize_bbox else boxes,
-                "frames": x["frames"],
+                "frames": x["frames"].squeeze(),
                 "ped_id": [f"track_{track_id:03d}"] * ts,
                 "video_id": x["video_id"],
-                "total_frames": x["total_frames"],
+                "total_frames": x["total_frames"].squeeze(),
                 "pose_masks": pose_masks,
                 "local_featmaps": x["local_featmaps"],
                 "intention_prob": np.zeros((ts), dtype=np.float_),
