@@ -387,22 +387,23 @@ def auc_charts(
 
     labels = [f"model_{i}" for i in range(len(gts))] if labels is None else labels
 
+    draw_chance = True
     for gt, proba, label in zip(gts, probas, labels):
         # ascertain target type
         y_type = type_of_target(gt)
         if y_type == "binary":
-            _binary_auc_charts(fig, ax, gt, proba, label)
+            _binary_auc_charts(fig, ax, gt, proba, label, draw_chance)
         elif y_type == "multiclass":
             average = average if average else "macro"
             _multiclass_auc_charts(fig, ax, gt, proba, label, average)
         else:
             raise ValueError(f"Target type ({y_type}) not supported")
+        draw_chance = False
 
-    title = (
-        f"ROC and PRC Curves for {task_name} with {average} average"
-        if task_name is not None
-        else f"ROC and PRC Curves with {average} average"
-    )
+    task_str = f"for {task_name} " if task_name is not None else ""
+    average_str = f"with {average} average" if average is not None else ""
+
+    title = f"ROC and PRC Curves {task_str}{average_str}"
     fig.suptitle(title)
 
     return fig
@@ -414,20 +415,55 @@ def _binary_auc_charts(
     gt: npt.NDArray[np.int_],
     proba: npt.NDArray[np.float_],
     label: str,
+    draw_chance: bool = True,
 ) -> None:
     fpr, tpr, _ = sk_roc_curve(gt, proba)
     auroc = auc(fpr, tpr)
     prec, rec, _ = precision_recall_curve(gt, proba)
     auprc = average_precision_score(gt, proba)
 
-    _ = ax[0].plot(fpr, tpr, label=f"{label} AUROC: {auroc:.4f}", lw=2, alpha=0.8)
+    if draw_chance:
+        # ROC
+        _ = ax[0].plot(
+            (0, 1),
+            (0, 1),
+            linestyle="--",
+            color="red",
+            label="Chance level (AUC = 0.5)",
+        )
+
+        # PRC
+        chance_level = np.sum(gt) / len(gt)
+        _ = ax[1].plot(
+            (0, 1),
+            (chance_level, chance_level),
+            linestyle="--",
+            color="red",
+            label=f"Chance level (AUPRC = {chance_level:.4f}",
+        )
+
+    _ = ax[0].plot(
+        fpr,
+        tpr,
+        label=f"{label} AUROC: {auroc:.4f}",
+        lw=2,
+        alpha=0.8,
+        drawstyle="steps-post",
+    )
     _ = ax[0].set_xlabel("False Positive Rate")
     _ = ax[0].set_ylabel("True Positive Rate")
     _ = ax[0].set_title("Receiver Operating Characteristics")
     _ = ax[0].set_ylim(-0.1, 1.1)
     _ = ax[0].legend(loc="lower right")
 
-    _ = ax[1].plot(rec, prec, label=f"{label} AUPRC: {auprc:.4f}", lw=2, alpha=0.8)
+    _ = ax[1].plot(
+        rec,
+        prec,
+        label=f"{label} AUPRC: {auprc:.4f}",
+        lw=2,
+        alpha=0.8,
+        drawstyle="steps-post",
+    )
     _ = ax[1].set_xlabel("Recall")
     _ = ax[1].set_ylabel("Precision")
     _ = ax[1].set_title("Precision Recall Curve")
@@ -495,7 +531,14 @@ def _multiclass_auc_charts(
         case _:
             raise NotImplementedError(f"Average type {average} not supported")
 
-    _ = ax[0].plot(fpr_mean, tpr, label=f"{label} AUROC: {auroc:.4f}", lw=2, alpha=0.8)
+    _ = ax[0].plot(
+        fpr_mean,
+        tpr,
+        label=f"{label} AUROC: {auroc:.4f}",
+        lw=2,
+        alpha=0.8,
+        drawstyle="steps-post",
+    )
     _ = ax[0].set_xlabel("False Positive Rate")
     _ = ax[0].set_ylabel("True Positive Rate")
     _ = ax[0].set_title("Receiver Operating Characteristics")
@@ -503,7 +546,12 @@ def _multiclass_auc_charts(
     _ = ax[0].legend(loc="lower right")
 
     _ = ax[1].plot(
-        recall_mean, prec, label=f"{label} AUPRC: {auprc:.4f}", lw=2, alpha=0.8
+        recall_mean,
+        prec,
+        label=f"{label} AUPRC: {auprc:.4f}",
+        lw=2,
+        alpha=0.8,
+        drawstyle="steps-post",
     )
     _ = ax[1].set_xlabel("Recall")
     _ = ax[1].set_ylabel("Precision")
@@ -1075,11 +1123,18 @@ def extended_classification_report(
     headers = ["AUROC", "AP"]
 
     if y_type == "binary" or y_type == "multiclass":
-        if not np.allclose(1, y_proba.sum(axis=1)):
-            y_proba = F.softmax(torch.tensor(y_proba), dim=1).numpy()
+        if y_type == "multiclass":
+            if not np.allclose(1, y_proba.sum(axis=1)):
+                y_proba = F.softmax(torch.tensor(y_proba), dim=1).numpy()
+        elif y_proba.min() < 0 or y_proba.max() > 1:
+            y_proba = F.sigmoid(torch.tensor(y_proba)).numpy()
 
         auroc = roc_auc_score(y_true, y_proba, average=None, multi_class="ovr")
         auprc = average_precision_score(y_true, y_proba, average=None)
+
+        if y_type == "binary":
+            auroc = [auroc, auroc]
+            auprc = [auprc, auprc]
 
         rows = zip(target_names, auroc, auprc)
 
